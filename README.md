@@ -13,12 +13,12 @@ they are.
 
 ## Why
 
-**You keep the keys.** Certificates, provisioning profiles, keystores and App Store Connect
-credentials stay on your machine. A hosted CI is a third party holding everything needed to ship
-as you.
+**You keep the keys.** Signing certificates, keystores, provisioning profiles, store
+credentials — everything needed to publish under your name — stays on your machine. A hosted CI
+is a third party holding all of it.
 
-**Minutes stop existing.** A Mac mini costs less than a year of most CI plans and does not bill
-by the second. Long builds stop being a budget decision.
+**Minutes stop existing.** Hardware you already own costs less than a year of most CI plans,
+and never bills by the second. Long builds stop being a budget decision.
 
 **It is just fastlane.** No new DSL, no YAML dialect, no vendor config to port. Laneyard reads
 the Fastfile you already have and asks *your* fastlane what it can do — plugins included. It
@@ -45,7 +45,7 @@ Laneyard is for one machine you control.
 - **Ruby with fastlane**, either through a project `Gemfile` (recommended) or installed for the
   active Ruby. Laneyard never bundles its own fastlane; it uses your project's.
 - **git**.
-- macOS or Linux. An Android project has no business needing a Mac.
+- macOS or Linux. iOS builds need a Mac, as they always have; Android builds do not.
 
 ## Install
 
