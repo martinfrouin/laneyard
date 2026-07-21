@@ -1480,12 +1480,17 @@ end
 case command
 when "lanes"
   begin
-    respond({ ok: true, lanes: collect_lanes(fastfile_path) })
+    lanes = collect_lanes(fastfile_path)
   rescue Exception => e # rubocop:disable Lint/RescueException
     # Un Fastfile est du Ruby arbitraire : son chargement peut lever n'importe quoi,
     # y compris des erreurs de syntaxe qui ne descendent pas de StandardError.
     fail_with("Chargement du Fastfile impossible : #{e.message}")
   end
+
+  # `respond` se termine par `exit`, qui lève SystemExit — lui aussi un Exception.
+  # L'appeler à l'intérieur du bloc protégé ferait attraper sa propre sortie et
+  # écrirait un second JSON d'erreur « exit ». Il reste donc dehors.
+  respond({ ok: true, lanes: lanes })
 else
   fail_with("Commande inconnue : #{command.inspect}")
 end
@@ -1500,7 +1505,7 @@ d'où le délai de 180 s.
 - [ ] **Step 5 : Commit**
 
 ```bash
-git add ruby tests/ruby
+git add ruby tests/ruby src/sidecar tests/sidecar
 git commit -m "feat(sidecar): commande lanes du script d'introspection Ruby"
 ```
 
