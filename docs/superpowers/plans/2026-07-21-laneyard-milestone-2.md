@@ -88,7 +88,7 @@ describe("loadOrCreateKey", () => {
     await loadOrCreateKey(dir);
     await chmod(join(dir, "key"), 0o644);
 
-    await expect(loadOrCreateKey(dir)).rejects.toThrow(/permission/i);
+    await expect(loadOrCreateKey(dir)).rejects.toThrow(/readable by other users/i);
   });
 
   it("refuses a key of the wrong size rather than deriving one", async () => {
@@ -217,7 +217,7 @@ describe("encrypt / decrypt", () => {
     const payload = encrypt("hunter2", key);
     const parts = payload.split(".");
     const body = Buffer.from(parts[3]!, "base64");
-    body[0] ^= 0xff;
+    body[0] = body[0]! ^ 0xff;
     parts[3] = body.toString("base64");
 
     expect(() => decrypt(parts.join("."), key)).toThrow();
@@ -561,8 +561,9 @@ describe("Redactor", () => {
   });
 
   it("redacts every occurrence, not just the first", () => {
-    const r = new Redactor(["abc"]);
-    expect(r.push("abc and abc") + r.flush()).toBe("•••••• and ••••••");
+    // Four characters minimum: below that the redactor declines, on purpose.
+    const r = new Redactor(["abcd"]);
+    expect(r.push("abcd and abcd") + r.flush()).toBe("•••••• and ••••••");
   });
 
   it("handles several secrets, longest first so one cannot leak inside another", () => {
@@ -623,7 +624,7 @@ const MARKER = "••••••";
  * while hiding nothing an attacker could not guess. Refusing is more honest than
  * pretending to protect it.
  */
-const MIN_LENGTH = 4;
+export const MIN_LENGTH = 4;
 
 /**
  * Removes secret values from a stream of text.
@@ -715,7 +716,7 @@ export class Redactor {
 - [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/logs/redact.test.ts`
-Expected: 10 passing.
+Expected: 11 passing.
 
 - [ ] **Step 5: Commit**
 
@@ -1001,7 +1002,7 @@ In `src/runner/orchestrate.ts`, add to `ExecuteRunOptions`:
 Import the redactor and apply it inside `emit`, before anything else happens to the text:
 
 ```ts
-import { Redactor } from "../logs/redact.js";
+import { Redactor, scrub } from "../logs/redact.js";
 ```
 
 ```ts
@@ -1099,6 +1100,7 @@ describe("secrets API", () => {
   it("lists names and scopes, never values", …); // no ciphertext, no plaintext in the body
   it("stores a secret and lists it", …);         // PUT then GET
   it("rejects a key that is not a valid environment variable name", …); // 400 on "not-a-key"
+  it("rejects a masked value too short to redact, rather than pretending", …); // 400 on "abc"
   it("overwrites an existing secret", …);
   it("deletes a secret", …);                     // DELETE then absent from GET
   it("404s on deleting one that does not exist", …);
@@ -1121,6 +1123,8 @@ import type { AppContext } from "../app.js";
 /** POSIX environment variable names. Anything else would never reach fastlane. */
 const VALID_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+import { MIN_LENGTH as MIN_REDACTABLE } from "../../logs/redact.js";
+
 export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   const listRoute = (slug: string | null) =>
     slug === null ? ctx.vault.listGlobal() : ctx.vault.list(slug);
@@ -1142,6 +1146,16 @@ export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext
     }
     if (typeof value !== "string" || value === "") {
       return reply.code(400).send({ error: "A value is required" });
+    }
+    // Accepting the tick box and quietly not honouring it would leave someone
+    // believing they are protected. Refusing is the honest answer.
+    if (masked !== false && value.length < MIN_REDACTABLE) {
+      return reply.code(400).send({
+        error:
+          `A value kept out of the logs must be at least ${MIN_REDACTABLE} characters. ` +
+          "Shorter than that, removing it would shred the log without hiding anything. " +
+          "Store it unmasked if you accept it appearing in the output.",
+      });
     }
     await ctx.vault.set(slug, key, value, masked !== false);
     return reply.code(204).send();
@@ -1331,6 +1345,12 @@ Both. They are separate repositories and nothing enforces that they agree.
 - Redacting secrets from a log that was written *before* they were stored. Redaction happens as
   output is produced; earlier runs keep whatever they captured.
 - Secrets in `config.yml` via `$NAME`. The schema accepts the syntax; nothing resolves it yet.
+- Removing the leftover of two secrets that overlap in the text. With `abcdef` and `efgh` stored,
+  the output `abcdefgh` loses the first and leaves `gh` behind — sequential replacement cannot do
+  better. Rare enough to accept, dishonest to leave unsaid.
+- Redacting git credentials. `git_auth.ref` for a token names a secret, but the workspace only
+  strips the configured repository URL from its own errors; a credential is not in `maskedValues`.
+  Task 11's rewrite must not claim otherwise.
 - Protecting a value shorter than four characters. The redactor declines them, because a
   two-character match would shred the log while hiding nothing an attacker could not guess. The
   API must say so when it happens rather than accept the tick box and quietly do nothing — a user
