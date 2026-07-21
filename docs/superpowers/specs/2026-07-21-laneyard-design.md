@@ -1,4 +1,4 @@
-# Homelane — conception
+# Laneyard — conception
 
 **Date** : 2026-07-21
 **État** : validé, prêt pour la planification d'implémentation
@@ -9,7 +9,7 @@ Déclencher, suivre et modifier des builds mobiles impose aujourd'hui de passer 
 terminal sur la machine de dev, soit par un service hébergé type Bitrise — facturé, opaque et
 propriétaire de la chaîne de signature.
 
-Homelane est un serveur de build auto-hébergé bâti sur fastlane. Il tourne sur une machine que
+Laneyard est un serveur de build auto-hébergé bâti sur fastlane. Il tourne sur une machine que
 tu possèdes, expose une interface web sur ton réseau local, et te permet de lancer des lanes,
 d'en suivre l'exécution en direct et de modifier le Fastfile sans ouvrir d'éditeur.
 
@@ -23,7 +23,7 @@ d'en suivre l'exécution en direct et de modifier le Fastfile sans ouvrir d'édi
 - Historique des runs avec artefacts téléchargeables.
 - Édition du Fastfile : vue structurée par actions et éditeur texte, puis commit et push.
 - Coffre de secrets injectés en variables d'environnement.
-- Notifications de fin de run.
+- Notifications de fin de run : notification du navigateur, plus webhook optionnel par projet.
 - Écran « Préparation CI » : check-list d'autonomie par projet.
 
 **Hors v1, mais la conception ne doit pas les rendre impossibles**
@@ -42,9 +42,27 @@ d'en suivre l'exécution en direct et de modifier le Fastfile sans ouvrir d'édi
 
 - Tourne sur macOS **et** Linux — un projet Android n'a aucune raison d'exiger un Mac.
 - Cible : une machine dédiée qui reste allumée, pilotée depuis un navigateur sur le réseau local.
-- Aucune connaissance de fastlane codée en dur. Ni noms d'actions, ni paramètres, ni lanes.
+- Aucune connaissance de fastlane codée en dur **dans le sidecar et dans l'éditeur** : ni noms
+  d'actions, ni paramètres, ni lanes. Voir « Frontière des heuristiques » pour les deux endroits où
+  des noms connus sont autorisés.
 - Un secret ne doit jamais atterrir dans un fichier de log.
 - Le Fastfile de l'utilisateur ne doit jamais ressortir abîmé d'une édition.
+
+### Frontière des heuristiques
+
+Deux fonctionnalités ont besoin de connaître fastlane par son nom : la check-list Préparation CI
+(qui parle de `match`, de `MATCH_PASSWORD`, de l'App Store Connect) et l'extraction du résumé
+d'erreur. Cette connaissance est autorisée, à trois conditions strictes :
+
+1. Elle vit dans un module unique et isolé, `src/heuristics/`, jamais dispersée dans le runner,
+   le sidecar ou l'éditeur.
+2. Elle ne peut produire que des **avertissements**. Une heuristique ne bloque jamais un run, ne
+   masque jamais une lane, ne modifie jamais un Fastfile.
+3. Elle est décrite comme une table de règles déclaratives, pas comme du code impératif éparpillé,
+   pour rester relisable quand fastlane évolue.
+
+Le sidecar et l'éditeur, eux, restent à zéro connaissance codée en dur. C'est une règle absolue :
+un plugin fastlane inconnu doit être aussi bien traité qu'une action officielle.
 
 ## Architecture
 
@@ -76,14 +94,14 @@ lancé **dans le bundle du projet concerné**.
 
 Deux alternatives ont été écartées :
 
-- **Backend tout-Ruby** — accès natif à l'API fastlane, mais Homelane deviendrait prisonnier d'un
+- **Backend tout-Ruby** — accès natif à l'API fastlane, mais Laneyard deviendrait prisonnier d'un
   environnement Ruby précis, cohabiterait mal avec les Gemfile des projets, et l'écosystème
   temps-réel y est moins praticable.
 - **Binaire Go/Rust parsant la sortie texte** — déploiement idéal, mais sans l'API Ruby les
   métadonnées d'actions sont perdues et l'éditeur structuré retomberait sur une liste codée en
   dur qui se périme à chaque version de fastlane. Rédhibitoire.
 
-Le sidecar isole entièrement Homelane du Ruby de chaque projet tout en lui donnant accès à la
+Le sidecar isole entièrement Laneyard du Ruby de chaque projet tout en lui donnant accès à la
 vraie version de fastlane et aux plugins installés.
 
 ### Composants
@@ -134,8 +152,8 @@ SQLite pour l'état. Fichiers sur disque pour les logs et les artefacts : un log
 plusieurs mégaoctets et n'a rien à faire en base.
 
 ```
-~/.homelane/
-  homelane.db
+~/.laneyard/
+  laneyard.db
   key                    # clé de chiffrement des secrets, 0600
   config.json            # port, hash du mot de passe, limites
   workspaces/<projet>/   # clones git, conservés entre les runs
@@ -151,7 +169,8 @@ plusieurs mégaoctets et n'a rien à faire en base.
 |---|---|---|
 | `id`, `name`, `slug` | text | Identité, URL lisible |
 | `git_url`, `default_branch` | text | Source du code |
-| `git_auth` | text | Chemin d'une clé SSH, ou référence vers un secret (token HTTPS) |
+| `git_auth_kind` | text | `none` · `ssh_key` · `token` |
+| `git_auth_ref` | text | Selon le type : chemin de la clé SSH, ou nom du secret contenant le token |
 | `fastlane_dir` | text | Sous-dossier contenant le Fastfile (défaut `fastlane`), gère les monorepos |
 | `runtime` | text | `bundle` ou `system` : comment invoquer fastlane |
 | `artifact_globs` | json | Motifs de collecte en plus des chemins annoncés par fastlane |
@@ -197,9 +216,12 @@ plusieurs mégaoctets et n'a rien à faire en base.
 
 ### Trois absences volontaires
 
-- **Aucune table `lane`.** Les lanes vivent dans le Fastfile. Homelane les lit via le sidecar et
-  met le résultat en cache, indexé par empreinte du fichier. L'interface ne peut pas afficher une
-  lane qui n'existe plus.
+- **Aucune table `lane`.** Les lanes vivent dans le Fastfile. Laneyard les lit via le sidecar et
+  met le résultat en cache dans une table `introspection_cache` (`project_id`, `fastfile_hash`,
+  `payload` JSON, `fetched_at`), une ligne par projet, écrasée à chaque changement d'empreinte.
+  C'est un cache, pas une source : une empreinte différente le rend caduc immédiatement, et le
+  vider n'a aucune conséquence hormis une lecture plus lente. L'interface ne peut donc pas
+  afficher une lane qui n'existe plus.
 - **Aucune table `user`.** Un mot de passe haché en configuration. Le multi-utilisateur n'a pas de
   sens pour un outil auto-hébergé personnel.
 - **Aucun log en base.** Un fichier par run, diffusé en direct puis relu à la demande.
@@ -209,19 +231,53 @@ plusieurs mégaoctets et n'a rien à faire en base.
 1. **Déclenchement** → `queued`. Le formulaire de paramètres est généré depuis la signature réelle
    de la lane. Le run est créé en base immédiatement : même en attente, il est visible.
 2. **File d'attente.** Un run par projet, limite globale configurable.
-3. **Préparation** → `preparing`. `git fetch` puis `checkout` dans le workspace du projet,
+3. **Préparation** → `preparing`. Au premier run d'un projet, le workspace n'existe pas encore :
+   il est créé par un clone complet, opération visible dans les logs du run avec sa propre étape,
+   car sur un gros dépôt elle dure. Le clone initial peut aussi être déclenché à l'enregistrement
+   du projet, ce qui permet de lire les lanes avant tout run. Ensuite, `git fetch` puis
+   `checkout` dans le workspace du projet,
    conservé entre les runs donc rapide, nettoyable sur demande. Le SHA est enregistré. Si le
    `Gemfile.lock` a changé, `bundle install` tourne d'abord. Les secrets sont déchiffrés en
    mémoire et préparés en variables d'environnement.
 4. **Exécution** → `running`. fastlane est lancé dans un pseudo-terminal : il conserve ses
    couleurs et son affichage habituel. Chaque fragment de sortie part vers trois destinations —
    le fichier de log, les navigateurs connectés, un tampon pour les connexions tardives.
-   En parallèle, les lignes d'étape alimentent `run_step`.
 5. **Fin.** Le code de sortie décide. En cas d'échec, le résumé d'erreur est extrait du bloc
-   d'erreur de fastlane. Les artefacts sont collectés depuis les chemins annoncés par fastlane et
-   les motifs configurés, puis déplacés hors du workspace pour survivre au prochain build.
+   d'erreur de fastlane par le module d'heuristiques. Les artefacts sont collectés, puis déplacés
+   hors du workspace pour survivre au prochain build.
 6. **Annulation.** `SIGINT` au groupe de processus — fastlane fait son ménage — puis `SIGKILL`
    s'il s'obstine. Délai maximum par run, 60 min par défaut.
+
+### D'où vient la chronologie des étapes
+
+fastlane écrit à chaque exécution un rapport JUnit dans `<fastlane_dir>/report.xml`, avec une
+entrée par action : index, nom, durée, et le détail en cas d'échec. Comportement vérifié sur une
+exécution réelle :
+
+```xml
+<testcase classname="fastlane.lanes" name="0: echo inner" time="0.007099"/>
+```
+
+Ce fichier fait autorité et alimente `run_step` en fin de run. Il est lu puis supprimé du
+workspace pour ne pas polluer le dépôt.
+
+Pendant l'exécution, ce rapport n'existe pas encore. L'affichage en direct s'appuie donc sur un
+repérage des séparateurs d'étape dans la sortie — best-effort, purement visuel, jamais persisté
+tel quel. À la fin, le rapport réconcilie la chronologie : si les deux divergent, le rapport gagne.
+
+Cette séparation est délibérée. Le confort d'affichage repose sur une heuristique fragile, la
+donnée conservée repose sur un format structuré produit par fastlane lui-même.
+
+### Collecte des artefacts
+
+Le `lane_context` de fastlane, qui contient les chemins de sortie, n'est pas accessible depuis un
+sous-processus. Les artefacts sont donc collectés par **motifs de fichiers configurés par projet**
+(`artifact_globs`), évalués sur le workspace après le run. C'est le contrat, explicite et
+prévisible.
+
+À l'enregistrement d'un projet, des motifs par défaut sont proposés selon ce qui est détecté dans
+le dépôt — `**/*.ipa`, `**/*.app.dSYM.zip` pour un projet iOS, `**/*.apk`, `**/*.aab` pour Android
+— modifiables ensuite. Aucun chemin n'est deviné en analysant la sortie du run.
 
 ### Mode non-interactif par défaut
 
@@ -234,20 +290,31 @@ Le PTY est utilisé dans les deux cas : il donne la sortie colorée, l'affichage
 une porte de sortie quand un run se bloque malgré tout.
 
 L'écran **Préparation CI** est ce qui rend un projet autonome. Check-list recalculée à la demande,
-avec un formulaire pour combler chaque manque :
+jamais automatiquement — chaque vérification a un coût. Aucun item ne bloque un run : ce sont des
+avertissements, conformément à la frontière des heuristiques.
 
-- Dépôt accessible sans mot de passe.
-- Dépendances installables.
-- Authentification App Store Connect — une clé API supprime le 2FA, contrairement à une session
-  Apple ID à renouveler.
-- `match` en readonly avec `MATCH_PASSWORD` présent.
-- Aucune action bloquante détectée dans les lanes.
+| Item | Détection | Remédiation proposée |
+|---|---|---|
+| Dépôt accessible sans mot de passe | `git ls-remote` avec un délai court et `GIT_TERMINAL_PROMPT=0`. Échec ou demande de saisie = rouge. | Formulaire : chemin d'une clé SSH, ou saisie d'un token stocké comme secret. |
+| Dépendances installables | Présence d'un `Gemfile`, puis `bundle check`. Sans `Gemfile`, on vérifie que `fastlane` est dans le `PATH` et le signale comme configuration `system`. | Bouton lançant `bundle install` et affichant sa sortie. |
+| Authentification App Store Connect | Recherche d'un secret de clé API (`APP_STORE_CONNECT_API_KEY_*`) ou d'un `FASTLANE_SESSION` dans le coffre du projet. Session seule = orange, avec l'explication qu'elle expire. | Formulaire de clé API : identifiant de clé, identifiant d'émetteur, contenu du `.p8`. Le tout stocké comme secrets masqués. |
+| `match` en readonly | Le Fastfile utilise-t-il `match` ou `sync_code_signing` — information venant du sidecar, pas d'une lecture textuelle ? Si oui, `MATCH_PASSWORD` est-il présent dans le coffre ? | Formulaire d'ajout du secret. |
+| Aucune action réputée bloquante | Croisement des actions listées par le sidecar avec la table de règles du module d'heuristiques (actions connues pour attendre une saisie, par exemple `prompt`). | Aucune action automatique : simple avertissement indiquant que le mode interactif sera nécessaire. |
+
+Chaque item est un couple détection/remédiation indépendant, ajouté un par un. La table de règles
+n'est consultée que pour le dernier item.
 
 ### Caviardage des secrets
 
 Les valeurs des secrets marqués `masked` sont remplacées dans le flux **avant** écriture disque et
 avant diffusion WebSocket. Ce n'est pas un filtrage d'affichage : la valeur n'existe jamais dans un
 fichier de log.
+
+Un remplacement naïf fragment par fragment ne suffit pas : un PTY découpe la sortie où il veut, et
+un secret peut se trouver coupé entre deux fragments. Le filtre conserve donc un tampon glissant
+d'au moins la longueur du plus long secret moins un octet, et ne relâche que ce qui ne peut plus
+faire partie d'une correspondance. Le test de propriété correspondant doit découper la sortie de
+test à des positions arbitraires, sans quoi il ne détecte rien.
 
 ## L'éditeur hybride
 
@@ -278,11 +345,11 @@ modification hors du cadre structuré passe par lui, et c'est le fonctionnement 
 
 ### Édition et git
 
-Le Fastfile édité vit dans le workspace, qui est un clone géré par Homelane. La boucle est donc :
+Le Fastfile édité vit dans le workspace, qui est un clone géré par Laneyard. La boucle est donc :
 éditer, lancer la lane pour vérifier, puis committer et pousser depuis l'interface. Un panneau
 « Modifications » affiche le diff.
 
-Homelane refuse tout `checkout` par-dessus des modifications non commitées et signale l'état sale
+Laneyard refuse tout `checkout` par-dessus des modifications non commitées et signale l'état sale
 du workspace dans l'interface.
 
 ## Interface
@@ -295,13 +362,31 @@ du workspace dans l'interface.
                     ├─ Fastfile         éditeur hybride + Modifications
                     ├─ Secrets          variables d'environnement
                     ├─ Préparation CI   check-list d'autonomie
-                    └─ Réglages         dépôt, branche, artefacts, purge
+                    └─ Réglages         dépôt, branche, artefacts, purge, notifications
 /r/<id>           Run — étapes, terminal, artefacts
 ```
 
 L'écran de run place la chronologie des étapes à gauche et le terminal à droite, les artefacts
 apparaissant en bas dès qu'ils existent. La ligne de saisie est toujours présente : désactivée avec
 sa raison affichée plutôt que masquée.
+
+### Notifications
+
+Deux canaux, tous deux configurés dans les Réglages du projet.
+
+**Notification du navigateur.** L'API `Notification` du navigateur, déclenchée à la réception de
+l'événement de fin de run sur le WebSocket. Aucun serveur de push, aucun service tiers, aucune
+dépendance système. Contrepartie assumée : elle ne fonctionne que si un onglet Laneyard est
+ouvert. C'est le cas d'usage réel — tu lances un build puis tu passes à autre chose sur la même
+machine.
+
+**Webhook.** Une URL par projet, appelée en POST avec un corps JSON décrivant le run terminé :
+identifiant, projet, lane, statut, durée, commit, liste des artefacts. C'est le point
+d'accroche pour Slack, ntfy, Discord ou n'importe quel script personnel. Les valeurs de secrets
+n'y figurent jamais.
+
+Une notification système native est explicitement écartée : elle s'afficherait sur la machine de
+build, que personne ne regarde.
 
 ### Direction visuelle
 
@@ -356,8 +441,23 @@ Contrainte de fond : **aucun vrai build dans la suite de tests.**
 - Caviardage des secrets en amont de toute persistance.
 - Aucune exposition Internet prévue ; un tunnel reste possible mais relève de l'utilisateur.
 
+## Jalons
+
+Le périmètre v1 couvre cinq sous-systèmes largement indépendants — sidecar Ruby, runner PTY,
+coffre de secrets, éditeur hybride, interface. Le plan d'implémentation doit viser une **tranche
+verticale le plus tôt possible** plutôt qu'un empilement de couches :
+
+1. **Le fil complet.** Enregistrer un projet, cloner, lister les lanes via le sidecar, lancer une
+   lane, voir les logs en direct, récupérer un artefact. Tout le reste s'y accroche ensuite.
+2. **Fiabilité du run.** Caviardage, file d'attente, annulation, timeout, runs interrompus,
+   chronologie depuis `report.xml`.
+3. **Secrets et Préparation CI.** Le coffre, puis les items de check-list un par un.
+4. **Éditeur.** D'abord le mode texte avec vérification et sauvegarde, ensuite seulement la vue
+   structurée — le mode texte seul est déjà utile, l'inverse n'est pas vrai.
+5. **Finitions.** Notifications, purge, thèmes, installation en service.
+
 ## Décisions ouvertes
 
-- Format exact des unités `launchd` et `systemd`, et forme de la commande `homelane install`.
-- Politique de purge par défaut : nombre de runs conservés, ou durée.
-- Choix du canal de notification : notification système locale, webhook, ou les deux.
+- Format exact des unités `launchd` et `systemd`, et forme de la commande `laneyard install`.
+- Politique de purge par défaut, à confirmer à l'usage : proposition initiale de 50 runs conservés
+  par projet et 30 jours de rétention pour les artefacts, les logs suivant leur run.
