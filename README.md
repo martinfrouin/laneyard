@@ -204,6 +204,10 @@ build triggered while another is going waits its turn rather than starting along
 run survives a restart of the server — it is still queued when it comes back up, and starts on
 its own.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: `npm test` runs the whole suite in

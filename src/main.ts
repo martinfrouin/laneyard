@@ -18,7 +18,7 @@ import { Vault } from "./secrets/vault.js";
 import { makeInvoke } from "./sidecar/bridge.js";
 import { LaneReader } from "./sidecar/lanes.js";
 
-export const version = "0.1.0";
+export const version = "0.2.0";
 
 export interface Started {
   app: FastifyInstance;
