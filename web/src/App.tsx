@@ -9,8 +9,9 @@ import { Readiness } from "./pages/Readiness";
 import { Run } from "./pages/Run";
 import { Secrets } from "./pages/Secrets";
 import { Settings } from "./pages/Settings";
+import { Users } from "./pages/Users";
 import { api } from "./api";
-import type { ProjectSummary } from "./api";
+import type { Identity, ProjectSummary } from "./api";
 import { mark } from "./status";
 
 /**
@@ -23,66 +24,111 @@ import { mark } from "./status";
  */
 export const ProjectsChanged = createContext<() => void>(() => {});
 
+/**
+ * Who is signed in, for the screens that show less to a builder.
+ *
+ * Hiding is courtesy, never security: the server refuses an admin route
+ * whatever this says, and its tests prove it. What this buys is a screen with
+ * nothing on it that would only ever answer 403.
+ */
+export const Session = createContext<Identity | null>(null);
+
 export function App() {
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [identity, setIdentity] = useState<Identity | null>(null);
+  const [checked, setChecked] = useState(false);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
 
-  // A 401 on this call means it's time to log in.
+  // A 401 on either call means it's time to log in.
   const load = () =>
     api
-      .projects()
-      .then((p) => {
-        setProjects(p);
-        setAuthenticated(true);
+      .me()
+      .then(async (who) => {
+        setIdentity(who);
+        setProjects(await api.projects().catch(() => []));
       })
-      .catch(() => setAuthenticated(false));
+      .catch(() => setIdentity(null))
+      .finally(() => setChecked(true));
 
   useEffect(() => {
     void load();
   }, []);
 
-  if (authenticated === null) return <p className="dim">loading…</p>;
-  if (!authenticated) return <Login onSuccess={() => void load()} />;
+  const signOut = () => {
+    void api.logout().finally(() => setIdentity(null));
+  };
+
+  if (!checked) return <p className="dim">loading…</p>;
+  if (!identity) return <Login onSuccess={() => void load()} />;
+
+  const admin = identity.role === "admin";
 
   return (
-    <ProjectsChanged.Provider value={() => void load()}>
-      <div className="shell">
-        <header>
-          <span className="brand">laneyard</span>
-          <ThemeToggle />
-        </header>
+    <Session.Provider value={identity}>
+      <ProjectsChanged.Provider value={() => void load()}>
+        <div className="shell">
+          <header>
+            <span className="brand">laneyard</span>
+            {/* Who you are, in the same line grammar as everything else: a
+                marker for the role, the name, then the controls. */}
+            <span className="who">
+              <span className={`mark ${admin ? "accent" : "dim"}`}>{admin ? "●" : "○"}</span>
+              <span className="bright">{identity.name}</span>
+              <span className="dim">{identity.role}</span>
+              <button onClick={signOut}>sign out</button>
+              <ThemeToggle />
+            </span>
+          </header>
 
-        <nav>
-          <p className="section nav-head">projects</p>
-          {projects.length === 0 && <p className="dim nav-item">none</p>}
-          {projects.map((p) => (
-            <NavLink
-              key={p.slug}
-              to={`/p/${p.slug}`}
-              className={({ isActive }) => `nav-item${isActive ? " current" : ""}`}
-            >
-              <span className={`mark status-${p.lastRun?.status ?? "queued"}`}>{mark(p.lastRun?.status)}</span>{" "}
-              {p.name}
-            </NavLink>
-          ))}
-        </nav>
+          <nav>
+            <p className="section nav-head">projects</p>
+            {projects.length === 0 && <p className="dim nav-item">none</p>}
+            {projects.map((p) => (
+              <NavLink
+                key={p.slug}
+                to={`/p/${p.slug}`}
+                className={({ isActive }) => `nav-item${isActive ? " current" : ""}`}
+              >
+                <span className={`mark status-${p.lastRun?.status ?? "queued"}`}>{mark(p.lastRun?.status)}</span>{" "}
+                {p.name}
+              </NavLink>
+            ))}
 
-        <main>
-          <Routes>
-            <Route path="/" element={<Projects />} />
-            {/* The tabs live in Project, which renders either its own content or
-                the nested route's — so the strip is the same on both. */}
-            <Route path="/p/:slug" element={<Project />}>
-              <Route path="fastfile" element={<Fastfile />} />
-              <Route path="secrets" element={<Secrets />} />
-              <Route path="readiness" element={<Readiness />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-            <Route path="/r/:id" element={<Run />} />
-            <Route path="*" element={<p className="dim">unknown page.</p>} />
-          </Routes>
-        </main>
-      </div>
-    </ProjectsChanged.Provider>
+            {admin && (
+              <>
+                <p className="section nav-head" style={{ marginTop: 16 }}>
+                  server
+                </p>
+                <NavLink to="/users" className={({ isActive }) => `nav-item${isActive ? " current" : ""}`}>
+                  <span className="mark dim">●</span> accounts
+                </NavLink>
+              </>
+            )}
+          </nav>
+
+          <main>
+            <Routes>
+              <Route path="/" element={<Projects />} />
+              {/* The tabs live in Project, which renders either its own content or
+                  the nested route's — so the strip is the same on both. */}
+              <Route path="/p/:slug" element={<Project />}>
+                {/* The three that would only ever answer 403 to a builder are
+                    not routed for one. Courtesy again: `permissions.ts` is what
+                    actually refuses them, whatever address is typed. */}
+                {admin && <Route path="fastfile" element={<Fastfile />} />}
+                {admin && <Route path="secrets" element={<Secrets />} />}
+                <Route path="readiness" element={<Readiness />} />
+                {admin && <Route path="settings" element={<Settings />} />}
+              </Route>
+              <Route path="/r/:id" element={<Run />} />
+              {/* Routed for an admin only. A builder who types the address gets
+                  the unknown-page line rather than a screen of refusals — and
+                  the routes behind it refuse them all the same. */}
+              {admin && <Route path="/users" element={<Users />} />}
+              <Route path="*" element={<p className="dim">unknown page.</p>} />
+            </Routes>
+          </main>
+        </div>
+      </ProjectsChanged.Provider>
+    </Session.Provider>
   );
 }

@@ -16,6 +16,19 @@ const empty = async (res: Response): Promise<void> => {
   throw new Error(body.error ?? res.statusText);
 };
 
+/**
+ * Two roles, and only two. `admin` may do everything; `builder` may start a
+ * build, watch it, cancel it and download what it produced — nothing that
+ * changes what a build does, and nothing that reveals a credential.
+ */
+export type Role = "admin" | "builder";
+
+/** Who is signed in. The same shape the accounts listing is made of. */
+export interface Identity {
+  name: string;
+  role: Role;
+}
+
 export interface ProjectSummary {
   slug: string;
   name: string;
@@ -115,12 +128,33 @@ export interface Changes {
 }
 
 export const api = {
-  login: (password: string) =>
+  login: (name: string, password: string) =>
     fetch("/api/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ name, password }),
     }).then((r) => r.ok),
+
+  /** Who this browser is. A 401 here is what sends the app to the login form. */
+  me: () => fetch("/api/me").then(json<Identity>),
+
+  // Ends this session and no other: the same person signed in on a phone stays
+  // signed in there. Only removing the account ends every session it has.
+  logout: () => fetch("/api/logout", { method: "POST" }).then(empty),
+
+  users: () => fetch("/api/users").then(json<Identity[]>),
+
+  // The refusals are sentences — the last admin, a password too short — and
+  // `json` carries them to the screen rather than flattening them into a code.
+  createUser: (name: string, role: Role, password: string) =>
+    fetch("/api/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, role, password }),
+    }).then(json<Identity>),
+
+  removeUser: (name: string) =>
+    fetch(`/api/users/${encodeURIComponent(name)}`, { method: "DELETE" }).then(empty),
 
   projects: () => fetch("/api/projects").then(json<ProjectSummary[]>),
   lanes: (slug: string) => fetch(`/api/projects/${slug}/lanes`).then(json<Lane[]>),

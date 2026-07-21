@@ -1,11 +1,16 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useMatch, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { Lane, RunDetail } from "../api";
+import { Session } from "../App";
 import { mark, statusLabel } from "../status";
 
 export function Project() {
   const { slug = "" } = useParams();
+  // A builder is shown the tabs a builder can use. The server refuses the other
+  // routes regardless — this is what keeps the strip from offering three tabs
+  // that would each answer 403.
+  const admin = useContext(Session)?.role === "admin";
   const navigate = useNavigate();
   const [lanes, setLanes] = useState<Lane[]>([]);
   const [runs, setRuns] = useState<RunDetail[]>([]);
@@ -53,18 +58,27 @@ export function Project() {
       <NavLink to={`/p/${slug}`} end className={({ isActive }) => (isActive ? "current" : "")}>
         lanes
       </NavLink>
-      <NavLink to={`/p/${slug}/fastfile`} className={({ isActive }) => (isActive ? "current" : "")}>
-        fastfile
-      </NavLink>
-      <NavLink to={`/p/${slug}/secrets`} className={({ isActive }) => (isActive ? "current" : "")}>
-        secrets
-      </NavLink>
+      {/* The Fastfile is readable by anyone with a session — a builder who can
+          start a lane benefits from seeing what it does — but this tab also
+          saves, commits and pushes it, and those are an admin's. */}
+      {admin && (
+        <NavLink to={`/p/${slug}/fastfile`} className={({ isActive }) => (isActive ? "current" : "")}>
+          fastfile
+        </NavLink>
+      )}
+      {admin && (
+        <NavLink to={`/p/${slug}/secrets`} className={({ isActive }) => (isActive ? "current" : "")}>
+          secrets
+        </NavLink>
+      )}
       <NavLink to={`/p/${slug}/readiness`} className={({ isActive }) => (isActive ? "current" : "")}>
         readiness
       </NavLink>
-      <NavLink to={`/p/${slug}/settings`} className={({ isActive }) => (isActive ? "current" : "")}>
-        settings
-      </NavLink>
+      {admin && (
+        <NavLink to={`/p/${slug}/settings`} className={({ isActive }) => (isActive ? "current" : "")}>
+          settings
+        </NavLink>
+      )}
     </nav>
   );
 

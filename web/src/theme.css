@@ -131,6 +131,10 @@ code { color: var(--text-bright); }
 
 .brand { color: var(--accent); letter-spacing: 0.12em; }
 
+/* Who is signed in, at the right of the bar: the same marker, name and role a
+   line of the accounts screen carries, so the two read as one fact. */
+.who { display: flex; align-items: baseline; gap: 8px; }
+
 .shell > nav {
   border-right: 1px solid var(--border);
   background: var(--bg-raised);
