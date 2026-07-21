@@ -242,6 +242,46 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
    The grammar is unchanged — marker, title, dim detail. */
 .checks .grow { white-space: normal; overflow: visible; }
 
+/* --- Fastfile editor ------------------------------------------------------- */
+
+/* The bar above the editor: state on the left, the one control on the right.
+   Same line grammar as a list row, without the rule under it. */
+.editor-bar,
+.commit-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.commit-bar input { flex: 1; max-width: 48ch; }
+
+/* Dark in both themes, like the terminal, and for the same reason: this is the
+   other surface that shows text written for a black background. The border is
+   the panel's own — no shadow, no rounded corner. */
+.editor {
+  height: calc(100vh - 420px);
+  min-height: 240px;
+  overflow: hidden;
+}
+
+/* A failed save keeps its two lines together and readable: the reason wraps
+   rather than being cut, because a reason you cannot read explains nothing. */
+.save-error { white-space: normal; margin: 8px 0; }
+
+/* The diff, in plain text. No gutters, no line numbers: git's own output,
+   read as git prints it. */
+.diff {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  max-height: 40vh;
+  overflow: auto;
+  background: var(--term-bg);
+  color: var(--term-text);
+  white-space: pre;
+  font: inherit;
+}
+
 /* --- Run screen ----------------------------------------------------------- */
 
 .run-head {

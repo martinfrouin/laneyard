@@ -70,6 +70,22 @@ export interface Readiness {
   checks: ReadinessCheck[];
 }
 
+/** The Fastfile as it is on disk, plus what git makes of it. */
+export interface FastfileContent {
+  /** Byte-for-byte what the file holds — never reformatted on the way here. */
+  content: string;
+  /** True when the workspace has uncommitted changes to tracked files. */
+  dirty: boolean;
+  /** The unified diff of the Fastfile alone, empty when it matches HEAD. */
+  diff: string;
+}
+
+/** Everything uncommitted in the workspace — the Fastfile is usually not alone. */
+export interface Changes {
+  files: string[];
+  diff: string;
+}
+
 export const api = {
   login: (password: string) =>
     fetch("/api/login", {
@@ -99,6 +115,30 @@ export const api = {
 
   deleteSecret: (slug: string, key: string) =>
     fetch(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`, { method: "DELETE" }).then(empty),
+
+  fastfile: (slug: string) => fetch(`/api/projects/${slug}/fastfile`).then(json<FastfileContent>),
+
+  // The server writes the file, asks fastlane whether it still parses, and puts
+  // the previous content back if it doesn't. Its refusal is a sentence about
+  // Ruby, which is the only thing that can explain what went wrong — `empty`
+  // carries it through instead of flattening it into "400".
+  saveFastfile: (slug: string, content: string) =>
+    fetch(`/api/projects/${slug}/fastfile`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content }),
+    }).then(empty),
+
+  changes: (slug: string) => fetch(`/api/projects/${slug}/changes`).then(json<Changes>),
+
+  commit: (slug: string, message: string) =>
+    fetch(`/api/projects/${slug}/commit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    }).then(empty),
+
+  push: (slug: string) => fetch(`/api/projects/${slug}/push`, { method: "POST" }).then(empty),
 
   trigger: (slug: string, lane: string, platform: string | null, params: Record<string, string>) =>
     fetch(`/api/projects/${slug}/runs`, {

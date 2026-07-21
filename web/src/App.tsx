@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { Login } from "./components/Login";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { Fastfile } from "./pages/Fastfile";
 import { Project } from "./pages/Project";
 import { Projects } from "./pages/Projects";
 import { Readiness } from "./pages/Readiness";
@@ -60,6 +61,7 @@ export function App() {
           {/* The tabs live in Project, which renders either its own content or
               the nested route's — so the strip is the same on both. */}
           <Route path="/p/:slug" element={<Project />}>
+            <Route path="fastfile" element={<Fastfile />} />
             <Route path="secrets" element={<Secrets />} />
             <Route path="readiness" element={<Readiness />} />
           </Route>
