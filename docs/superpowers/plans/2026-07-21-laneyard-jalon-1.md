@@ -41,6 +41,9 @@ src/
     report.ts        Lecture de fastlane/report.xml
     artifacts.ts     Collecte par motifs
     orchestrate.ts   Enchaînement complet d'un run et transitions d'état
+  cli/
+    detect.ts        Inspection d'un projet existant : fastlane, plateforme, git
+    add.ts           Écriture du bloc projet dans config.yml, commentaires préservés
   server/
     app.ts           Construction de l'instance Fastify
     auth.ts          Session par cookie, mot de passe scrypt
@@ -102,7 +105,7 @@ Expected: échec — le module `src/main.ts` n'existe pas.
   "engines": { "node": ">=22" },
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "build": "tsc -p tsconfig.json && cp src/db/schema.sql dist/src/db/",
+    "build": "tsc -p tsconfig.json && cp src/db/schema.sql dist/src/db/ && npm run build:web",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -141,6 +144,7 @@ Expected: échec — le module `src/main.ts` n'existe pas.
     "moduleResolution": "NodeNext",
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
     "outDir": "dist",
     "rootDir": ".",
     "skipLibCheck": true,
@@ -163,6 +167,7 @@ export default defineConfig({
 `.gitignore` — ajouter aux lignes existantes :
 
 ```
+node_modules/
 dist/
 *.db
 ```
@@ -1149,7 +1154,7 @@ export class Workspace {
 - [ ] **Step 4 : Lancer les tests**
 
 Run: `npm test -- tests/git/workspace.test.ts`
-Expected: 4 tests passés.
+Expected: 5 tests passés.
 
 - [ ] **Step 5 : Commit**
 
@@ -1784,18 +1789,21 @@ import { describe, expect, it } from "vitest";
 import { readReport } from "../../src/runner/report.js";
 import { tmpDir } from "../fixtures/repos.js";
 
+// Forme réelle observée : les actions réussies sont auto-fermantes.
 const OK = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
   <testsuite name="fastlane.lanes">
-    <testcase classname="fastlane.lanes" name="0: match" time="11.5"></testcase>
-    <testcase classname="fastlane.lanes" name="1: build_app" time="238.25"></testcase>
+    <testcase classname="fastlane.lanes" name="0: match" time="11.5"/>
+    <testcase classname="fastlane.lanes" name="1: build_app" time="238.25"/>
   </testsuite>
 </testsuites>`;
 
+// Rapport mixte : c'est le cas qui piège un motif mal ordonné.
 const FAILED = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
   <testsuite name="fastlane.lanes">
-    <testcase classname="fastlane.lanes" name="0: build_app" time="12.0">
+    <testcase classname="fastlane.lanes" name="0: match" time="1.0"/>
+    <testcase classname="fastlane.lanes" name="1: build_app" time="12.0">
       <failure message="Error building the application"></failure>
     </testcase>
   </testsuite>
@@ -1813,11 +1821,15 @@ describe("readReport", () => {
     ]);
   });
 
-  it("marque en échec une action portant un failure", async () => {
+  it("n'attribue l'échec qu'à l'action concernée dans un rapport mixte", async () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(join(dir, "report.xml"), FAILED, "utf8");
     const steps = await readReport(join(dir, "report.xml"));
-    expect(steps[0]!.status).toBe("failed");
+
+    expect(steps).toHaveLength(2);
+    expect(steps[0]!.status).toBe("success");
+    expect(steps[1]!.name).toBe("build_app");
+    expect(steps[1]!.status).toBe("failed");
   });
 
   it("renvoie null si le rapport n'existe pas", async () => {
@@ -1899,7 +1911,11 @@ export interface ReportStep {
   status: "success" | "failed";
 }
 
-const TESTCASE = /<testcase\b([^>]*)>([\s\S]*?)<\/testcase>|<testcase\b([^>]*)\/>/g;
+// La branche auto-fermante vient en premier : fastlane écrit les actions réussies
+// sous la forme `<testcase … />` et seules les échouées ont un corps. Dans l'autre
+// ordre, `[^>]*` avalerait le `/` final et le corps paresseux courrait jusqu'au
+// `</testcase>` suivant, fusionnant deux actions et attribuant l'échec à la mauvaise.
+const TESTCASE = /<testcase\b([^>]*?)\/>|<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g;
 const ATTR = (source: string, name: string): string | null =>
   new RegExp(`${name}="([^"]*)"`).exec(source)?.[1] ?? null;
 
@@ -1921,8 +1937,8 @@ export async function readReport(path: string): Promise<ReportStep[] | null> {
 
   const steps: ReportStep[] = [];
   for (const m of xml.matchAll(TESTCASE)) {
-    const attrs = m[1] ?? m[3] ?? "";
-    const body = m[2] ?? "";
+    const attrs = m[1] ?? m[2] ?? "";
+    const body = m[3] ?? "";
     const rawName = ATTR(attrs, "name");
     if (rawName === null) continue;
 
@@ -3329,10 +3345,21 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
 }
 ```
 
-> `app.broadcastRunChunk` et `ctx.sockets` viennent du module WebSocket de la tâche 15. Les appels
-> optionnels (`?.`) permettent d'écrire et de faire passer les tests d'API de cette tâche avant
-> qu'il existe : créer `src/server/ws.ts` avec un export vide provisoire si le typage bloque, la
-> tâche 15 le remplit.
+> `app.ts` importe `registerWebSocket` et le type `RunSockets` de la tâche 15. Pour que les tests
+> de cette tâche-ci tournent avant, créer un `src/server/ws.ts` provisoire **fonctionnel** — un
+> module vide ne suffit pas, l'import échouerait :
+>
+> ```ts
+> export class RunSockets {
+>   broadcast(_runId: number, _chunk: string, _offset: number): void {}
+>   finish(_runId: number, _status: string): void {}
+> }
+> export async function registerWebSocket(): Promise<RunSockets> {
+>   return new RunSockets();
+> }
+> ```
+>
+> La tâche 15 le remplace par la vraie implémentation et ses tests.
 
 - [ ] **Step 4 : Lancer les tests**
 
@@ -3680,7 +3707,7 @@ git commit -m "feat: point d'entrée et assemblage du serveur"
 ### Task 17 : Interface — squelette et thème
 
 **Files:**
-- Create: `web/index.html`, `web/vite.config.ts`, `web/src/main.tsx`, `web/src/theme.css`, `web/src/api.ts`
+- Create: `web/index.html`, `web/vite.config.ts`, `web/src/main.tsx`, `web/src/App.tsx`, `web/src/components/Login.tsx`, `web/src/theme.css`, `web/src/api.ts`
 - Modify: `package.json` (dépendances et scripts du front)
 
 - [ ] **Step 1 : Installer le front**
@@ -4200,8 +4227,12 @@ rechargement sur `/r/42` renvoie 404. Dans `src/server/app.ts`, après les route
 ```ts
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 // …
-const webRoot = join(deps.root, "..", "dist", "web");
+// Résolu depuis l'emplacement du module, pas depuis le dossier de données :
+// `deps.root` est ~/.laneyard, la SPA construite vit dans le dépôt.
+const webRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dist", "web");
 if (existsSync(webRoot)) {
   await app.register(fastifyStatic, { root: webRoot });
   // Le routage vit côté navigateur : toute URL inconnue rend l'application.
@@ -4313,7 +4344,7 @@ projects:
       cookies,
     });
     expect(download.statusCode).toBe(200);
-    expect(download.body).toBe("faux binaire");
+    expect(download.body.trim()).toBe("faux binaire");
 
     await app.close();
   }, 120_000);
@@ -4345,6 +4376,440 @@ Expected: tout passe.
 ```bash
 git add tests/e2e
 git commit -m "test: vérification de bout en bout du fil complet"
+```
+
+---
+
+### Task 21 : Commande `laneyard add` — adopter un projet fastlane existant
+
+Le cas d'usage réel n'est pas de partir d'une page blanche mais d'un projet qui utilise déjà
+fastlane. La commande s'exécute depuis le dossier du projet, détecte ce qu'elle peut et écrit le
+bloc correspondant dans `config.yml` — sans jamais toucher au reste du fichier.
+
+**Files:**
+- Create: `src/cli/detect.ts`, `src/cli/add.ts`, `tests/cli/detect.test.ts`, `tests/cli/add.test.ts`
+- Modify: `src/main.ts` (aiguillage de commande), `package.json` (champ `bin`)
+
+- [ ] **Step 1 : Écrire les tests de détection**
+
+`tests/cli/detect.test.ts` :
+
+```ts
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { detectProject } from "../../src/cli/detect.js";
+import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
+
+async function projectDir(files: Record<string, string>): Promise<string> {
+  const dir = await tmpDir("laneyard-detect-");
+  for (const [name, content] of Object.entries(files)) {
+    await mkdir(join(dir, name, ".."), { recursive: true });
+    await writeFile(join(dir, name), content, "utf8");
+  }
+  return dir;
+}
+
+describe("detectProject", () => {
+  it("trouve le dossier fastlane à la racine", async () => {
+    const dir = await projectDir({ "fastlane/Fastfile": "lane :beta do\nend\n" });
+    const d = await detectProject(dir);
+    expect(d.fastlaneDir).toBe("fastlane");
+  });
+
+  it("trouve un dossier fastlane imbriqué dans un monorepo", async () => {
+    const dir = await projectDir({ "apps/ios/fastlane/Fastfile": "lane :beta do\nend\n" });
+    const d = await detectProject(dir);
+    expect(d.fastlaneDir).toBe("apps/ios/fastlane");
+  });
+
+  it("signale l'absence de fastlane plutôt que de deviner", async () => {
+    const dir = await projectDir({ "README.md": "rien" });
+    const d = await detectProject(dir);
+    expect(d.fastlaneDir).toBeNull();
+  });
+
+  it("choisit bundle quand un Gemfile est présent, system sinon", async () => {
+    const avec = await projectDir({ "fastlane/Fastfile": "", Gemfile: 'gem "fastlane"' });
+    expect((await detectProject(avec)).runtime).toBe("bundle");
+
+    const sans = await projectDir({ "fastlane/Fastfile": "" });
+    expect((await detectProject(sans)).runtime).toBe("system");
+  });
+
+  it("propose des motifs d'artefacts iOS sur un projet Xcode", async () => {
+    const dir = await projectDir({ "fastlane/Fastfile": "", "Popotes.xcodeproj/project.pbxproj": "" });
+    const d = await detectProject(dir);
+    expect(d.artifactGlobs).toContain("**/*.ipa");
+    expect(d.artifactGlobs.some((g) => g.includes("dSYM"))).toBe(true);
+  });
+
+  it("propose des motifs Android sur un projet Gradle", async () => {
+    const dir = await projectDir({ "fastlane/Fastfile": "", "app/build.gradle": "" });
+    const d = await detectProject(dir);
+    expect(d.artifactGlobs).toContain("**/*.apk");
+    expect(d.artifactGlobs).toContain("**/*.aab");
+  });
+
+  it("lit l'URL du distant et la branche courante", async () => {
+    const origin = await makeOriginRepo({ "fastlane/Fastfile": "" });
+    const clone = await tmpDir("laneyard-clone-");
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    await promisify(execFile)("git", ["clone", origin, clone]);
+
+    const d = await detectProject(clone);
+    expect(d.gitUrl).toBe(origin);
+    expect(d.defaultBranch).toBe("main");
+  });
+
+  it("déduit un slug du nom de dossier", async () => {
+    const dir = await projectDir({ "fastlane/Fastfile": "" });
+    const d = await detectProject(dir);
+    expect(d.slug).toMatch(/^[a-z0-9][a-z0-9-]*$/);
+  });
+});
+```
+
+- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+
+Run: `npm test -- tests/cli/detect.test.ts`
+Expected: échec — module introuvable.
+
+- [ ] **Step 3 : Implémenter la détection**
+
+`src/cli/detect.ts` :
+
+```ts
+import { execFile } from "node:child_process";
+import { access } from "node:fs/promises";
+import { basename, join, relative, sep } from "node:path";
+import { promisify } from "node:util";
+import { glob } from "tinyglobby";
+
+const exec = promisify(execFile);
+
+export interface Detection {
+  slug: string;
+  gitUrl: string | null;
+  defaultBranch: string;
+  /** Chemin relatif du dossier contenant le Fastfile, ou null si introuvable. */
+  fastlaneDir: string | null;
+  runtime: "bundle" | "system";
+  artifactGlobs: string[];
+  platform: "ios" | "android" | "unknown";
+}
+
+const exists = async (p: string): Promise<boolean> => {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const gitOr = async (args: string[], cwd: string, fallback: string | null): Promise<string | null> => {
+  try {
+    const { stdout } = await exec("git", args, { cwd });
+    return stdout.trim() || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+/** Un nom de dossier n'est pas un slug : on le normalise sans jamais échouer. */
+function slugify(name: string): string {
+  const s = name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return s === "" ? "projet" : s;
+}
+
+/**
+ * Inspecte un projet existant et propose une configuration.
+ *
+ * Ne décide rien d'irréversible : tout ce qu'elle renvoie est une proposition que
+ * l'utilisateur voit et peut corriger avant écriture.
+ */
+export async function detectProject(dir: string): Promise<Detection> {
+  // Le Fastfile peut être à la racine ou sous un sous-dossier, cas des monorepos.
+  const fastfiles = await glob(["fastlane/Fastfile", "*/fastlane/Fastfile", "*/*/fastlane/Fastfile"], {
+    cwd: dir,
+    absolute: true,
+    onlyFiles: true,
+  });
+  const fastfile = fastfiles.sort((a, b) => a.length - b.length)[0] ?? null;
+  const fastlaneDir = fastfile
+    ? relative(dir, join(fastfile, "..")).split(sep).join("/")
+    : null;
+
+  const isIos =
+    (await glob(["*.xcodeproj", "*.xcworkspace", "*/*.xcodeproj"], { cwd: dir, onlyDirectories: true }))
+      .length > 0;
+  const isAndroid =
+    (await glob(["build.gradle", "build.gradle.kts", "*/build.gradle", "*/build.gradle.kts"], {
+      cwd: dir,
+      onlyFiles: true,
+    })).length > 0;
+
+  const artifactGlobs: string[] = [];
+  if (isIos) artifactGlobs.push("**/*.ipa", "**/*.app.dSYM.zip");
+  if (isAndroid) artifactGlobs.push("**/*.apk", "**/*.aab");
+
+  return {
+    slug: slugify(basename(dir)),
+    gitUrl: await gitOr(["remote", "get-url", "origin"], dir, null),
+    defaultBranch: (await gitOr(["rev-parse", "--abbrev-ref", "HEAD"], dir, "main")) ?? "main",
+    fastlaneDir,
+    runtime: (await exists(join(dir, "Gemfile"))) ? "bundle" : "system",
+    artifactGlobs,
+    platform: isIos ? "ios" : isAndroid ? "android" : "unknown",
+  };
+}
+```
+
+- [ ] **Step 4 : Lancer les tests de détection**
+
+Run: `npm test -- tests/cli/detect.test.ts`
+Expected: 8 tests passés.
+
+- [ ] **Step 5 : Écrire les tests d'écriture**
+
+`tests/cli/add.test.ts` :
+
+```ts
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
+import { addProjectToConfig } from "../../src/cli/add.js";
+import { tmpDir } from "../fixtures/repos.js";
+
+const EXISTING = `# Ma configuration Laneyard
+server:
+  port: 7890
+  password_hash: "scrypt$a$b"   # mot de passe du serveur
+
+projects:
+  - slug: deja-la
+    git_url: git@example.com:a.git
+`;
+
+async function configAt(content: string): Promise<string> {
+  const dir = await tmpDir("laneyard-add-");
+  const path = join(dir, "config.yml");
+  await writeFile(path, content, "utf8");
+  return path;
+}
+
+const entry = {
+  slug: "popotes-ios",
+  name: "Popotes iOS",
+  git_url: "git@example.com:popotes.git",
+  default_branch: "main",
+  fastlane_dir: "fastlane",
+  runtime: "system" as const,
+  artifact_globs: ["**/*.ipa"],
+};
+
+describe("addProjectToConfig", () => {
+  it("ajoute le projet sans supprimer les projets existants", async () => {
+    const path = await configAt(EXISTING);
+    await addProjectToConfig(path, entry);
+
+    const parsed = parse(await readFile(path, "utf8")) as { projects: { slug: string }[] };
+    expect(parsed.projects.map((p) => p.slug)).toEqual(["deja-la", "popotes-ios"]);
+  });
+
+  it("préserve les commentaires du fichier", async () => {
+    const path = await configAt(EXISTING);
+    await addProjectToConfig(path, entry);
+
+    const raw = await readFile(path, "utf8");
+    expect(raw).toContain("# Ma configuration Laneyard");
+    expect(raw).toContain("# mot de passe du serveur");
+  });
+
+  it("refuse un slug déjà pris", async () => {
+    const path = await configAt(EXISTING);
+    await expect(addProjectToConfig(path, { ...entry, slug: "deja-la" })).rejects.toThrow(/deja-la/);
+  });
+
+  it("crée le fichier et la section serveur s'il n'existe pas", async () => {
+    const dir = await tmpDir("laneyard-add-");
+    const path = join(dir, "config.yml");
+
+    await addProjectToConfig(path, entry);
+
+    const parsed = parse(await readFile(path, "utf8")) as {
+      server: { password_hash: string };
+      projects: unknown[];
+    };
+    expect(parsed.projects).toHaveLength(1);
+    // Un mot de passe doit exister, sinon le serveur refuserait toute connexion.
+    expect(parsed.server.password_hash).toMatch(/^scrypt\$/);
+  });
+
+  it("ajoute une section projects absente d'un fichier existant", async () => {
+    const path = await configAt('server:\n  password_hash: "scrypt$a$b"\n');
+    await addProjectToConfig(path, entry);
+
+    const parsed = parse(await readFile(path, "utf8")) as { projects: unknown[] };
+    expect(parsed.projects).toHaveLength(1);
+  });
+});
+```
+
+- [ ] **Step 6 : Lancer les tests pour vérifier qu'ils échouent**
+
+Run: `npm test -- tests/cli/add.test.ts`
+Expected: échec — module introuvable.
+
+- [ ] **Step 7 : Implémenter l'écriture et la commande**
+
+`src/cli/add.ts` :
+
+```ts
+import { readFile, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { Document, parseDocument, YAMLSeq } from "yaml";
+import { hashPassword } from "../server/auth.js";
+import { detectProject } from "./detect.js";
+
+export interface NewProjectEntry {
+  slug: string;
+  name: string;
+  git_url: string;
+  default_branch: string;
+  fastlane_dir: string;
+  runtime: "bundle" | "system";
+  artifact_globs: string[];
+}
+
+/**
+ * Ajoute un bloc projet à config.yml en préservant le reste du fichier.
+ *
+ * L'édition passe par le document YAML plutôt que par un aller-retour
+ * parse/serialize : les commentaires de l'utilisateur — et l'ordre de ses clés —
+ * survivent. C'est la même exigence que pour le Fastfile : un fichier écrit à la
+ * main ne doit jamais ressortir abîmé.
+ */
+export async function addProjectToConfig(path: string, entry: NewProjectEntry): Promise<void> {
+  let doc: Document.Parsed | Document;
+  try {
+    doc = parseDocument(await readFile(path, "utf8"));
+  } catch {
+    doc = new Document({});
+  }
+  if (doc.contents === null) doc = new Document({});
+
+  if (!doc.hasIn(["server", "password_hash"])) {
+    // Un serveur sans mot de passe refuserait toute connexion : on en génère un
+    // et on l'affiche une seule fois, à l'appelant de le noter.
+    const generated = randomBytes(9).toString("base64url");
+    doc.setIn(["server", "password_hash"], hashPassword(generated));
+    process.stdout.write(`\nMot de passe généré : ${generated}\n  (notez-le, il ne sera plus affiché)\n`);
+  }
+
+  const projects = doc.getIn(["projects"]);
+  const seq = projects instanceof YAMLSeq ? projects : new YAMLSeq();
+  if (!(projects instanceof YAMLSeq)) doc.setIn(["projects"], seq);
+
+  for (const item of seq.items) {
+    const slug = (item as { get?: (k: string) => unknown }).get?.("slug");
+    if (slug === entry.slug) {
+      throw new Error(`Un projet porte déjà le slug « ${entry.slug} » dans ${path}`);
+    }
+  }
+
+  seq.add(doc.createNode(entry));
+  await writeFile(path, doc.toString(), "utf8");
+}
+
+/** Point d'entrée de `laneyard add`. */
+export async function runAddCommand(cwd: string, configPath: string, slugOverride?: string): Promise<number> {
+  const d = await detectProject(cwd);
+
+  if (d.fastlaneDir === null) {
+    process.stderr.write(
+      "Aucun Fastfile trouvé ici. Laneyard pilote fastlane : lancez la commande depuis un projet " +
+        "qui l'utilise déjà, ou exécutez d'abord `fastlane init`.\n",
+    );
+    return 1;
+  }
+  if (d.gitUrl === null) {
+    process.stderr.write(
+      "Aucun distant git nommé « origin ». Laneyard clone les projets depuis leur dépôt : " +
+        "ajoutez un distant, ou renseignez git_url à la main dans config.yml.\n",
+    );
+    return 1;
+  }
+
+  const slug = slugOverride ?? d.slug;
+  await addProjectToConfig(configPath, {
+    slug,
+    name: slug,
+    git_url: d.gitUrl,
+    default_branch: d.defaultBranch,
+    fastlane_dir: d.fastlaneDir,
+    runtime: d.runtime,
+    artifact_globs: d.artifactGlobs,
+  });
+
+  process.stdout.write(
+    `\nProjet « ${slug} » ajouté à ${configPath}\n` +
+      `  dépôt        ${d.gitUrl} (${d.defaultBranch})\n` +
+      `  fastlane     ${d.fastlaneDir}\n` +
+      `  exécution    ${d.runtime}\n` +
+      `  artefacts    ${d.artifactGlobs.join(", ") || "aucun motif détecté — à compléter"}\n` +
+      `\nRelancez Laneyard ou attendez le rechargement automatique, le projet apparaîtra dans l'interface.\n`,
+  );
+  return 0;
+}
+```
+
+Dans `src/main.ts`, aiguiller avant le démarrage du serveur :
+
+```ts
+const [, , command, ...rest] = process.argv;
+if (command === "add") {
+  const home = process.env["LANEYARD_HOME"] ?? join(homedir(), ".laneyard");
+  await mkdir(home, { recursive: true });
+  const slugIndex = rest.indexOf("--slug");
+  const slug = slugIndex === -1 ? undefined : rest[slugIndex + 1];
+  process.exit(await runAddCommand(process.cwd(), join(home, "config.yml"), slug));
+}
+```
+
+Et dans `package.json` :
+
+```json
+"bin": { "laneyard": "dist/src/main.js" }
+```
+
+- [ ] **Step 8 : Lancer les tests**
+
+Run: `npm test -- tests/cli/`
+Expected: 13 tests passés.
+
+- [ ] **Step 9 : Vérifier sur un vrai projet**
+
+Depuis un projet mobile existant qui utilise fastlane :
+
+```bash
+LANEYARD_HOME=/tmp/laneyard-demo npx tsx /chemin/vers/laneyard/src/main.ts add
+```
+
+Vérifier que `/tmp/laneyard-demo/config.yml` contient un bloc cohérent, que le mot de passe généré
+s'affiche une fois, et qu'une seconde exécution refuse le doublon de slug.
+
+- [ ] **Step 10 : Commit**
+
+```bash
+git add src/cli tests/cli src/main.ts package.json
+git commit -m "feat(cli): commande add pour adopter un projet fastlane existant"
 ```
 
 ---

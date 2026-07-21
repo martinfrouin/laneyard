@@ -24,6 +24,7 @@ d'en suivre l'exécution en direct et de modifier le Fastfile sans ouvrir d'édi
 - Édition du Fastfile : vue structurée par actions et éditeur texte, puis commit et push.
 - Configuration intégralement pilotable par fichiers, secrets exclus — sauvegardable et
   versionnable, l'interface n'étant qu'un éditeur de ces fichiers.
+- `laneyard add` : adoption d'un projet fastlane existant par détection, depuis son dossier.
 - Coffre de secrets injectés en variables d'environnement.
 - Notifications de fin de run : notification du navigateur, plus webhook optionnel par projet.
 - Écran « Préparation CI » : check-list d'autonomie par projet.
@@ -219,6 +220,27 @@ required_secrets:                    # noms seulement, jamais de valeurs
   - MATCH_PASSWORD
   - APP_STORE_CONNECT_API_KEY_ID
 ```
+
+### Adopter un projet existant
+
+Personne ne part d'une page blanche : un projet qui mérite Laneyard utilise déjà fastlane. Écrire
+le bloc `config.yml` à la main est donc le mauvais premier contact.
+
+`laneyard add`, lancée depuis le dossier du projet, inspecte ce qui est là — dossier `fastlane`, y
+compris imbriqué dans un monorepo ; présence d'un `Gemfile` pour choisir entre `bundle` et
+`system` ; nature du projet, Xcode ou Gradle, pour proposer des motifs d'artefacts ; distant git et
+branche courante — puis ajoute le bloc correspondant à `config.yml`.
+
+Deux exigences sur cette écriture :
+
+- **Le fichier n'est jamais réécrit en entier.** L'édition passe par le document YAML, pas par un
+  aller-retour parse/serialize : commentaires et ordre des clés survivent. C'est la même règle que
+  pour le Fastfile — un fichier écrit à la main ne doit jamais ressortir abîmé.
+- **Rien n'est deviné en silence.** La commande affiche ce qu'elle a détecté et ce qu'elle n'a pas
+  su déduire, et refuse d'agir si le projet n'a ni Fastfile ni distant git, avec un message qui dit
+  quoi faire.
+
+À la première utilisation, elle génère aussi un mot de passe serveur et l'affiche une seule fois.
 
 ### Précédence et écriture
 
