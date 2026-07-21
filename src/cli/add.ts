@@ -74,6 +74,16 @@ export async function runAddCommand(cwd: string, configPath: string, slugOverrid
   }
 
   const slug = slugOverride ?? d.slug;
+
+  // Un slug sert de nom de dossier et de segment d'URL. Non validé, un
+  // `--slug ../evil` s'écrirait sans broncher et rendrait ensuite config.yml
+  // invalide, mettant hors ligne tous les autres projets.
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    process.stderr.write(
+      `Slug invalide : « ${slug} ». Minuscules, chiffres et tirets uniquement.\n`,
+    );
+    return 1;
+  }
   await addProjectToConfig(configPath, {
     slug,
     name: slug,

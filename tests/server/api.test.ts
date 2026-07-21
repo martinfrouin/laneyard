@@ -129,4 +129,29 @@ describe("API", () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it("refuse un second run tant que le précédent occupe le workspace", async () => {
+    const { app } = await harness();
+    const session = await login(app);
+    const cookies = { laneyard_session: session };
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/projects/popotes/runs",
+      cookies,
+      payload: { lane: "beta", params: {} },
+    });
+    expect(first.statusCode).toBe(201);
+
+    // Le premier run est encore actif : deux runs partageraient le même clone git.
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/projects/popotes/runs",
+      cookies,
+      payload: { lane: "beta", params: {} },
+    });
+
+    expect(second.statusCode).toBe(409);
+    expect((second.json() as { error: string }).error).toMatch(/en cours/);
+  });
 });

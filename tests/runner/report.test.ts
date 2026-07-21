@@ -74,3 +74,41 @@ describe("readReport", () => {
     expect(await readReport(join(dir, "report.xml"))).toBeNull();
   });
 });
+
+describe("readReport — index non fiables", () => {
+  it("renumérote des index en doublon plutôt que de les laisser entrer en base", async () => {
+    const dir = await tmpDir("laneyard-rep-");
+    // Deux testsuites, chacune renumérotant à partir de 0 : la clé primaire
+    // (run_id, idx) de run_step refuserait l'insertion.
+    await writeFile(
+      join(dir, "report.xml"),
+      `<testsuites>
+         <testsuite name="fastlane.lanes">
+           <testcase classname="fastlane.lanes" name="0: match" time="1"/>
+         </testsuite>
+         <testsuite name="fastlane.lanes">
+           <testcase classname="fastlane.lanes" name="0: build_app" time="2"/>
+           <testcase classname="fastlane.lanes" name="sans index" time="3"/>
+         </testsuite>
+       </testsuites>`,
+      "utf8",
+    );
+
+    const steps = await readReport(join(dir, "report.xml"));
+    if (!steps) throw new Error("rapport attendu");
+
+    expect(steps).toHaveLength(3);
+    expect(steps.map((s) => s.idx)).toEqual([0, 1, 2]);
+    expect(new Set(steps.map((s) => s.idx)).size).toBe(3);
+  });
+
+  it("laisse passer une entité numérique hors plage sans lever", async () => {
+    const dir = await tmpDir("laneyard-rep-");
+    await writeFile(
+      join(dir, "report.xml"),
+      '<testsuites><testsuite name="l"><testcase name="0: &#9999999999;" time="1"/></testsuite></testsuites>',
+      "utf8",
+    );
+    await expect(readReport(join(dir, "report.xml"))).resolves.toHaveLength(1);
+  });
+});

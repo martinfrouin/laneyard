@@ -30,13 +30,26 @@ export class Workspace {
     return env;
   }
 
+  /**
+   * Remplace l'URL du dépôt par un jeton neutre dans un texte.
+   *
+   * Une URL HTTPS peut porter un mot de passe — `https://user:token@github.com/…`
+   * est parfaitement légal dans `config.yml`. Or les erreurs git finissent dans
+   * le fichier de log du run. Le caviardage général des secrets viendra au jalon
+   * suivant ; cette fuite-ci vient de notre propre formatage, elle se répare ici.
+   */
+  private redact(text: string): string {
+    return text.split(this.gitUrl).join("<dépôt>");
+  }
+
   private async git(args: string[], cwd = this.path): Promise<string> {
     try {
       const { stdout } = await exec("git", args, { cwd, env: this.env(), maxBuffer: 32 * 1024 * 1024 });
       return stdout.trim();
     } catch (cause) {
       const err = cause as { stderr?: string; message: string };
-      throw new Error(`git ${args.join(" ")} a échoué : ${(err.stderr || err.message).trim()}`);
+      const detail = (err.stderr || err.message).trim();
+      throw new Error(`git ${this.redact(args.join(" "))} a échoué : ${this.redact(detail)}`);
     }
   }
 
@@ -74,7 +87,7 @@ export class Workspace {
    */
   async ensureCloned(onProgress?: (line: string) => void): Promise<void> {
     if (await this.exists()) return;
-    onProgress?.(`Clonage de ${this.gitUrl}…`);
+    onProgress?.(`Clonage de ${this.redact(this.gitUrl)}…`);
     await this.git(["clone", this.gitUrl, this.path], process.cwd());
   }
 

@@ -89,6 +89,11 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   const useBundle = settings.runtime === "bundle";
   const reportPath = join(opts.workspacePath, settings.fastlane_dir, "report.xml");
 
+  // Un rapport traîne peut-être là, laissé par un run précédent que fastlane
+  // n'a pas eu le temps d'écraser. Sans ce ménage, un run qui échoue avant
+  // même d'atteindre fastlane adopterait la chronologie du run d'avant.
+  await rm(reportPath, { force: true });
+
   const { done } = startPty({
     command: useBundle ? "bundle" : "fastlane",
     args: useBundle
@@ -110,43 +115,15 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   await writer.close();
 
   // --- Chronologie -------------------------------------------------------
-  const report = await readReport(reportPath);
-  const live = tracker.steps();
-
-  if (report) {
-    // Le rapport fait autorité ; le repérage en direct n'apporte que les décalages.
-    const steps: Step[] = report.map((s, i) => ({
-      idx: s.idx,
-      name: s.name,
-      durationMs: s.durationMs,
-      status: s.status,
-      logOffset: live[i]?.logOffset ?? null,
-      source: "report",
-    }));
-    runs.replaceSteps(runId, steps);
-    await rm(reportPath, { force: true });
-  } else if (live.length > 0) {
-    // Run annulé, expiré ou interrompu : on garde ce qui a été vu, en le signalant.
-    runs.replaceSteps(
-      runId,
-      live.map((s, i) => ({
-        idx: i,
-        name: s.name,
-        durationMs: null,
-        status: "unknown",
-        logOffset: s.logOffset,
-        source: "live" as const,
-      })),
-    );
+  // Tout ce qui suit est de l'après-vente : la chronologie et les artefacts
+  // enjolivent un run déjà terminé. Une base qui refuse une insertion ou un
+  // fichier qui s'évapore ne doit pas coûter le verdict du run, ni faire
+  // remonter une exception jusqu'au serveur qui n'a personne pour l'attraper.
+  try {
+    await recordOutcome();
+  } catch (cause) {
+    await emit(`\nChronologie ou artefacts incomplets : ${(cause as Error).message}\n`);
   }
-
-  // --- Artefacts et statut final ----------------------------------------
-  const collected = await collectArtifacts(
-    opts.workspacePath,
-    settings.artifact_globs,
-    opts.artifactsDir,
-  );
-  for (const a of collected) runs.addArtifact(runId, a);
 
   if (outcome.exitCode === 0 && !outcome.timedOut) {
     runs.finish(runId, { status: "success", exitCode: 0, errorSummary: null });
@@ -159,6 +136,46 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
 
   runs.finish(runId, { status: "failed", exitCode: outcome.exitCode, errorSummary: summary });
   return { status: "failed" };
+
+  async function recordOutcome(): Promise<void> {
+    const report = await readReport(reportPath);
+    const live = tracker.steps();
+
+    if (report) {
+      // Le rapport fait autorité ; le repérage en direct n'apporte que les décalages.
+      const steps: Step[] = report.map((s, i) => ({
+        idx: s.idx,
+        name: s.name,
+        durationMs: s.durationMs,
+        status: s.status,
+        logOffset: live[i]?.logOffset ?? null,
+        source: "report",
+      }));
+      runs.replaceSteps(runId, steps);
+      await rm(reportPath, { force: true });
+    } else if (live.length > 0) {
+      // Run annulé, expiré ou interrompu : on garde ce qui a été vu, en le signalant.
+      runs.replaceSteps(
+        runId,
+        live.map((s, i) => ({
+          idx: i,
+          name: s.name,
+          durationMs: null,
+          status: "unknown",
+          logOffset: s.logOffset,
+          source: "live" as const,
+        })),
+      );
+    }
+
+    // --- Artefacts --------------------------------------------------------
+    const collected = await collectArtifacts(
+      opts.workspacePath,
+      settings.artifact_globs,
+      opts.artifactsDir,
+    );
+    for (const a of collected) runs.addArtifact(runId, a);
+  }
 }
 
 function laneArgs(opts: ExecuteRunOptions): string[] {

@@ -31,6 +31,20 @@ export function useRunStream(runId: number): { log: string; finished: string | n
     setLog("");
     setFinished(null);
 
+    /**
+     * Recharge le log depuis le dernier décalage connu, jusqu'à couvrir au
+     * moins `upTo`. Le serveur écrit avant de diffuser : ce que le socket
+     * annonce est donc déjà lisible par l'API.
+     */
+    const fillGap = async (upTo: number) => {
+      const missing = await api.log(runId, offset.current);
+      if (closed || !missing) return;
+      const gained = new TextEncoder().encode(missing).byteLength;
+      if (offset.current + gained < upTo) return; // rattrapage incomplet, le prochain fragment relancera
+      offset.current += gained;
+      setLog((prev) => prev + missing);
+    };
+
     const connect = async () => {
       if (closed) return;
       const backlog = await api.log(runId, offset.current);
@@ -51,6 +65,17 @@ export function useRunStream(runId: number): { log: string; finished: string | n
         if (msg.type === "chunk") {
           // Un fragment déjà couvert par le rattrapage est ignoré.
           if (msg.offset < offset.current) return;
+
+          // Un fragment qui commence plus loin que là où nous en sommes signale
+          // un trou : la sortie émise entre la réponse HTTP de rattrapage et
+          // l'ouverture du socket n'a atteint personne. L'ajouter tel quel
+          // laisserait un log discontinu, et décalerait tous les sauts vers une
+          // étape. On rattrape la partie manquante avant de continuer.
+          if (msg.offset > offset.current) {
+            void fillGap(msg.offset);
+            return;
+          }
+
           offset.current = msg.offset + new TextEncoder().encode(msg.data).byteLength;
           setLog((prev) => prev + msg.data);
         } else {

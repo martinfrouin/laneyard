@@ -67,4 +67,16 @@ describe("Workspace", () => {
     await ws.ensureCloned();
     expect(await ws.exists()).toBe(true);
   }, 30_000);
+
+  it("ne recopie jamais l'URL du dépôt dans un message d'erreur", async () => {
+    // Une URL HTTPS peut porter un jeton ; ces messages finissent dans le log du run.
+    const secret = "https://user:ghp_TRESSECRET@example.invalid/m/demo.git";
+    const ws = new Workspace(join(await tmpDir(), "p"), secret);
+
+    await expect(ws.prepare("main")).rejects.toThrow();
+    await ws.prepare("main").catch((err: Error) => {
+      expect(err.message).not.toContain("ghp_TRESSECRET");
+      expect(err.message).toContain("<dépôt>");
+    });
+  }, 30_000);
 });

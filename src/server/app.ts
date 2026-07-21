@@ -11,7 +11,7 @@ import { RunStore } from "../db/runs.js";
 import { Workspace } from "../git/workspace.js";
 import { LogStore } from "../logs/store.js";
 import type { Lane } from "../sidecar/lanes.js";
-import { SESSION_COOKIE, SessionStore, verifyPassword } from "./auth.js";
+import { LoginThrottle, SESSION_COOKIE, SessionStore, verifyPassword } from "./auth.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerWebSocket } from "./ws.js";
@@ -63,14 +63,26 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     },
   };
 
+  const throttle = new LoginThrottle();
+
   app.post("/api/login", async (req, reply) => {
     const { password } = req.body as { password?: string };
     const hash = deps.config.server()?.password_hash;
 
-    if (!password || !hash || !verifyPassword(password, hash)) {
+    const waitMs = throttle.retryAfterMs();
+    if (waitMs > 0) {
+      return reply
+        .code(429)
+        .header("retry-after", Math.ceil(waitMs / 1000))
+        .send({ error: `Trop de tentatives. Réessayez dans ${Math.ceil(waitMs / 1000)} s.` });
+    }
+
+    if (!password || !hash || !(await verifyPassword(password, hash))) {
+      throttle.recordFailure();
       return reply.code(401).send({ error: "Mot de passe incorrect" });
     }
 
+    throttle.recordSuccess();
     const token = ctx.sessions.issue();
     return reply
       .setCookie(SESSION_COOKIE, token, { path: "/", httpOnly: true, sameSite: "lax" })

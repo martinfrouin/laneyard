@@ -31,10 +31,20 @@ const ENTITIES: Record<string, string> = {
 
 const decodeXml = (value: string): string =>
   value.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (whole, code: string) => {
-    if (code.startsWith("#x") || code.startsWith("#X")) {
-      return String.fromCodePoint(parseInt(code.slice(2), 16));
+    // Un point de code hors plage ferait lever String.fromCodePoint : on rend
+    // l'entité telle quelle plutôt que d'écrouler la lecture du rapport.
+    const point =
+      code.startsWith("#x") || code.startsWith("#X")
+        ? parseInt(code.slice(2), 16)
+        : code.startsWith("#")
+          ? Number(code.slice(1))
+          : null;
+
+    if (point !== null) {
+      return Number.isInteger(point) && point >= 0 && point <= 0x10ffff
+        ? String.fromCodePoint(point)
+        : whole;
     }
-    if (code.startsWith("#")) return String.fromCodePoint(Number(code.slice(1)));
     return ENTITIES[code] ?? whole;
   });
 
@@ -78,5 +88,13 @@ export async function readReport(path: string): Promise<ReportStep[] | null> {
     });
   }
 
-  return steps.length > 0 ? steps.sort((a, b) => a.idx - b.idx) : null;
+  if (steps.length === 0) return null;
+
+  // L'index vient du nom, pas de la position : rien ne garantit son unicité.
+  // Un rapport à plusieurs testsuites, ou mêlant cas numérotés et non numérotés,
+  // produit des doublons — et `run_step` a une clé primaire (run_id, idx).
+  // On renumérote donc après tri, en gardant l'ordre annoncé.
+  return steps
+    .sort((a, b) => a.idx - b.idx)
+    .map((step, position) => ({ ...step, idx: position }));
 }
