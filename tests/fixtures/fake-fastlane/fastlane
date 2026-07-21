@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Faux fastlane pour les tests : rejoue une sortie enregistrée sans rien construire.
+#
+#   FAKE_FASTLANE_SCENARIO=success|failure|slow
+#   FAKE_FASTLANE_REPORT_DIR=<dossier où écrire report.xml, défaut $PWD/fastlane>
+#
+# Il imite le comportement réel : séparateurs d'étape, rapport JUnit écrit
+# relativement au dossier courant, et production d'un artefact. Aucune dépendance
+# à Xcode, la suite de tests est donc exécutable partout.
+set -euo pipefail
+
+scenario="${FAKE_FASTLANE_SCENARIO:-success}"
+# Comme le vrai fastlane, le rapport est écrit dans le dossier fastlane du projet.
+report_dir="${FAKE_FASTLANE_REPORT_DIR:-$PWD/fastlane}"
+
+echo "[09:41:01]: Driving the lane '$*'"
+echo "[09:41:02]: ------ Step: match ------"
+echo "[09:41:03]: Installing certificates"
+echo "[09:41:04]: ------ Step: build_app ------"
+echo "[09:41:05]: Compiling sources"
+
+if [ "$scenario" = "slow" ]; then
+  sleep 30
+fi
+
+# Un build produit son artefact. Le dossier build/ est ignoré par git dans les
+# fixtures, ce qui évite qu'un artefact déplacé salisse le workspace.
+mkdir -p "$PWD/build"
+echo "faux binaire" > "$PWD/build/Popotes.ipa"
+
+write_report() {
+  mkdir -p "$report_dir"
+  cat > "$report_dir/report.xml" <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="fastlane.lanes">
+    <testcase classname="fastlane.lanes" name="0: match" time="1.5"></testcase>
+    <testcase classname="fastlane.lanes" name="1: build_app" time="2.5">$1</testcase>
+  </testsuite>
+</testsuites>
+XML
+}
+
+if [ "$scenario" = "failure" ]; then
+  echo "[09:41:09]: Error building the application"
+  write_report '<failure message="Error building the application"></failure>'
+  exit 1
+fi
+
+echo "[09:41:09]: fastlane.tools finished successfully"
+write_report ""
+exit 0

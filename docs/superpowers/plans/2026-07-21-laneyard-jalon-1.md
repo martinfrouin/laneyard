@@ -35,12 +35,16 @@ src/
     lanes.ts         Lecture des lanes avec cache indexé sur l'empreinte du fastlane_dir
   logs/
     store.ts         Écriture append-only et lecture depuis un décalage
+  heuristics/
+    error-summary.ts Extraction d'une cause d'échec lisible — connaissance nommée, isolée
   runner/
     pty.ts           Lancement d'un processus dans un PTY, flux de sortie, code de sortie
     live-steps.ts    Repérage des séparateurs d'étape et de leur décalage en octets
     report.ts        Lecture de fastlane/report.xml
     artifacts.ts     Collecte par motifs
     orchestrate.ts   Enchaînement complet d'un run et transitions d'état
+  sidecar/
+    ruby-env.ts      Résolution d'un environnement Ruby capable de charger fastlane
   cli/
     detect.ts        Inspection d'un projet existant : fastlane, plateforme, git
     add.ts           Écriture du bloc projet dans config.yml, commentaires préservés
@@ -373,7 +377,11 @@ import type { RepoConfig, ServerConfig } from "./schema.js";
 export type LoadResult<T> = { ok: true; config: T } | { ok: false; error: string };
 
 /** Lit et valide un fichier YAML. N'échoue jamais par exception : l'appelant décide. */
-async function loadYamlFile<T>(path: string, schema: ZodType<T>): Promise<LoadResult<T>> {
+// `ZodType<T, any, any>` et non `ZodType<T>` : sur un schéma comportant des `.default()`,
+// le type d'entrée diffère du type de sortie, et TypeScript infère alors `T` sur l'entrée
+// — donc avec des champs optionnels. Neutraliser les deux derniers paramètres force
+// l'inférence sur la sortie, seule pertinente ici.
+async function loadYamlFile<T>(path: string, schema: ZodType<T, any, any>): Promise<LoadResult<T>> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
@@ -1105,9 +1113,17 @@ export class Workspace {
     }
   }
 
+  /**
+   * Vrai s'il existe des modifications *suivies* non commitées.
+   *
+   * Les fichiers non suivis sont volontairement ignorés : un build en sème
+   * (fastlane réécrit `fastlane/README.md` à chaque exécution, les artefacts
+   * atterrissent dans `build/`), et surtout `git checkout` ne les détruit pas.
+   * Les compter rendrait tout second run impossible sans protéger quoi que ce soit.
+   */
   async isDirty(): Promise<boolean> {
     if (!(await this.exists())) return false;
-    return (await this.git(["status", "--porcelain"])) !== "";
+    return (await this.git(["status", "--porcelain", "--untracked-files=no"])) !== "";
   }
 
   async headSha(): Promise<string> {
@@ -1168,9 +1184,157 @@ git commit -m "feat(git): clone, fetch et checkout du workspace"
 ### Task 6 : Sidecar Ruby — commande `lanes`
 
 **Files:**
-- Create: `ruby/introspect.rb`, `tests/ruby/introspect.test.ts`
+- Create: `src/sidecar/ruby-env.ts`, `tests/sidecar/ruby-env.test.ts`, `ruby/introspect.rb`, `tests/ruby/introspect.test.ts`
 
-- [ ] **Step 1 : Écrire le test qui échoue**
+#### Pourquoi un résolveur d'environnement Ruby
+
+Le sidecar suppose que `require "fastlane"` fonctionne. Ce n'est vrai que si fastlane est un gem
+visible du Ruby courant. Or l'installation la plus répandue sur macOS, celle d'Homebrew, place
+fastlane dans un `GEM_HOME` privé et fournit un lanceur qui le positionne avant d'exécuter :
+
+```bash
+GEM_HOME="${HOME}/.local/share/fastlane/4.0.0" exec ".../libexec/bin/fastlane" "$@"
+```
+
+Avec ce type d'installation, `ruby -e 'require "fastlane"'` échoue. Le mode `system` serait donc
+inutilisable sans que rien n'explique pourquoi. En mode `bundle`, `bundle exec` règle la question
+seul — le problème ne concerne que `system`.
+
+La résolution procède par essais, du plus simple au plus spécifique, et le résultat est mémorisé :
+
+1. l'environnement courant, qui suffit dès que fastlane est installé normalement (`gem install`,
+   rbenv, rvm, asdf) ;
+2. à défaut, l'environnement extrait du lanceur `fastlane` s'il s'agit d'un script shell — cas
+   Homebrew ;
+3. sinon, un échec explicite disant quoi faire.
+
+- [ ] **Step 1 : Écrire les tests du résolveur**
+
+`tests/sidecar/ruby-env.test.ts` :
+
+```ts
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { describe, expect, it } from "vitest";
+import { resolveRubyEnv } from "../../src/sidecar/ruby-env.js";
+
+const exec = promisify(execFile);
+
+describe("resolveRubyEnv", () => {
+  it("rend un environnement où Ruby sait charger fastlane", async () => {
+    const resolved = await resolveRubyEnv();
+    expect(resolved).not.toBeNull();
+
+    const { stdout } = await exec("ruby", ["-e", 'require "fastlane"; print "ok"'], {
+      env: resolved!.env,
+      timeout: 180_000,
+    });
+    expect(stdout).toBe("ok");
+  }, 240_000);
+
+  it("indique d'où vient l'environnement retenu", async () => {
+    const resolved = await resolveRubyEnv();
+    expect(["process", "launcher"]).toContain(resolved!.source);
+  }, 240_000);
+
+  it("mémorise le résultat plutôt que de resonder à chaque appel", async () => {
+    const a = await resolveRubyEnv();
+    const b = await resolveRubyEnv();
+    expect(b).toBe(a);
+  }, 240_000);
+});
+```
+
+- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+
+Run: `npm test -- tests/sidecar/ruby-env.test.ts`
+Expected: échec — module introuvable.
+
+- [ ] **Step 3 : Implémenter le résolveur**
+
+`src/sidecar/ruby-env.ts` :
+
+```ts
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const exec = promisify(execFile);
+
+export interface RubyEnv {
+  env: NodeJS.ProcessEnv;
+  /** `process` : Ruby savait déjà. `launcher` : environnement repris du lanceur fastlane. */
+  source: "process" | "launcher";
+}
+
+async function canRequireFastlane(env: NodeJS.ProcessEnv): Promise<boolean> {
+  try {
+    await exec("ruby", ["-e", 'require "fastlane"'], { env, timeout: 180_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reconstitue l'environnement du lanceur `fastlane` quand c'en est un script shell.
+ *
+ * On n'exécute pas le lanceur : on relit ses affectations `GEM_HOME` et `GEM_PATH`
+ * et on les fait évaluer par bash, qui sait développer `${HOME}` et les valeurs par
+ * défaut. Approche volontairement étroite — deux variables, rien d'autre.
+ */
+async function envFromLauncher(): Promise<NodeJS.ProcessEnv | null> {
+  const script = `
+    shim=$(command -v fastlane) || exit 1
+    head -c 2 "$shim" | grep -q '#!' || exit 1
+    eval "$(grep -oE '(GEM_HOME|GEM_PATH)="[^"]*"' "$shim" | sed 's/^/export /')" || exit 1
+    [ -n "$GEM_HOME" ] || exit 1
+    printf '%s\\n%s\\n' "$GEM_HOME" "$GEM_PATH"
+  `;
+  try {
+    const { stdout } = await exec("bash", ["-c", script], { timeout: 30_000 });
+    const [gemHome, gemPath] = stdout.split("\n");
+    if (!gemHome) return null;
+    return { ...process.env, GEM_HOME: gemHome, GEM_PATH: gemPath || gemHome };
+  } catch {
+    return null;
+  }
+}
+
+let cached: Promise<RubyEnv | null> | null = null;
+
+/**
+ * Trouve un environnement dans lequel `ruby` peut charger fastlane, ou null.
+ *
+ * Le résultat est mémorisé : sonder coûte plusieurs secondes, fastlane étant lent
+ * à charger, et l'installation ne change pas en cours d'exécution.
+ */
+export function resolveRubyEnv(): Promise<RubyEnv | null> {
+  cached ??= (async () => {
+    if (await canRequireFastlane(process.env)) {
+      return { env: process.env, source: "process" as const };
+    }
+    const env = await envFromLauncher();
+    if (env && (await canRequireFastlane(env))) {
+      return { env, source: "launcher" as const };
+    }
+    return null;
+  })();
+  return cached;
+}
+
+/** Message unique, pour ne pas décrire le problème différemment à chaque endroit. */
+export const FASTLANE_UNAVAILABLE =
+  "Ruby ne parvient pas à charger fastlane. Installez-le pour le Ruby courant " +
+  "(`gem install fastlane`), ou déclarez un Gemfile dans le projet et passez le " +
+  "réglage `runtime` à `bundle`.";
+```
+
+- [ ] **Step 4 : Lancer les tests du résolveur**
+
+Run: `npm test -- tests/sidecar/ruby-env.test.ts`
+Expected: 3 tests passés. Le premier appel prend plusieurs secondes — fastlane est lent à charger.
+
+- [ ] **Step 5 : Écrire les tests du sidecar**
 
 `tests/ruby/introspect.test.ts` :
 
@@ -1180,6 +1344,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { resolveRubyEnv } from "../../src/sidecar/ruby-env.js";
 import { tmpDir } from "../fixtures/repos.js";
 
 const exec = promisify(execFile);
@@ -1193,9 +1358,14 @@ async function projectWithFastfile(content: string): Promise<string> {
 }
 
 async function introspect(dir: string, cmd: string): Promise<unknown> {
+  // Le sidecar tourne ici sans bundle : il lui faut l'environnement résolu.
+  const ruby = await resolveRubyEnv();
+  if (!ruby) throw new Error("fastlane introuvable pour le Ruby courant");
+
   const { stdout } = await exec("ruby", [SCRIPT, cmd, "--fastlane-dir", "fastlane"], {
     cwd: dir,
-    timeout: 120_000,
+    env: ruby.env,
+    timeout: 180_000,
   });
   return JSON.parse(stdout);
 }
@@ -1320,12 +1490,17 @@ end
 case command
 when "lanes"
   begin
-    respond({ ok: true, lanes: collect_lanes(fastfile_path) })
+    lanes = collect_lanes(fastfile_path)
   rescue Exception => e # rubocop:disable Lint/RescueException
     # Un Fastfile est du Ruby arbitraire : son chargement peut lever n'importe quoi,
     # y compris des erreurs de syntaxe qui ne descendent pas de StandardError.
     fail_with("Chargement du Fastfile impossible : #{e.message}")
   end
+
+  # `respond` se termine par `exit`, qui lève SystemExit — lui aussi un Exception.
+  # L'appeler à l'intérieur du bloc protégé ferait attraper sa propre sortie et
+  # écrirait un second JSON d'erreur « exit ». Il reste donc dehors.
+  respond({ ok: true, lanes: lanes })
 else
   fail_with("Commande inconnue : #{command.inspect}")
 end
@@ -1340,7 +1515,7 @@ d'où le délai de 180 s.
 - [ ] **Step 5 : Commit**
 
 ```bash
-git add ruby tests/ruby
+git add ruby tests/ruby src/sidecar tests/sidecar
 git commit -m "feat(sidecar): commande lanes du script d'introspection Ruby"
 ```
 
@@ -1436,6 +1611,7 @@ import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { FASTLANE_UNAVAILABLE, resolveRubyEnv } from "./ruby-env.js";
 
 const exec = promisify(execFile);
 
@@ -1463,9 +1639,19 @@ export function makeInvoke(runtime: "bundle" | "system"): Invoke {
         ? ["bundle", ["exec", "ruby", SCRIPT, command, "--fastlane-dir", fastlaneDir]]
         : ["ruby", [SCRIPT, command, "--fastlane-dir", fastlaneDir]];
 
+    // En mode bundle, `bundle exec` fournit déjà le bon environnement. En mode
+    // system, il faut le trouver : selon l'installation, `ruby` ne voit pas fastlane.
+    let env = process.env;
+    if (runtime === "system") {
+      const ruby = await resolveRubyEnv();
+      if (!ruby) return { ok: false, error: FASTLANE_UNAVAILABLE };
+      env = ruby.env;
+    }
+
     try {
-      const { stdout } = await exec(bin, args, {
+      const { stdout } = await exec(bin, args as string[], {
         cwd,
+        env,
         timeout: 180_000,
         maxBuffer: 64 * 1024 * 1024,
       });
@@ -1825,6 +2011,8 @@ describe("readReport", () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(join(dir, "report.xml"), FAILED, "utf8");
     const steps = await readReport(join(dir, "report.xml"));
+    // Restreint le type autant que ça vérifie : la suite indexe le tableau.
+    if (!steps) throw new Error("rapport attendu");
 
     expect(steps).toHaveLength(2);
     expect(steps[0]!.status).toBe("success");
@@ -1863,7 +2051,12 @@ Expected: échec — modules introuvables.
  * information que report.xml ne contient pas. Les noms et durées qui font foi
  * viendront du rapport en fin de run.
  */
-const SEPARATOR = /-{2,}\s*Step:\s*(\S+)\s*-{2,}/;
+// Forme réelle observée, séquences ANSI comprises :
+//   [13:14:00]: \x1b[32m--- Step: mkdir -p ../build && echo x > y.ipa ---\x1b[0m
+// Le nom n'est pas un identifiant : pour une action `sh`, c'est la commande
+// entière, espaces inclus. La capture est donc paresseuse jusqu'aux tirets
+// de fermeture, et surtout pas `\S+`.
+const SEPARATOR = /-{2,}\s+Step:\s*(.+?)\s+-{2,}/;
 
 export interface LiveStep {
   name: string;
@@ -1916,8 +2109,36 @@ export interface ReportStep {
 // ordre, `[^>]*` avalerait le `/` final et le corps paresseux courrait jusqu'au
 // `</testcase>` suivant, fusionnant deux actions et attribuant l'échec à la mauvaise.
 const TESTCASE = /<testcase\b([^>]*?)\/>|<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g;
-const ATTR = (source: string, name: string): string | null =>
-  new RegExp(`${name}="([^"]*)"`).exec(source)?.[1] ?? null;
+// `\b` obligatoire : sans lui, chercher `name=` trouve d'abord la fin de
+// `classname=`, que fastlane écrit systématiquement en premier attribut.
+/**
+ * Décode les entités XML d'une valeur d'attribut.
+ *
+ * Indispensable : un nom d'action `sh` contient la commande entière, donc
+ * volontiers un `&&` ou une redirection, que le rapport écrit `&amp;&amp;`
+ * et `&gt;`. Sans décodage, l'interface affiche l'échappement.
+ */
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
+const decodeXml = (value: string): string =>
+  value.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (whole, code: string) => {
+    if (code.startsWith("#x") || code.startsWith("#X")) {
+      return String.fromCodePoint(parseInt(code.slice(2), 16));
+    }
+    if (code.startsWith("#")) return String.fromCodePoint(Number(code.slice(1)));
+    return ENTITIES[code] ?? whole;
+  });
+
+const ATTR = (source: string, name: string): string | null => {
+  const raw = new RegExp(`\\b${name}="([^"]*)"`).exec(source)?.[1];
+  return raw === undefined ? null : decodeXml(raw);
+};
 
 /**
  * Lit le rapport JUnit que fastlane écrit à chaque exécution.
@@ -2258,7 +2479,9 @@ describe("runInPty", () => {
       timeoutMs: 1000,
     });
     expect(res.timedOut).toBe(true);
+    // Tué par signal : le code doit refléter la mort violente, pas valoir 0.
     expect(res.exitCode).not.toBe(0);
+    expect(res.signal).not.toBeNull();
   }, 20_000);
 
   it("échoue proprement si la commande n'existe pas", async () => {
@@ -2359,7 +2582,16 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
 
     proc.onExit(({ exitCode, signal }) => {
       if (timer) clearTimeout(timer);
-      resolve({ exitCode, signal: signal ?? null, timedOut });
+      // `waitpid` ne renseigne un code de sortie que pour une fin normale : un
+      // processus tué par signal laisse 0, ce qui ferait passer une annulation
+      // pour une réussite. On applique la convention du shell, 128 + signal,
+      // pour qu'un code de sortie reste toujours interprétable.
+      const killed = signal !== undefined && signal !== 0;
+      resolve({
+        exitCode: killed && exitCode === 0 ? 128 + signal : exitCode,
+        signal: signal ?? null,
+        timedOut,
+      });
     });
   });
 
@@ -2389,10 +2621,59 @@ Run: `npm test -- tests/runner/pty.test.ts`
 Expected: 4 tests passés. Sur un `PATH` sans la commande, `node-pty` remonte un code de sortie non
 nul plutôt qu'une exception — c'est ce que vérifie le dernier test.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5 : Réparer les droits du binaire de node-pty**
+
+`node-pty` livre un exécutable auxiliaire, `spawn-helper`, que npm dépose parfois sans le bit
+d'exécution. Tout `spawn` échoue alors avec un `posix_spawnp failed` incompréhensible, y compris
+sur une commande aussi banale que `ls`. Le dépôt étant destiné à être public, mieux vaut réparer
+que documenter.
+
+`scripts/fix-node-pty-permissions.mjs` :
+
+```js
+#!/usr/bin/env node
+// npm dépose parfois le spawn-helper de node-pty sans droit d'exécution, ce qui
+// fait échouer tout lancement de processus avec un message opaque. On répare au
+// lieu de laisser chacun le découvrir.
+import { chmod, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
+
+const root = "node_modules/node-pty/prebuilds";
+
+try {
+  for (const dir of await readdir(root)) {
+    const helper = join(root, dir, "spawn-helper");
+    try {
+      const info = await stat(helper);
+      // 0o111 : au moins un bit d'exécution.
+      if ((info.mode & 0o111) === 0) {
+        await chmod(helper, 0o755);
+        console.log(`node-pty : droit d'exécution rendu à ${helper}`);
+      }
+    } catch {
+      // Pas de helper dans ce dossier : rien à faire.
+    }
+  }
+} catch {
+  // node-pty absent ou sans prebuilds : l'installation n'a pas à échouer pour autant.
+}
+```
+
+Ajouter à `package.json` :
+
+```json
+"postinstall": "node scripts/fix-node-pty-permissions.mjs"
+```
+
+Vérifier ensuite que les tests passent depuis une installation propre du binaire :
+
+Run: `chmod -x node_modules/node-pty/prebuilds/*/spawn-helper && npm run postinstall && npm test -- tests/runner/pty.test.ts`
+Expected: le script signale la réparation, puis 4 tests passés.
+
+- [ ] **Step 6 : Commit**
 
 ```bash
-git add src/runner/pty.ts tests/runner/pty.test.ts tests/fixtures/fake-fastlane
+git add src/runner/pty.ts tests/runner/pty.test.ts tests/fixtures/fake-fastlane scripts package.json
 git commit -m "feat(runner): exécution dans un pseudo-terminal et faux fastlane de test"
 ```
 
@@ -2502,6 +2783,34 @@ describe("executeRun", () => {
     expect(runs.steps(runId).find((s) => s.name === "build_app")?.status).toBe("failed");
   }, 60_000);
 
+  it("échoue proprement si la résolution des réglages lève", async () => {
+    const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n" });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: join(root, "ws"),
+      artifactsDir: join(root, "art"),
+      gitUrl: origin,
+      branch: "main",
+      // Cas réel : le projet a disparu de config.yml pendant la préparation.
+      resolveSettings: async () => {
+        throw new Error("projet inconnu");
+      },
+      env: {},
+      onChunk: () => {},
+    });
+
+    const run = runs.get(runId)!;
+    expect(run.status).toBe("failed");
+    expect(run.errorSummary).toMatch(/projet inconnu/);
+  }, 60_000);
+
   it("échoue avant le lancement si le dépôt est inaccessible", async () => {
     const root = await tmpDir("laneyard-root-");
     const runs = new RunStore(openDatabase(":memory:"));
@@ -2547,6 +2856,7 @@ import type { RunStore, Step } from "../db/runs.js";
 import { Workspace } from "../git/workspace.js";
 import type { GitAuth } from "../git/workspace.js";
 import type { LogStore } from "../logs/store.js";
+import { summarizeFailure } from "../heuristics/error-summary.js";
 import { collectArtifacts } from "./artifacts.js";
 import { LiveStepTracker } from "./live-steps.js";
 import { startPty } from "./pty.js";
@@ -2576,16 +2886,6 @@ export interface ExecuteRunResult {
   status: "success" | "failed";
 }
 
-/** Extrait de quoi afficher une cause d'échec sans ouvrir le log intégral. */
-function summarizeFailure(log: string, exitCode: number): string {
-  const lines = log
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-
-  const flagged = [...lines].reverse().find((l) => /error|failed|failure/i.test(l));
-  return flagged ? flagged.slice(0, 500) : `fastlane s'est arrêté avec le code ${exitCode}`;
-}
 
 /**
  * Enchaîne un run complet et pose ses transitions d'état.
@@ -2627,7 +2927,14 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
 
   // Le workspace existe enfin : c'est seulement maintenant que le laneyard.yml
   // du dépôt est lisible, donc seulement maintenant que les réglages sont connus.
-  const settings = await opts.resolveSettings();
+  // La résolution est protégée : le projet peut avoir disparu de config.yml
+  // pendant la préparation, et un run ne doit jamais s'évaporer sur une exception.
+  let settings: ProjectSettings;
+  try {
+    settings = await opts.resolveSettings();
+  } catch (cause) {
+    return fail(`Réglages du projet illisibles : ${(cause as Error).message}`);
+  }
 
   // --- Exécution ---------------------------------------------------------
   const useBundle = settings.runtime === "bundle";
@@ -3350,11 +3657,19 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
 > module vide ne suffit pas, l'import échouerait :
 >
 > ```ts
+> import type { FastifyInstance } from "fastify";
+>
 > export class RunSockets {
 >   broadcast(_runId: number, _chunk: string, _offset: number): void {}
 >   finish(_runId: number, _status: string): void {}
 > }
-> export async function registerWebSocket(): Promise<RunSockets> {
+>
+> // La signature accepte déjà les arguments du site d'appel dans `app.ts`,
+> // sinon le typage échoue avant même que la tâche 15 existe.
+> export async function registerWebSocket(
+>   _app?: FastifyInstance,
+>   _ctx?: unknown,
+> ): Promise<RunSockets> {
 >   return new RunSockets();
 > }
 > ```
@@ -3521,6 +3836,10 @@ export async function registerWebSocket(app: FastifyInstance, ctx: AppContext): 
   await app.register(websocket);
 
   app.get("/api/runs/:id/stream", { websocket: true }, (socket, req) => {
+    // Redondance assumée : le hook global d'`app.ts` refuse déjà tout `/api`
+    // sans session, et le fait dès la poignée de main — un client non authentifié
+    // reçoit un 401 HTTP et n'arrive jamais ici. Ce garde ne coûte rien et évite
+    // qu'une exemption future de ce hook ouvre silencieusement le flux.
     if (!ctx.sessions.valid(req.cookies[SESSION_COOKIE])) {
       socket.close(4001, "Session requise");
       return;
