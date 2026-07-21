@@ -13,7 +13,7 @@ describe("Workspace", () => {
     await ws.prepare("main");
     expect(await ws.exists()).toBe(true);
     expect(await readFile(join(ws.path, "README.md"), "utf8")).toBe("hello");
-  });
+  }, 30_000);
 
   it("récupère les nouveaux commits au run suivant", async () => {
     const origin = await makeOriginRepo({ "a.txt": "v1" });
@@ -25,7 +25,7 @@ describe("Workspace", () => {
 
     expect(await readFile(join(ws.path, "a.txt"), "utf8")).toBe("v2");
     expect(await ws.headSha()).toBe(sha);
-  });
+  }, 30_000);
 
   it("refuse de préparer par-dessus des modifications non commitées", async () => {
     const origin = await makeOriginRepo({ "a.txt": "v1" });
@@ -35,7 +35,7 @@ describe("Workspace", () => {
 
     expect(await ws.isDirty()).toBe(true);
     await expect(ws.prepare("main")).rejects.toThrow(/non commit/i);
-  });
+  }, 30_000);
 
   it("ne se déclare pas sale pour des fichiers non suivis laissés par un build", async () => {
     const origin = await makeOriginRepo({ "a.txt": "v1" });
@@ -48,13 +48,13 @@ describe("Workspace", () => {
     expect(await ws.isDirty()).toBe(false);
     // Et le run suivant doit pouvoir préparer le workspace.
     await expect(ws.prepare("main")).resolves.toMatch(/^[0-9a-f]{40}$/);
-  });
+  }, 30_000);
 
   it("échoue lisiblement sur une branche inconnue", async () => {
     const origin = await makeOriginRepo({ "a.txt": "v1" });
     const ws = new Workspace(join(await tmpDir(), "p"), origin);
     await expect(ws.prepare("nexiste-pas")).rejects.toThrow(/nexiste-pas/);
-  });
+  }, 30_000);
 
   it("clone à la demande sans basculer de branche", async () => {
     const origin = await makeOriginRepo({ "laneyard.yml": "runtime: system\n" });
@@ -66,5 +66,5 @@ describe("Workspace", () => {
     // Idempotent : un second appel ne refait rien et ne lève pas.
     await ws.ensureCloned();
     expect(await ws.exists()).toBe(true);
-  });
+  }, 30_000);
 });

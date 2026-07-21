@@ -67,7 +67,15 @@ if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.js")
     await mkdir(home, { recursive: true });
     const slugIndex = rest.indexOf("--slug");
     const slug = slugIndex === -1 ? undefined : rest[slugIndex + 1];
-    process.exit(await runAddCommand(process.cwd(), join(home, "config.yml"), slug));
+    try {
+      process.exit(await runAddCommand(process.cwd(), join(home, "config.yml"), slug));
+    } catch (cause) {
+      // Un slug déjà pris, un fichier illisible : ce sont des situations
+      // ordinaires côté utilisateur. Une trace de pile n'est pas un message
+      // d'erreur, elle donne juste l'impression que l'outil a cassé.
+      process.stderr.write(`${(cause as Error).message}\n`);
+      process.exit(1);
+    }
   } else {
     main().catch((err: unknown) => {
       console.error(err);
