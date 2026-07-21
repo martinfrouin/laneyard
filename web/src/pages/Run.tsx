@@ -4,7 +4,7 @@ import { api } from "../api";
 import type { RunDetail } from "../api";
 import { Terminal } from "../components/Terminal";
 import type { TerminalHandle } from "../components/Terminal";
-import { isActive, mark } from "../status";
+import { isActive, mark, statusLabel } from "../status";
 import { useRunStream } from "../useRunStream";
 
 /** Readable duration, from tenths of a second to hours. */
@@ -23,6 +23,8 @@ export function Run() {
   const id = Number(useParams().id);
   const [run, setRun] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [, tick] = useState(0);
   const terminal = useRef<TerminalHandle>(null);
   const { log, finished } = useRunStream(id);
@@ -56,6 +58,24 @@ export function Run() {
     return () => clearInterval(t);
   }, [run]);
 
+  // No confirmation dialogue: cancelling a build is cheap and undone by
+  // triggering another, and a dialogue on a cheap action teaches people to
+  // click through dialogues.
+  const cancel = async () => {
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await api.cancel(id);
+      // A waiting run is already cancelled when the call returns; a running one
+      // takes a few moments to stop. We re-read rather than guess which.
+      setRun(await api.run(id));
+    } catch (e) {
+      setCancelError((e as Error).message);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   if (error) return <p className="status-failed">{error}</p>;
   if (!run) return <p className="dim">loading…</p>;
 
@@ -81,9 +101,16 @@ export function Run() {
         <span className="dim">
           duration <span className="bright">{elapsed(run.startedAt, run.finishedAt)}</span>
         </span>
-        <span className={`status-${run.status}`}>{run.status}</span>
+        <span className={`status-${run.status}`}>{statusLabel(run.status, run.queuePosition)}</span>
+        {/* Offered for as long as there is something to stop, and nowhere else. */}
+        {isActive(run.status) && (
+          <button onClick={() => void cancel()} disabled={cancelling} title="stop this run">
+            cancel
+          </button>
+        )}
       </div>
 
+      {cancelError && <p className="status-failed">cancel refused — {cancelError}</p>}
       {run.errorSummary && <p className="status-failed">{run.errorSummary}</p>}
 
       <div className="run-body">
@@ -94,7 +121,11 @@ export function Run() {
           </div>
           {run.steps.length === 0 && (
             <p className="dim" style={{ padding: "6px 12px" }}>
-              {isActive(run.status) ? "spotting in progress…" : "no step recorded"}
+              {run.status === "queued"
+                ? "not started yet"
+                : isActive(run.status)
+                  ? "spotting in progress…"
+                  : "no step recorded"}
             </p>
           )}
           <ul className="steps">
@@ -117,7 +148,11 @@ export function Run() {
           </ul>
         </div>
 
-        <Terminal text={log} handle={terminal} />
+        <Terminal
+          text={log}
+          handle={terminal}
+          emptyLabel={run.status === "queued" ? "waiting for its turn…" : undefined}
+        />
       </div>
 
       {run.artifacts.length > 0 && (

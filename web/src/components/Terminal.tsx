@@ -28,9 +28,16 @@ function lineAtByteOffset(text: string, offset: number): number {
 export function Terminal({
   text,
   handle,
+  emptyLabel = "waiting for output…",
 }: {
   text: string;
   handle: RefObject<TerminalHandle | null>;
+  /**
+   * What an empty pane says. A run waiting its turn and a run that has started
+   * and printed nothing yet look identical here, and they are not the same
+   * thing to someone watching.
+   */
+  emptyLabel?: string;
 }) {
   const pre = useRef<HTMLPreElement>(null);
   // Following doesn't resume on its own: as long as the user has scrolled up, we
@@ -76,7 +83,7 @@ export function Terminal({
             {s.text}
           </span>
         ))}
-        {text === "" && <span className="dim">waiting for output…</span>}
+        {text === "" && <span className="dim">{emptyLabel}</span>}
       </pre>
 
       {/*

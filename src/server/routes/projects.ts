@@ -35,6 +35,14 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
   app.get("/api/projects/:slug/runs", async (req, reply) => {
     const { slug } = req.params as { slug: string };
     if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
-    return ctx.runs.listByProject(slug);
+
+    // The whole line is read once and the positions are looked up in it, rather
+    // than asking the database where each of fifty runs stands. The position is
+    // the global one: the queue is shared by every project.
+    const line = ctx.runs.queued().map((r) => r.id);
+    return ctx.runs.listByProject(slug).map((run) => {
+      const at = line.indexOf(run.id);
+      return { ...run, queuePosition: at === -1 ? null : at + 1 };
+    });
   });
 }

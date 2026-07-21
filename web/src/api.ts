@@ -35,6 +35,8 @@ export interface RunDetail {
   projectSlug: string;
   lane: string;
   status: string;
+  /** 1 for the next to start, null when the run is not waiting. */
+  queuePosition: number | null;
   branch: string | null;
   commitSha: string | null;
   startedAt: string | null;
@@ -82,5 +84,7 @@ export const api = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ lane, platform, params }),
-    }).then(json<{ id: number }>),
+    }).then(json<{ id: number; queuePosition: number | null }>),
+
+  cancel: (id: number) => fetch(`/api/runs/${id}/cancel`, { method: "POST" }).then(empty),
 };

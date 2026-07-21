@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useMatch, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { Lane, RunDetail } from "../api";
-import { mark } from "../status";
+import { mark, statusLabel } from "../status";
 
 export function Project() {
   const { slug = "" } = useParams();
@@ -103,7 +103,10 @@ export function Project() {
               <span className={`mark status-${r.status}`}>{mark(r.status)}</span> <span className="dim">#{r.id}</span>{" "}
               {r.lane}
             </Link>
-            <span className={`status-${r.status}`}>{r.status}</span>
+            {/* A queue of three is visible from here, without opening anything. */}
+            <span className={`status-${r.status}`}>
+              {statusLabel(r.status, r.queuePosition)}
+            </span>
           </li>
         ))}
       </ul>
