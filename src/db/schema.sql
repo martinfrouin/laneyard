@@ -37,11 +37,17 @@ CREATE TABLE IF NOT EXISTS artifact (
   kind     TEXT    NOT NULL
 );
 
+-- `kind` is part of the key because more than one reader caches per project —
+-- lanes and the actions each lane calls. Without it the second write overwrites
+-- the first, and the next read returns a payload of the wrong shape rather than
+-- missing the cache.
 CREATE TABLE IF NOT EXISTS introspection_cache (
-  project_slug TEXT PRIMARY KEY,
+  project_slug TEXT NOT NULL,
+  kind         TEXT NOT NULL,
   config_hash  TEXT NOT NULL,
   payload      TEXT NOT NULL,
-  fetched_at   TEXT NOT NULL
+  fetched_at   TEXT NOT NULL,
+  PRIMARY KEY (project_slug, kind)
 );
 
 -- A global secret is stored with an empty project_slug rather than NULL:

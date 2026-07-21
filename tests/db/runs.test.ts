@@ -105,3 +105,26 @@ describe("RunStore", () => {
     expect(s.artifacts(id)[0]!.kind).toBe("ipa");
   });
 });
+
+describe("CacheStore", () => {
+  it("keeps payloads of different kinds apart for the same project", async () => {
+    const { CacheStore } = await import("../../src/db/cache.js");
+    const cache = new CacheStore(openDatabase(":memory:"));
+
+    // Same project, same fastlane_dir hash: only the kind distinguishes them.
+    // Without it the second write wins and the first reader is handed the wrong
+    // shape — worse than a cache miss, because it looks like a success.
+    cache.put("app", "lanes", "same-hash", [{ name: "beta" }]);
+    cache.put("app", "uses", "same-hash", [{ lane: "beta", actions: [] }]);
+
+    expect(cache.get("app", "lanes", "same-hash")).toEqual([{ name: "beta" }]);
+    expect(cache.get("app", "uses", "same-hash")).toEqual([{ lane: "beta", actions: [] }]);
+  });
+
+  it("misses when the hash has moved on", async () => {
+    const { CacheStore } = await import("../../src/db/cache.js");
+    const cache = new CacheStore(openDatabase(":memory:"));
+    cache.put("app", "lanes", "old", [1]);
+    expect(cache.get("app", "lanes", "new")).toBeNull();
+  });
+});

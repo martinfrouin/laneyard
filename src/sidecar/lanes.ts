@@ -39,14 +39,14 @@ export class LaneReader {
   async read(slug: string, workspacePath: string, fastlaneDir: string): Promise<Lane[]> {
     const hash = await hashFastlaneDir(workspacePath, fastlaneDir);
 
-    const cached = this.cache.get(slug, hash);
+    const cached = this.cache.get(slug, "lanes", hash);
     if (cached) return cached as Lane[];
 
     const res = await this.invoke("lanes", workspacePath, fastlaneDir);
     if (!res.ok) throw new Error(res.error);
 
     const lanes = res["lanes"] as Lane[];
-    this.cache.put(slug, hash, lanes);
+    this.cache.put(slug, "lanes", hash, lanes);
     return lanes;
   }
 }
