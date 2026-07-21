@@ -253,7 +253,8 @@ What it does *not* do is most of the point, because "delete" elsewhere usually m
 - **the repository is untouched.** Its `laneyard.yml`, its Fastfile and its history are the
   repository's, not Laneyard's.
 
-Removal is refused while a run of that project is in flight — that run is using the workspace.
+Removal is refused while a run of that project is in flight — that run is using the workspace. A
+run still waiting in the queue will not start: it ends as failed, saying its project is gone.
 
 ## Security
 

@@ -154,8 +154,11 @@ export function Settings() {
         </li>
       </ul>
 
+      {/* The one state change removal does cause, said before it happens rather
+          than found later as a run that failed for a reason nobody asked for. */}
       <p className="dim" style={{ marginTop: 20 }}>
-        a run in flight holds the workspace: removal is refused until it finishes.
+        a run in flight holds the workspace: removal is refused until it finishes. a run still
+        waiting in the queue will not start — it ends as failed, saying its project is gone.
       </p>
 
       {/* Typing the name is the confirmation. A dialogue one can click through
