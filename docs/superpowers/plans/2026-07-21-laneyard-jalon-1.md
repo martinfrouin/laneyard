@@ -2438,7 +2438,9 @@ describe("runInPty", () => {
       timeoutMs: 1000,
     });
     expect(res.timedOut).toBe(true);
+    // Tué par signal : le code doit refléter la mort violente, pas valoir 0.
     expect(res.exitCode).not.toBe(0);
+    expect(res.signal).not.toBeNull();
   }, 20_000);
 
   it("échoue proprement si la commande n'existe pas", async () => {
@@ -2539,7 +2541,16 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
 
     proc.onExit(({ exitCode, signal }) => {
       if (timer) clearTimeout(timer);
-      resolve({ exitCode, signal: signal ?? null, timedOut });
+      // `waitpid` ne renseigne un code de sortie que pour une fin normale : un
+      // processus tué par signal laisse 0, ce qui ferait passer une annulation
+      // pour une réussite. On applique la convention du shell, 128 + signal,
+      // pour qu'un code de sortie reste toujours interprétable.
+      const killed = signal !== undefined && signal !== 0;
+      resolve({
+        exitCode: killed && exitCode === 0 ? 128 + signal : exitCode,
+        signal: signal ?? null,
+        timedOut,
+      });
     });
   });
 
@@ -2569,10 +2580,59 @@ Run: `npm test -- tests/runner/pty.test.ts`
 Expected: 4 tests passés. Sur un `PATH` sans la commande, `node-pty` remonte un code de sortie non
 nul plutôt qu'une exception — c'est ce que vérifie le dernier test.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5 : Réparer les droits du binaire de node-pty**
+
+`node-pty` livre un exécutable auxiliaire, `spawn-helper`, que npm dépose parfois sans le bit
+d'exécution. Tout `spawn` échoue alors avec un `posix_spawnp failed` incompréhensible, y compris
+sur une commande aussi banale que `ls`. Le dépôt étant destiné à être public, mieux vaut réparer
+que documenter.
+
+`scripts/fix-node-pty-permissions.mjs` :
+
+```js
+#!/usr/bin/env node
+// npm dépose parfois le spawn-helper de node-pty sans droit d'exécution, ce qui
+// fait échouer tout lancement de processus avec un message opaque. On répare au
+// lieu de laisser chacun le découvrir.
+import { chmod, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
+
+const root = "node_modules/node-pty/prebuilds";
+
+try {
+  for (const dir of await readdir(root)) {
+    const helper = join(root, dir, "spawn-helper");
+    try {
+      const info = await stat(helper);
+      // 0o111 : au moins un bit d'exécution.
+      if ((info.mode & 0o111) === 0) {
+        await chmod(helper, 0o755);
+        console.log(`node-pty : droit d'exécution rendu à ${helper}`);
+      }
+    } catch {
+      // Pas de helper dans ce dossier : rien à faire.
+    }
+  }
+} catch {
+  // node-pty absent ou sans prebuilds : l'installation n'a pas à échouer pour autant.
+}
+```
+
+Ajouter à `package.json` :
+
+```json
+"postinstall": "node scripts/fix-node-pty-permissions.mjs"
+```
+
+Vérifier ensuite que les tests passent depuis une installation propre du binaire :
+
+Run: `chmod -x node_modules/node-pty/prebuilds/*/spawn-helper && npm run postinstall && npm test -- tests/runner/pty.test.ts`
+Expected: le script signale la réparation, puis 4 tests passés.
+
+- [ ] **Step 6 : Commit**
 
 ```bash
-git add src/runner/pty.ts tests/runner/pty.test.ts tests/fixtures/fake-fastlane
+git add src/runner/pty.ts tests/runner/pty.test.ts tests/fixtures/fake-fastlane scripts package.json
 git commit -m "feat(runner): exécution dans un pseudo-terminal et faux fastlane de test"
 ```
 
