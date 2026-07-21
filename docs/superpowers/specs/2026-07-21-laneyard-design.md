@@ -22,6 +22,8 @@ d'en suivre l'exécution en direct et de modifier le Fastfile sans ouvrir d'édi
 - Suivi en direct : logs diffusés, chronologie des actions, statut, durée.
 - Historique des runs avec artefacts téléchargeables.
 - Édition du Fastfile : vue structurée par actions et éditeur texte, puis commit et push.
+- Configuration intégralement pilotable par fichiers, secrets exclus — sauvegardable et
+  versionnable, l'interface n'étant qu'un éditeur de ces fichiers.
 - Coffre de secrets injectés en variables d'environnement.
 - Notifications de fin de run : notification du navigateur, plus webhook optionnel par projet.
 - Écran « Préparation CI » : check-list d'autonomie par projet.
@@ -56,8 +58,9 @@ d'erreur. Cette connaissance est autorisée, à trois conditions strictes :
 
 1. Elle vit dans un module unique et isolé, `src/heuristics/`, jamais dispersée dans le runner,
    le sidecar ou l'éditeur.
-2. Elle ne peut produire que des **avertissements**. Une heuristique ne bloque jamais un run, ne
-   masque jamais une lane, ne modifie jamais un Fastfile.
+2. Elle **ne bloque jamais et ne modifie jamais**. Une heuristique ne refuse pas un run, ne masque
+   pas une lane, ne touche pas à un Fastfile. Elle produit de l'information : un avertissement
+   dans la check-list, un résumé d'erreur à côté du log intégral, qui lui fait toujours foi.
 3. Elle est décrite comme une table de règles déclaratives, pas comme du code impératif éparpillé,
    pour rester relisable quand fastlane évolue.
 
@@ -148,40 +151,90 @@ SPA React. Trois niveaux de navigation : projets → projet → run.
 
 ### Stockage
 
-SQLite pour l'état. Fichiers sur disque pour les logs et les artefacts : un log de build pèse
-plusieurs mégaoctets et n'a rien à faire en base.
+SQLite pour l'état d'exécution. Fichiers sur disque pour la configuration, les logs et les
+artefacts : un log de build pèse plusieurs mégaoctets et n'a rien à faire en base.
 
 ```
 ~/.laneyard/
-  laneyard.db
+  config.yml             # configuration du serveur et des projets — versionnable
+  laneyard.db            # runs, étapes, artefacts, secrets chiffrés, cache
   key                    # clé de chiffrement des secrets, 0600
-  config.json            # port, hash du mot de passe, limites
-  workspaces/<projet>/   # clones git, conservés entre les runs
+  workspaces/<slug>/     # clones git, conservés entre les runs
   logs/<run>.log
   artifacts/<run>/
 ```
 
+## Configuration par fichiers
+
+**Toute la configuration, secrets exclus, vit dans des fichiers texte.** L'interface est un
+éditeur de ces fichiers, jamais une source de vérité parallèle. Sauvegarder Laneyard, c'est copier
+deux fichiers ; le restaurer sur une autre machine, c'est les recopier et ressaisir les secrets.
+
+### `~/.laneyard/config.yml` — le serveur et ses projets
+
+Ce que Laneyard doit savoir avant même d'avoir cloné quoi que ce soit.
+
+```yaml
+server:
+  port: 7890
+  bind: 0.0.0.0
+  password_hash: "$argon2id$..."
+  max_concurrent_runs: 1
+  retention: { runs: 50, artifact_days: 30 }
+
+projects:
+  - slug: popotes-ios
+    name: Popotes iOS
+    git_url: git@github.com:martin/popotes.git
+    default_branch: main
+    git_auth: { kind: ssh_key, ref: ~/.ssh/id_ed25519 }
+    color: green
+    webhook_url: $SLACK_WEBHOOK      # référence de secret, jamais la valeur
+```
+
+### `laneyard.yml` dans le dépôt — le comportement de build
+
+Facultatif, à la racine du dépôt, versionné avec le code. Il décrit comment ce projet se
+construit — donc il a sa place à côté du code, comme un `bitrise.yml`.
+
+```yaml
+fastlane_dir: fastlane
+runtime: bundle
+timeout_minutes: 60
+interactive_default: false
+artifact_globs:
+  - "build/**/*.ipa"
+  - "build/**/*.app.dSYM.zip"
+required_secrets:                    # noms seulement, jamais de valeurs
+  - MATCH_PASSWORD
+  - APP_STORE_CONNECT_API_KEY_ID
+```
+
+### Précédence et écriture
+
+Champ par champ : `laneyard.yml` du dépôt, puis le bloc du projet dans `config.yml`, puis les
+valeurs par défaut. L'interface affiche la provenance de chaque réglage — un réglage venu du dépôt
+est signalé comme tel, et le modifier produit une modification git à committer, exactement comme
+une édition du Fastfile. Les réglages de `config.yml` sont écrits directement.
+
+Les fichiers sont surveillés : une modification à la main est prise en compte sans redémarrage.
+Un fichier invalide est signalé dans l'interface et l'ancienne configuration valide reste active —
+jamais de démarrage à moitié configuré.
+
+**Un secret ne figure jamais dans un fichier de configuration.** Ces fichiers ne peuvent que
+déclarer des noms de secrets ou y faire référence par `$NOM`.
+
 ## Modèle de données
 
-### `project`
-
-| Champ | Type | Rôle |
-|---|---|---|
-| `id`, `name`, `slug` | text | Identité, URL lisible |
-| `git_url`, `default_branch` | text | Source du code |
-| `git_auth_kind` | text | `none` · `ssh_key` · `token` |
-| `git_auth_ref` | text | Selon le type : chemin de la clé SSH, ou nom du secret contenant le token |
-| `fastlane_dir` | text | Sous-dossier contenant le Fastfile (défaut `fastlane`), gère les monorepos |
-| `runtime` | text | `bundle` ou `system` : comment invoquer fastlane |
-| `artifact_globs` | json | Motifs de collecte en plus des chemins annoncés par fastlane |
-| `interactive_default` | bool | Autoriser les prompts par défaut sur ce projet |
-| `color` | text | Repère visuel |
+SQLite ne contient que l'état d'exécution et les secrets. Aucune table `project` : la liste des
+projets vient de `config.yml`, et les runs référencent un projet par son `slug`. Retirer un projet
+du fichier ne détruit pas son historique, qui reste consultable.
 
 ### `secret`
 
 | Champ | Type | Rôle |
 |---|---|---|
-| `project_id` | id? | Portée : un projet, ou nul pour un secret global |
+| `project_slug` | text? | Portée : un projet, ou nul pour un secret global |
 | `key` | text | Nom de la variable d'environnement |
 | `value_enc` | blob | Chiffré au repos, AES-GCM, clé hors base |
 | `masked` | bool | Si vrai : jamais réaffiché dans l'UI, caviardé dans les logs |
@@ -190,7 +243,7 @@ plusieurs mégaoctets et n'a rien à faire en base.
 
 | Champ | Type | Rôle |
 |---|---|---|
-| `project_id`, `lane`, `platform` | — | Ce qui a été lancé |
+| `project_slug`, `lane`, `platform` | — | Ce qui a été lancé |
 | `params` | json | Options passées à la lane |
 | `status` | text | `queued` · `preparing` · `running` · `success` · `failed` · `cancelled` · `interrupted` |
 | `branch`, `commit_sha` | text | État exact du code au moment du build |
@@ -203,9 +256,11 @@ plusieurs mégaoctets et n'a rien à faire en base.
 
 | Champ | Type | Rôle |
 |---|---|---|
-| `run_id`, `idx`, `name` | — | Ordre et nom de l'action |
-| `started_at`, `duration_ms`, `status` | — | Repérer l'étape lente ou fautive |
-| `log_offset` | int | Position dans le log : cliquer une étape saute au bon endroit |
+| `run_id`, `idx`, `name` | — | Ordre et nom de l'action, issus de `report.xml` |
+| `duration_ms`, `status` | — | Issus de `report.xml`. Repérer l'étape lente ou fautive |
+| `started_at` | ts | Calculé par cumul des durées depuis le début du run |
+| `log_offset` | int? | Position dans le log, issue du repérage en direct. Nulle si l'étape n'a pas été repérée |
+| `source` | text | `report` ou `live` — d'où vient la ligne, voir ci-dessous |
 
 ### `artifact`
 
@@ -214,11 +269,15 @@ plusieurs mégaoctets et n'a rien à faire en base.
 | `run_id`, `filename`, `path`, `size` | — | Fichier déplacé hors du workspace |
 | `kind` | text | `ipa` · `apk` · `aab` · `dsym` · `other` |
 
-### Trois absences volontaires
+### Quatre absences volontaires
 
+- **Aucune table `project`.** La configuration vit dans les fichiers, jamais en base. Voir
+  « Configuration par fichiers ».
 - **Aucune table `lane`.** Les lanes vivent dans le Fastfile. Laneyard les lit via le sidecar et
-  met le résultat en cache dans une table `introspection_cache` (`project_id`, `fastfile_hash`,
+  met le résultat en cache dans une table `introspection_cache` (`project_slug`, `config_hash`,
   `payload` JSON, `fetched_at`), une ligne par projet, écrasée à chaque changement d'empreinte.
+  L'empreinte couvre **tout le `fastlane_dir`**, pas seulement le Fastfile : un `Appfile`, un
+  `Pluginfile` ou un fichier importé modifie les lanes tout autant.
   C'est un cache, pas une source : une empreinte différente le rend caduc immédiatement, et le
   vider n'a aucune conséquence hormis une lecture plus lente. L'interface ne peut donc pas
   afficher une lane qui n'existe plus.
@@ -258,15 +317,26 @@ exécution réelle :
 <testcase classname="fastlane.lanes" name="0: echo inner" time="0.007099"/>
 ```
 
-Ce fichier fait autorité et alimente `run_step` en fin de run. Il est lu puis supprimé du
-workspace pour ne pas polluer le dépôt.
+Ce fichier fait autorité pour les noms, l'ordre, les durées et les échecs. Il est lu en fin de run,
+alimente `run_step`, puis est supprimé du workspace pour ne pas polluer le dépôt.
 
 Pendant l'exécution, ce rapport n'existe pas encore. L'affichage en direct s'appuie donc sur un
-repérage des séparateurs d'étape dans la sortie — best-effort, purement visuel, jamais persisté
-tel quel. À la fin, le rapport réconcilie la chronologie : si les deux divergent, le rapport gagne.
+repérage des séparateurs d'étape dans la sortie. De ce repérage, une seule chose est conservée :
+la **position en octets** où chaque étape a commencé dans le log, qui alimente `log_offset` et
+permet de cliquer une étape pour sauter au bon endroit — `report.xml` ne contient aucune position.
+Les noms et durées issus du repérage en direct sont, eux, jetés à la fin.
 
-Cette séparation est délibérée. Le confort d'affichage repose sur une heuristique fragile, la
-donnée conservée repose sur un format structuré produit par fastlane lui-même.
+La réconciliation est un appariement par index. Si le repérage a manqué une étape, le décalage
+correspondant est nul et le saut au log est simplement indisponible pour celle-là : une
+dégradation visible et sans conséquence.
+
+**Quand `report.xml` n'existe pas** — run annulé, expiré, interrompu par un redémarrage, ou échec
+avant même le lancement de fastlane (clone, `bundle install`) — les lignes issues du repérage en
+direct sont conservées telles quelles, avec `source = live`. L'interface indique alors que la
+chronologie est partielle. Un run qui n'a jamais atteint fastlane n'a tout simplement aucune étape.
+
+Cette séparation est délibérée : le confort d'affichage repose sur une heuristique fragile, la
+donnée qui fait foi repose sur un format structuré produit par fastlane lui-même.
 
 ### Collecte des artefacts
 
@@ -298,7 +368,7 @@ avertissements, conformément à la frontière des heuristiques.
 | Dépôt accessible sans mot de passe | `git ls-remote` avec un délai court et `GIT_TERMINAL_PROMPT=0`. Échec ou demande de saisie = rouge. | Formulaire : chemin d'une clé SSH, ou saisie d'un token stocké comme secret. |
 | Dépendances installables | Présence d'un `Gemfile`, puis `bundle check`. Sans `Gemfile`, on vérifie que `fastlane` est dans le `PATH` et le signale comme configuration `system`. | Bouton lançant `bundle install` et affichant sa sortie. |
 | Authentification App Store Connect | Recherche d'un secret de clé API (`APP_STORE_CONNECT_API_KEY_*`) ou d'un `FASTLANE_SESSION` dans le coffre du projet. Session seule = orange, avec l'explication qu'elle expire. | Formulaire de clé API : identifiant de clé, identifiant d'émetteur, contenu du `.p8`. Le tout stocké comme secrets masqués. |
-| `match` en readonly | Le Fastfile utilise-t-il `match` ou `sync_code_signing` — information venant du sidecar, pas d'une lecture textuelle ? Si oui, `MATCH_PASSWORD` est-il présent dans le coffre ? | Formulaire d'ajout du secret. |
+| `match` utilisable sans intervention | Le Fastfile utilise-t-il `match` ou `sync_code_signing` — information venant du sidecar, pas d'une lecture textuelle ? Si oui : `MATCH_PASSWORD` est-il présent dans le coffre, et le paramètre `readonly` est-il à vrai dans l'appel ? | Formulaire d'ajout du secret ; pour `readonly`, un renvoi vers l'action dans l'éditeur. |
 | Aucune action réputée bloquante | Croisement des actions listées par le sidecar avec la table de règles du module d'heuristiques (actions connues pour attendre une saisie, par exemple `prompt`). | Aucune action automatique : simple avertissement indiquant que le mode interactif sera nécessaire. |
 
 Chaque item est un couple détection/remédiation indépendant, ajouté un par un. La table de règles
@@ -338,7 +408,9 @@ du projet sont donc pris en charge sans effort particulier.
   biscornu survivent intacts.
 - **Vérification après chaque écriture.** Reparse plus `fastlane lanes`. Si la syntaxe casse ou si
   une lane a disparu, l'écriture est annulée et l'ancienne version restaurée.
-- **Sauvegarde avant écriture**, avec un historique local des versions consultable et restaurable.
+- **Sauvegarde avant écriture**, restaurée automatiquement si la vérification échoue. Un historique
+  navigable des versions n'est pas nécessaire en v1 : git remplit déjà ce rôle dès que la
+  modification est commitée.
 
 Le mode texte est un vrai éditeur de code avec coloration Ruby, pas un pis-aller. Toute
 modification hors du cadre structuré passe par lui, et c'est le fonctionnement attendu.
@@ -362,9 +434,14 @@ du workspace dans l'interface.
                     ├─ Fastfile         éditeur hybride + Modifications
                     ├─ Secrets          variables d'environnement
                     ├─ Préparation CI   check-list d'autonomie
-                    └─ Réglages         dépôt, branche, artefacts, purge, notifications
+                    └─ Réglages         édition des fichiers de configuration
 /r/<id>           Run — étapes, terminal, artefacts
 ```
+
+L'onglet Réglages présente les valeurs effectives et, pour chacune, le fichier d'où elle vient.
+Modifier une valeur définie dans le dépôt produit une modification git à committer ; modifier une
+valeur du serveur écrit dans `config.yml`. Une bascule permet d'éditer directement le YAML brut,
+comme l'éditeur de Fastfile propose son mode texte.
 
 L'écran de run place la chronologie des étapes à gauche et le terminal à droite, les artefacts
 apparaissant en bas dès qu'ils existent. La ligne de saisie est toujours présente : désactivée avec
@@ -447,8 +524,10 @@ Le périmètre v1 couvre cinq sous-systèmes largement indépendants — sidecar
 coffre de secrets, éditeur hybride, interface. Le plan d'implémentation doit viser une **tranche
 verticale le plus tôt possible** plutôt qu'un empilement de couches :
 
-1. **Le fil complet.** Enregistrer un projet, cloner, lister les lanes via le sidecar, lancer une
-   lane, voir les logs en direct, récupérer un artefact. Tout le reste s'y accroche ensuite.
+1. **Le fil complet.** Déclarer un projet dans `config.yml`, cloner, lister les lanes via le
+   sidecar, lancer une lane, voir les logs en direct, récupérer un artefact. La configuration par
+   fichiers vient d'abord : elle est le socle de tout le reste, et l'écrire après signifierait
+   démonter une couche de persistance déjà écrite.
 2. **Fiabilité du run.** Caviardage, file d'attente, annulation, timeout, runs interrompus,
    chronologie depuis `report.xml`.
 3. **Secrets et Préparation CI.** Le coffre, puis les items de check-list un par un.
