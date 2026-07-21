@@ -43,3 +43,15 @@ CREATE TABLE IF NOT EXISTS introspection_cache (
   payload      TEXT NOT NULL,
   fetched_at   TEXT NOT NULL
 );
+
+-- A global secret is stored with an empty project_slug rather than NULL:
+-- SQLite considers two NULLs distinct in a UNIQUE index, so NULL would let the
+-- same global name be inserted twice.
+CREATE TABLE IF NOT EXISTS secret (
+  project_slug TEXT    NOT NULL DEFAULT '',
+  key          TEXT    NOT NULL,
+  value_enc    TEXT    NOT NULL,
+  masked       INTEGER NOT NULL DEFAULT 1,
+  updated_at   TEXT    NOT NULL,
+  PRIMARY KEY (project_slug, key)
+);
