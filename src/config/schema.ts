@@ -31,8 +31,11 @@ export const projectEntrySchema = projectSettingsInputSchema.extend({
   default_branch: z.string().default("main"),
   git_auth: z
     .object({
-      kind: z.enum(["none", "ssh_key", "token"]),
-      /** File path if kind is ssh_key, secret name if kind is token. */
+      // `token` is not accepted yet. The workspace only knows how to use an SSH
+      // key, so accepting it would leave a project configured for something that
+      // silently never happens — worse than a clear refusal at load time.
+      kind: z.enum(["none", "ssh_key"]),
+      /** Path to the SSH key file. */
       ref: z.string().optional(),
     })
     .default({ kind: "none" }),

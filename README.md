@@ -168,8 +168,9 @@ Read this before putting Laneyard on a network.
 
 What this does *not* cover, stated plainly:
 
-- **Git credentials are not in the vault.** `git_auth` points at an SSH key on disk by path, and a
-  `token` kind is declared but not yet implemented. Laneyard removes the configured repository URL
+- **Git credentials are not in the vault.** `git_auth` points at an SSH key on disk by path;
+  token authentication is refused at load time rather than silently ignored, so a project cannot
+  be configured for something that never happens. Laneyard removes the configured repository URL
   from its own git error messages — so a token embedded in an HTTPS URL does not leak that way —
   but that is one string, not a vault.
 - **A value shorter than four characters is refused, not protected.** Removing a two-character

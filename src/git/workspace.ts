@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 const exec = promisify(execFile);
 
 export interface GitAuth {
-  kind: "none" | "ssh_key" | "token";
+  kind: "none" | "ssh_key";
   ref?: string;
 }
 

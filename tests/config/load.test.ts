@@ -74,3 +74,22 @@ projects:
     expect(res.ok).toBe(false);
   });
 });
+
+describe("git_auth", () => {
+  it("refuses a kind the workspace cannot honour", async () => {
+    // Accepting `token` would leave a project configured for an authentication
+    // that never happens. A refusal at load time is the honest answer.
+    const res = await loadServerConfig(
+      await withConfig(`
+server: { password_hash: "x" }
+projects:
+  - slug: a
+    git_url: https://example.com/a.git
+    git_auth: { kind: token, ref: MY_TOKEN }
+`),
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/git_auth/);
+  });
+});
