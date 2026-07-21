@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { LEGACY_ADMIN_NAME } from "../config/load.js";
 import type { ConfigStore } from "../config/store.js";
 import type { Db } from "../db/open.js";
 import { RunStore } from "../db/runs.js";
@@ -156,7 +157,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   app.post("/api/login", async (req, reply) => {
     const { password } = req.body as { password?: string };
-    const hash = deps.config.server()?.password_hash;
+    const hash = deps.config
+      .server()
+      ?.users.find((u) => u.name === LEGACY_ADMIN_NAME)?.password_hash;
 
     const waitMs = throttle.retryAfterMs();
     if (waitMs > 0) {

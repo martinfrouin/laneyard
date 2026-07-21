@@ -75,6 +75,101 @@ projects:
   });
 });
 
+describe("accounts", () => {
+  it("reads a lone password_hash as a single admin named admin", async () => {
+    // The 0.2 installation: one password, no accounts. Locking that person out
+    // of their own build server would not be an upgrade.
+    const res = await loadServerConfig(await withConfig(minimal));
+    if (!res.ok) throw new Error(res.error);
+    expect(res.config.server.users).toEqual([
+      { name: "admin", role: "admin", password_hash: "scrypt$aaa$bbb" },
+    ]);
+  });
+
+  it("reads a list of users", async () => {
+    const res = await loadServerConfig(
+      await withConfig(`
+server:
+  users:
+    - { name: martin, role: admin, password_hash: "scrypt$a$b" }
+    - { name: ci, role: builder, password_hash: "scrypt$c$d" }
+`),
+    );
+    if (!res.ok) throw new Error(res.error);
+    expect(res.config.server.users.map((u) => `${u.name}:${u.role}`)).toEqual([
+      "martin:admin",
+      "ci:builder",
+    ]);
+  });
+
+  it("refuses saying it both ways at once", async () => {
+    const res = await loadServerConfig(
+      await withConfig(`
+server:
+  password_hash: "scrypt$a$b"
+  users:
+    - { name: martin, role: admin, password_hash: "scrypt$c$d" }
+`),
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/password_hash/);
+    expect(res.error).toMatch(/users/);
+  });
+
+  it("refuses two accounts sharing a name", async () => {
+    const res = await loadServerConfig(
+      await withConfig(`
+server:
+  users:
+    - { name: martin, role: admin, password_hash: "scrypt$a$b" }
+    - { name: martin, role: builder, password_hash: "scrypt$c$d" }
+`),
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/duplicate user: martin/);
+  });
+
+  it("refuses an empty list of users", async () => {
+    const res = await loadServerConfig(await withConfig("server:\n  users: []\n"));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/at least one/i);
+  });
+
+  it("refuses a server nobody can administer", async () => {
+    const res = await loadServerConfig(
+      await withConfig(`
+server:
+  users:
+    - { name: ci, role: builder, password_hash: "scrypt$a$b" }
+`),
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/admin/);
+  });
+
+  it("refuses a configuration with no way to log in at all", async () => {
+    const res = await loadServerConfig(await withConfig("server: { port: 7890 }\nprojects: []\n"));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/users/);
+  });
+
+  it("refuses a role it does not know", async () => {
+    const res = await loadServerConfig(
+      await withConfig(`
+server:
+  users:
+    - { name: martin, role: superuser, password_hash: "scrypt$a$b" }
+`),
+    );
+    expect(res.ok).toBe(false);
+  });
+});
+
 describe("git_auth", () => {
   it("refuses a kind the workspace cannot honour", async () => {
     // Accepting `token` would leave a project configured for an authentication

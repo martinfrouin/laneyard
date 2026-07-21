@@ -49,11 +49,33 @@ export const projectEntrySchema = projectSettingsInputSchema.extend({
   webhook_url: z.string().optional(),
 });
 
+/**
+ * Two roles, and only two.
+ *
+ * A third is easy to add and impossible to remove. These two cover the case
+ * that prompted them — someone who ships without being trusted with the
+ * signing chain — and two can be held in a reader's head.
+ */
+export const userRoleSchema = z.enum(["admin", "builder"]);
+
+export const userEntrySchema = z.object({
+  // The name is typed into a login form and printed in a status bar; keeping it
+  // to a plain identifier avoids a name that reads differently than it is stored.
+  name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/, "name: letters, digits, dot, dash, underscore"),
+  role: userRoleSchema,
+  password_hash: z.string().min(1),
+});
+
 export const serverConfigSchema = z.object({
   server: z.object({
     port: z.number().int().positive().default(7890),
     bind: z.string().default("0.0.0.0"),
-    password_hash: z.string().min(1),
+    // Both optional in the file, exactly one required by the loader. The old
+    // single-password form is what a 0.2 installation has on disk, and it must
+    // keep working unedited; `load.ts` normalises it into `users` so that
+    // nothing downstream ever learns which of the two forms was written.
+    password_hash: z.string().min(1).optional(),
+    users: z.array(userEntrySchema).optional(),
     // Only 1 is accepted. Runs share one working directory per project, so a
     // higher number would promise parallel builds that never happen — the
     // queue drains one run at a time, whatever this says. Refusing at load
@@ -86,7 +108,20 @@ export const repoConfigSchema = projectSettingsInputSchema;
 
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
 export type ProjectEntry = z.infer<typeof projectEntrySchema> & { name: string };
-export type ServerConfig = Omit<z.infer<typeof serverConfigSchema>, "projects"> & {
-  projects: ProjectEntry[];
-};
+export type UserRole = z.infer<typeof userRoleSchema>;
+export type UserEntry = z.infer<typeof userEntrySchema>;
+
+/**
+ * The server block once normalised.
+ *
+ * `password_hash` is deliberately absent from this type: after the loader has
+ * folded it into `users`, no consumer has any business reading it, and a type
+ * that still offered it would invite one to.
+ */
+export type ServerSettings = Omit<
+  z.infer<typeof serverConfigSchema>["server"],
+  "password_hash" | "users"
+> & { users: UserEntry[] };
+
+export type ServerConfig = { server: ServerSettings; projects: ProjectEntry[] };
 export type RepoConfig = z.infer<typeof repoConfigSchema>;

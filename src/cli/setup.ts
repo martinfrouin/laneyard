@@ -43,7 +43,10 @@ export async function addProjectToConfig(path: string, entry: NewProjectEntry): 
   }
   if (doc.contents === null) doc = new Document({});
 
-  if (!doc.hasIn(["server", "password_hash"])) {
+  // `server.users` counts as a password already set: adding a `password_hash`
+  // next to it would produce the one combination the loader refuses, and turn
+  // registering a project into breaking the server's configuration.
+  if (!doc.hasIn(["server", "password_hash"]) && !doc.hasIn(["server", "users"])) {
     // A server with no password would refuse every connection: we generate one
     // and print it once, leaving it to the caller to note it down.
     const generated = randomBytes(9).toString("base64url");
