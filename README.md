@@ -160,18 +160,34 @@ least four characters long — see below.
 
 ### Readiness
 
-Every project has a Readiness tab: five checks on what stands between it and a build that runs
-while nobody watches.
+Every project has a Readiness tab: what stands between it and a build that runs while nobody
+watches. Only the checks that apply to the project are shown — an Android project is never asked
+for an App Store Connect key, because one irrelevant warning teaches you to ignore the screen.
+
+Always:
 
 - **the repository** answers `git ls-remote` without asking for credentials — a run that meets a
   password prompt does not fail, it waits;
 - **dependencies** are installable: `bundle check` against your Gemfile, or the `fastlane` a run
   would otherwise find on the PATH;
+- **no lane calls an action known to stop and ask** — `prompt`, `sigh`, `cert`, a writable
+  `match`, an upload waiting for its summary to be confirmed.
+
+On iOS:
+
 - **App Store Connect** has an API key in the vault rather than a `FASTLANE_SESSION`, which
   expires and takes the next night's build with it;
 - **match** has its `MATCH_PASSWORD` stored and is called `readonly`, so it fetches certificates
-  instead of trying to create them;
-- **no lane calls an action known to stop and ask** — `prompt`, `sigh`, a writable `match`.
+  instead of trying to create them.
+
+On Android:
+
+- **the keystore** is reachable without a prompt: a lane handing `gradle` a `storeFile` needs a
+  passphrase, and one that is neither in the call nor in the vault makes gradle stop and ask;
+- **the Play Store service account** is in the vault when a lane calls `upload_to_play_store`.
+
+Like the iOS ones, the Android checks read **literal arguments only**. `gradle(storePassword:
+ENV["PW"])` is reported as undetermined, never guessed at: a checklist that guesses gets believed.
 
 They run when you open the tab or press refresh, never on their own: they shell out to git and to
 bundler. The time of the last run is on screen, because a stale green tick is worse than a red

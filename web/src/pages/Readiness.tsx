@@ -1,8 +1,20 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
-import type { Readiness as ReadinessReport } from "../api";
+import type { Readiness as ReadinessReport, ReadinessSection } from "../api";
 import { checkClass, checkMark } from "../status";
+
+/**
+ * What a section is called.
+ *
+ * "always" rather than "all": it says why those lines are there, which is the
+ * question someone reading a section heading actually has.
+ */
+const SECTION_LABEL: Record<ReadinessSection["platform"], string> = {
+  all: "always",
+  ios: "ios",
+  android: "android",
+};
 
 /** The time of day is what matters here; the date is noise on a checklist run minutes ago. */
 const at = (iso: string): string =>
@@ -58,32 +70,44 @@ export function Readiness() {
 
       {error && <p className="status-failed">checklist unavailable — {error}</p>}
 
-      <ul className="rows checks">
-        {(report?.checks ?? []).map((check) => (
-          <li key={check.id}>
-            <span className={`mark ${checkClass(check.state)}`}>{checkMark(check.state)}</span>
-            <span className="grow">
-              <span className="bright">{check.title}</span> <span className="dim">{check.detail}</span>
-              {/* The fix is a sentence on its own line, not a control: most of
-                  these are fixed by editing a Fastfile, and a button would be
-                  claiming Laneyard can do that for you. */}
-              {check.fix && (
-                <div className="dim">
-                  {check.fix}
-                  {check.fixIn === "secrets" && (
-                    <>
-                      {" "}
-                      <Link to={`/p/${slug}/secrets`} className="accent">
-                        secrets →
-                      </Link>
-                    </>
+      {/* A section only appears when it applies, so an Android project is
+          never told off for having no App Store Connect key. The heading is the
+          same small-caps rule the rest of the interface uses — a card here
+          would make one group look more important than another. */}
+      {(report?.sections ?? []).map((section) => (
+        <Fragment key={section.platform}>
+          <h2 className="section" style={{ marginTop: 20 }}>
+            {SECTION_LABEL[section.platform]}
+          </h2>
+          <ul className="rows checks">
+            {section.checks.map((check) => (
+              <li key={check.id}>
+                <span className={`mark ${checkClass(check.state)}`}>{checkMark(check.state)}</span>
+                <span className="grow">
+                  <span className="bright">{check.title}</span>{" "}
+                  <span className="dim">{check.detail}</span>
+                  {/* The fix is a sentence on its own line, not a control: most
+                      of these are fixed by editing a Fastfile, and a button
+                      would be claiming Laneyard can do that for you. */}
+                  {check.fix && (
+                    <div className="dim">
+                      {check.fix}
+                      {check.fixIn === "secrets" && (
+                        <>
+                          {" "}
+                          <Link to={`/p/${slug}/secrets`} className="accent">
+                            secrets →
+                          </Link>
+                        </>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Fragment>
+      ))}
     </>
   );
 }

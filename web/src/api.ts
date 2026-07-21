@@ -64,10 +64,22 @@ export interface ReadinessCheck {
   fixIn?: "secrets";
 }
 
+/**
+ * The checks that apply to one platform, or to every project.
+ *
+ * A project only ever receives the sections that apply to it: an Android
+ * project is never sent the App Store Connect check, because one irrelevant
+ * warning teaches someone to ignore the whole screen.
+ */
+export interface ReadinessSection {
+  platform: "all" | "ios" | "android";
+  checks: ReadinessCheck[];
+}
+
 export interface Readiness {
   /** When these answers were produced. A checklist with no date is a rumour. */
   checkedAt: string;
-  checks: ReadinessCheck[];
+  sections: ReadinessSection[];
 }
 
 /** The Fastfile as it is on disk, plus what git makes of it. */

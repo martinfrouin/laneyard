@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
-  CHECKS,
+  SECTIONS,
+  checkAndroidKeystore,
   checkAppStoreConnect,
   checkBlockingActions,
   checkDependencies,
   checkMatch,
+  checkPlayStore,
   checkRepository,
-  runChecks,
+  runChecklist,
 } from "../../src/heuristics/readiness.js";
-import type { Known, LaneUses, ReadinessInput } from "../../src/heuristics/readiness.js";
+import type {
+  Check,
+  Known,
+  LaneUses,
+  ReadinessInput,
+  ReadinessSection,
+} from "../../src/heuristics/readiness.js";
+import type { Platform } from "../../src/heuristics/platforms.js";
 
 const known = <T>(value: T): Known<T> => ({ ok: true, value });
 const unknown = <T>(reason: string): Known<T> => ({ ok: false, reason });
@@ -242,7 +251,141 @@ describe("checkBlockingActions", () => {
   });
 });
 
-describe("runChecks", () => {
+describe("checkAndroidKeystore", () => {
+  it("is ok when no lane builds with gradle", () => {
+    const check = checkAndroidKeystore(
+      lanes({ lane: "test", actions: [{ name: "run_tests", args: {} }] }),
+      [],
+    );
+    expect(check.id).toBe("android-keystore");
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/no lane/);
+  });
+
+  it("is ok when a gradle lane passes no keystore of its own", () => {
+    // What it says is exactly what it read: no `storeFile`, no `storePassword`.
+    // It does not claim the build is unsigned — only that nothing in the lane
+    // hands gradle a keystore to unlock.
+    const check = checkAndroidKeystore(
+      lanes({ lane: "beta", actions: [{ name: "gradle", args: { task: "assemble" } }] }),
+      [],
+    );
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/storeFile/);
+  });
+
+  it("warns when a lane passes a keystore and no password is in the vault", () => {
+    const check = checkAndroidKeystore(
+      lanes({
+        lane: "beta",
+        actions: [{ name: "gradle", args: { task: "bundle", storeFile: "release.keystore" } }],
+      }),
+      ["MATCH_PASSWORD"],
+    );
+    expect(check.state).toBe("warn");
+    expect(check.detail).toMatch(/beta/);
+    expect(check.fixIn).toBe("secrets");
+  });
+
+  it("is ok once a keystore password is in the vault", () => {
+    const check = checkAndroidKeystore(
+      lanes({ lane: "beta", actions: [{ name: "gradle", args: { storeFile: "release.keystore" } }] }),
+      ["ANDROID_KEYSTORE_PASSWORD"],
+    );
+    expect(check.state).toBe("ok");
+  });
+
+  it("sees build_android_app as gradle", () => {
+    const check = checkAndroidKeystore(
+      lanes({ lane: "beta", actions: [{ name: "build_android_app", args: { storeFile: "k.jks" } }] }),
+      [],
+    );
+    expect(check.state).toBe("warn");
+  });
+
+  it("is ok when the call carries the passphrase itself", () => {
+    const check = checkAndroidKeystore(
+      lanes({
+        lane: "beta",
+        actions: [{ name: "gradle", args: { storeFile: "k.jks", storePassword: "hunter2" } }],
+      }),
+      [],
+    );
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/the call itself/);
+  });
+
+  it("never guesses at an argument that was not a literal", () => {
+    // `gradle(storePassword: ENV["PW"])` reaches us with an empty args hash,
+    // exactly as `match(readonly: ENV["RO"])` does. Neither one is guessed at.
+    const check = checkAndroidKeystore(
+      lanes({ lane: "beta", actions: [{ name: "gradle", args: {} }] }),
+      [],
+    );
+    expect(check.state).toBe("ok");
+    expect(check.detail).not.toMatch(/hunter2/);
+  });
+
+  it("is unknown when the lanes could not be read", () => {
+    const check = checkAndroidKeystore(unknown("unparseable Fastfile"), []);
+    expect(check.state).toBe("unknown");
+    expect(check.detail).toMatch(/unparseable/);
+  });
+});
+
+describe("checkPlayStore", () => {
+  it("is ok when no lane uploads", () => {
+    const check = checkPlayStore(
+      lanes({ lane: "beta", actions: [{ name: "gradle", args: {} }] }),
+      [],
+    );
+    expect(check.id).toBe("play-store");
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/no lane/);
+  });
+
+  it("warns when a lane uploads and no service account is in the vault", () => {
+    const check = checkPlayStore(
+      lanes({ lane: "release", actions: [{ name: "upload_to_play_store", args: {} }] }),
+      [],
+    );
+    expect(check.state).toBe("warn");
+    expect(check.detail).toMatch(/release/);
+    expect(check.fixIn).toBe("secrets");
+  });
+
+  it("sees supply as upload_to_play_store", () => {
+    const check = checkPlayStore(lanes({ lane: "release", actions: [{ name: "supply", args: {} }] }), []);
+    expect(check.state).toBe("warn");
+  });
+
+  it("is ok when the service account JSON is in the vault", () => {
+    const check = checkPlayStore(
+      lanes({ lane: "release", actions: [{ name: "supply", args: {} }] }),
+      ["SUPPLY_JSON_KEY_DATA"],
+    );
+    expect(check.state).toBe("ok");
+  });
+
+  it("says it could not tell when the lane names a key file instead", () => {
+    // A path in a Fastfile says nothing about whether the file is on this
+    // machine. That is a "could not tell", not a warning and not a tick.
+    const check = checkPlayStore(
+      lanes({ lane: "release", actions: [{ name: "supply", args: { json_key: "play.json" } }] }),
+      [],
+    );
+    expect(check.state).toBe("unknown");
+    expect(check.detail).toMatch(/json_key/);
+  });
+
+  it("is unknown when the lanes could not be read", () => {
+    const check = checkPlayStore(unknown("no Ruby on this machine"), []);
+    expect(check.state).toBe("unknown");
+    expect(check.detail).toMatch(/no Ruby/);
+  });
+});
+
+describe("runChecklist", () => {
   const input = (over: Partial<ReadinessInput> = {}): ReadinessInput => ({
     probeRepository: async () => "ok",
     dependencies: {
@@ -252,14 +395,64 @@ describe("runChecks", () => {
     },
     secretKeys: ["APP_STORE_CONNECT_API_KEY_ID", "MATCH_PASSWORD"],
     uses: lanes({ lane: "beta", actions: [{ name: "match", args: { readonly: true } }] }),
+    platforms: known<Platform[]>(["ios"]),
     ...over,
   });
 
-  it("returns the five checks, in the table's order", async () => {
-    const checks = await runChecks(input());
-    expect(checks.map((c) => c.id)).toEqual(CHECKS.map((c) => c.id));
-    expect(checks).toHaveLength(5);
-    expect(checks.every((c) => c.state === "ok")).toBe(true);
+  const ids = (sections: ReadinessSection[]): string[] =>
+    sections.flatMap((s) => s.checks.map((c: Check) => c.id));
+  const section = (sections: ReadinessSection[], platform: string): ReadinessSection | undefined =>
+    sections.find((s) => s.platform === platform);
+
+  it("shows the shared checks and the iOS ones on an iOS project", async () => {
+    const sections = await runChecklist(input());
+    expect(sections.map((s) => s.platform)).toEqual(["all", "ios"]);
+    expect(ids(sections)).toContain("app-store-connect");
+    expect(ids(sections)).not.toContain("android-keystore");
+    expect(ids(sections).every((id) => id.length > 0)).toBe(true);
+  });
+
+  it("never shows the iOS checks to a project that only builds for Android", async () => {
+    // One irrelevant warning teaches someone to ignore the whole screen. An
+    // Android project told off for having no App Store Connect key is exactly
+    // that warning.
+    const sections = await runChecklist(input({ platforms: known<Platform[]>(["android"]) }));
+    expect(sections.map((s) => s.platform)).toEqual(["all", "android"]);
+    expect(ids(sections)).not.toContain("app-store-connect");
+    expect(ids(sections)).not.toContain("match");
+    expect(ids(sections)).toContain("play-store");
+  });
+
+  it("shows both when a project builds for both", async () => {
+    const sections = await runChecklist(input({ platforms: known<Platform[]>(["ios", "android"]) }));
+    expect(sections.map((s) => s.platform)).toEqual(["all", "ios", "android"]);
+  });
+
+  it("shows the shared section and one line when no platform is known", async () => {
+    const sections = await runChecklist(input({ platforms: known<Platform[]>([]) }));
+    expect(sections.map((s) => s.platform)).toEqual(["all"]);
+
+    const note = section(sections, "all")!.checks.at(-1)!;
+    expect(note.state).toBe("unknown");
+    expect(note.detail).toMatch(/no platform/i);
+    // And how to say so, in the file where it belongs.
+    expect(note.fix).toMatch(/laneyard\.yml/);
+    expect(note.fix).toMatch(/platforms/);
+  });
+
+  it("keeps the shared section's own checks whole when there is no platform", async () => {
+    const sections = await runChecklist(input({ platforms: known<Platform[]>([]) }));
+    expect(ids(sections)).toContain("repository");
+    expect(ids(sections)).toContain("dependencies");
+    expect(ids(sections)).toContain("blocking-actions");
+  });
+
+  it("returns the sections and checks in the table's order", async () => {
+    const sections = await runChecklist(input({ platforms: known<Platform[]>(["ios", "android"]) }));
+    expect(sections.map((s) => s.platform)).toEqual(SECTIONS.map((s) => s.platform));
+    for (const [i, s] of sections.entries()) {
+      expect(s.checks.map((c) => c.id)).toEqual(SECTIONS[i]!.checks.map((c) => c.id));
+    }
   });
 
   it("turns a check that throws into an unknown one, never losing the others", async () => {
@@ -267,17 +460,21 @@ describe("runChecks", () => {
     // secrets that isn't a list. Each check promises not to throw; the wrapper
     // exists because that promise is worth what the next edit makes it worth,
     // and a checklist that disappears is what teaches people to ignore it.
-    const checks = await runChecks(input({ secretKeys: null as unknown as string[] }));
-    expect(checks).toHaveLength(5);
-    const appStoreConnect = checks.find((c) => c.id === "app-store-connect")!;
+    const sections = await runChecklist(input({ secretKeys: null as unknown as string[] }));
+    const appStoreConnect = section(sections, "ios")!.checks.find((c) => c.id === "app-store-connect")!;
     expect(appStoreConnect.state).toBe("unknown");
     expect(appStoreConnect.detail).toMatch(/the check itself failed/);
     // The others are unharmed.
-    expect(checks.find((c) => c.id === "repository")!.state).toBe("ok");
+    expect(section(sections, "all")!.checks.find((c) => c.id === "repository")!.state).toBe("ok");
+  });
+
+  it("does not throw when nothing sensible was passed for the platforms", async () => {
+    const sections = await runChecklist(input({ platforms: null as unknown as Known<Platform[]> }));
+    expect(sections.map((s) => s.platform)).toEqual(["all"]);
   });
 
   it("gives every check a title", async () => {
-    const checks = await runChecks(input());
-    expect(checks.every((c) => c.title.length > 0)).toBe(true);
+    const sections = await runChecklist(input({ platforms: known<Platform[]>(["ios", "android"]) }));
+    expect(sections.flatMap((s) => s.checks).every((c) => c.title.length > 0)).toBe(true);
   });
 });

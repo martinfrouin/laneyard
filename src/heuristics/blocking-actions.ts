@@ -39,6 +39,26 @@ export const BLOCKING_RULES: BlockingRule[] = [
     because: "renews provisioning profiles, which needs an Apple account interactively",
     fix: "Use `match` in readonly mode instead, with profiles stored in a repository.",
   },
+  {
+    action: "cert",
+    because: "creates or downloads a signing certificate, which needs an Apple account interactively",
+    fix: "Use `match` in readonly mode instead, with certificates stored in a repository.",
+  },
+  // `deliver` renders an HTML summary and waits for a yes before uploading.
+  // Only reported when the lane says `force: false` outright: the default is
+  // not something the sidecar reports, and inventing one would be a guess.
+  {
+    action: "deliver",
+    when: { arg: "force", equals: false },
+    because: "shows a summary and waits for it to be confirmed before uploading",
+    fix: "Pass `force: true` so it uploads without asking.",
+  },
+  {
+    action: "upload_to_app_store",
+    when: { arg: "force", equals: false },
+    because: "shows a summary and waits for it to be confirmed before uploading",
+    fix: "Pass `force: true` so it uploads without asking.",
+  },
 ];
 
 /** What the sidecar's `uses` command reports for a single call: the action's

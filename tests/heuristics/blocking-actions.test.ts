@@ -34,4 +34,22 @@ describe("findBlockingActions", () => {
     expect(Array.isArray(BLOCKING_RULES)).toBe(true);
     expect(BLOCKING_RULES.find((r) => r.action === "sigh")).toBeDefined();
   });
+
+  it("reports cert, which asks for an Apple account", () => {
+    const findings = findBlockingActions([{ name: "cert", args: {} }]);
+    expect(findings.map((f) => f.action)).toEqual(["cert"]);
+    expect(findings[0]!.fix).toMatch(/match/);
+  });
+
+  it("reports an upload that waits for its summary to be confirmed", () => {
+    // `deliver` renders an HTML preview and waits for a yes unless `force` says
+    // otherwise. A lane that passes `force: false` explicitly means it.
+    const findings = findBlockingActions([{ name: "upload_to_app_store", args: { force: false } }]);
+    expect(findings.map((f) => f.action)).toEqual(["upload_to_app_store"]);
+    expect(findings[0]!.fix).toMatch(/force: true/);
+  });
+
+  it("says nothing about an upload that already passes force: true", () => {
+    expect(findBlockingActions([{ name: "deliver", args: { force: true } }])).toEqual([]);
+  });
 });

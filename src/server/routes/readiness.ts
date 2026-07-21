@@ -3,8 +3,11 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { FastifyInstance } from "fastify";
+import { glob } from "tinyglobby";
 import { Workspace } from "../../git/workspace.js";
-import { runChecks } from "../../heuristics/readiness.js";
+import { resolvePlatforms } from "../../heuristics/platforms.js";
+import type { FindPaths, Platform } from "../../heuristics/platforms.js";
+import { runChecklist } from "../../heuristics/readiness.js";
 import type { Known, LaneUses } from "../../heuristics/readiness.js";
 import type { AppContext } from "../app.js";
 
@@ -37,6 +40,12 @@ async function findFastlane(): Promise<string | null> {
     return null;
   }
 }
+
+/** The globbing `heuristics/platforms.ts` asks for, bound to the workspace. */
+const findIn =
+  (dir: string): FindPaths =>
+  (globs, { onlyDirectories }) =>
+    glob(globs, onlyDirectories ? { cwd: dir, onlyDirectories: true } : { cwd: dir, onlyFiles: true });
 
 const exists = async (path: string): Promise<boolean> =>
   access(path).then(
@@ -85,7 +94,17 @@ export async function registerReadinessRoutes(app: FastifyInstance, ctx: AppCont
             // tell", none of them is a 500.
             .catch((cause: unknown) => ({ ok: false as const, reason: (cause as Error).message }));
 
-    const checks = await runChecks({
+    // What the project builds for decides which half of the checklist applies.
+    // `laneyard.yml` answers on its own; without it the workspace is looked at,
+    // and an unreachable workspace is a "could not tell" rather than a claim
+    // that the repository holds neither an Xcode project nor a Gradle build.
+    const configured = resolved?.settings.platforms;
+    const platforms: Known<Platform[]> =
+      unreachable !== null && (configured === undefined || configured.length === 0)
+        ? { ok: false, reason: unreachable }
+        : { ok: true, value: await resolvePlatforms(configured, findIn(workspacePath)) };
+
+    const sections = await runChecklist({
       probeRepository: () => workspace.probeRemote(),
       dependencies: {
         workspace:
@@ -98,8 +117,9 @@ export async function registerReadinessRoutes(app: FastifyInstance, ctx: AppCont
       // Names only: the vault never hands a value to anything but a run.
       secretKeys: ctx.vault.list(slug).map((s) => s.key),
       uses,
+      platforms,
     });
 
-    return { checkedAt: new Date().toISOString(), checks };
+    return { checkedAt: new Date().toISOString(), sections };
   });
 }

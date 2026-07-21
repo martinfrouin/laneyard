@@ -7,7 +7,7 @@ import { ConfigStore } from "../../src/config/store.js";
 import { openDatabase } from "../../src/db/open.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { Vault } from "../../src/secrets/vault.js";
-import type { Check } from "../../src/heuristics/readiness.js";
+import type { Check, ReadinessSection } from "../../src/heuristics/readiness.js";
 import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
 /**
@@ -21,8 +21,16 @@ const FASTFILE = "lane :beta do\n  match(readonly: false)\nend\n";
 
 const USES = [{ lane: "beta", actions: [{ name: "match", args: { readonly: false } }] }];
 
-async function harness(options: { gitUrl?: string; uses?: () => Promise<unknown> } = {}) {
-  const origin = await makeOriginRepo({ "fastlane/Fastfile": FASTFILE });
+async function harness(
+  options: { gitUrl?: string; uses?: () => Promise<unknown>; files?: Record<string, string> } = {},
+) {
+  const origin = await makeOriginRepo({
+    "fastlane/Fastfile": FASTFILE,
+    // An Xcode project by default, so the iOS section applies: most cases below
+    // are about match and App Store Connect, and a repository with no platform
+    // at all would not be shown either of them.
+    ...(options.files ?? { "Sample.xcodeproj/project.pbxproj": "" }),
+  });
   const root = await tmpDir("laneyard-readiness-");
   const configPath = join(root, "config.yml");
   await writeFile(
@@ -61,6 +69,14 @@ async function login(app: Awaited<ReturnType<typeof harness>>["app"]): Promise<s
   return res.cookies[0]!.value;
 }
 
+interface Report {
+  checkedAt: string;
+  sections: ReadinessSection[];
+}
+
+/** Every line on the screen, whichever section it is under. */
+const allChecks = (body: Report): Check[] => body.sections.flatMap((s) => s.checks);
+
 const byId = (checks: Check[], id: string): Check => checks.find((c) => c.id === id)!;
 
 describe("readiness API", () => {
@@ -77,17 +93,18 @@ describe("readiness API", () => {
     expect(res.statusCode).toBe(404);
   }, SLOW);
 
-  it("returns the five checks and when they were run", async () => {
+  it("returns the shared and iOS checks, and when they were run", async () => {
     const { app } = await harness();
     const cookies = { laneyard_session: await login(app) };
     const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
 
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { checkedAt: string; checks: Check[] };
-    expect(body.checks).toHaveLength(5);
+    const body = res.json() as Report;
+    expect(body.sections.map((s) => s.platform)).toEqual(["all", "ios"]);
+    expect(allChecks(body)).toHaveLength(5);
     expect(Number.isNaN(Date.parse(body.checkedAt))).toBe(false);
     // The repository is a real local clone source: it answers without a password.
-    expect(byId(body.checks, "repository").state).toBe("ok");
+    expect(byId(allChecks(body), "repository").state).toBe("ok");
   }, SLOW);
 
   it("reports a lane that calls match with readonly: false and no MATCH_PASSWORD", async () => {
@@ -95,7 +112,7 @@ describe("readiness API", () => {
     const cookies = { laneyard_session: await login(app) };
     const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
 
-    const checks = (res.json() as { checks: Check[] }).checks;
+    const checks = allChecks(res.json() as Report);
     const match = byId(checks, "match");
     expect(match.state).toBe("warn");
     expect(match.detail).toMatch(/MATCH_PASSWORD/);
@@ -114,7 +131,7 @@ describe("readiness API", () => {
     });
 
     const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
-    const match = byId((res.json() as { checks: Check[] }).checks, "match");
+    const match = byId(allChecks(res.json() as Report), "match");
     // Still a warning, but a different one: the passphrase is there, the call
     // is not readonly. The checklist moved on to the next thing.
     expect(match.state).toBe("warn");
@@ -132,7 +149,7 @@ describe("readiness API", () => {
     const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
 
     expect(res.statusCode).toBe(200);
-    const checks = (res.json() as { checks: Check[] }).checks;
+    const checks = allChecks(res.json() as Report);
     expect(byId(checks, "match").state).toBe("unknown");
     expect(byId(checks, "match").detail).toMatch(/Ruby cannot load fastlane/);
     expect(byId(checks, "blocking-actions").state).toBe("unknown");
@@ -146,10 +163,52 @@ describe("readiness API", () => {
     const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
 
     expect(res.statusCode).toBe(200);
-    const checks = (res.json() as { checks: Check[] }).checks;
+    const body = res.json() as Report;
+    const checks = allChecks(body);
     expect(byId(checks, "repository").state).toBe("warn");
     expect(byId(checks, "dependencies").state).toBe("unknown");
-    expect(byId(checks, "match").state).toBe("unknown");
+    // No clone means no way to see what this project builds for either — and
+    // "no platform detected" would be a claim about a repository never read.
+    expect(body.sections.map((s) => s.platform)).toEqual(["all"]);
+    expect(byId(checks, "platforms").state).toBe("unknown");
+    // The clone's own words, repository URL redacted as everywhere else.
+    expect(byId(checks, "platforms").detail).toMatch(/could not tell: git clone/);
+    expect(byId(checks, "platforms").fix).toMatch(/laneyard\.yml/);
+  }, SLOW);
+
+  it("shows the Android checks, and none of the iOS ones, on a Gradle project", async () => {
+    // The defect this whole section exists for: an Android project told off for
+    // having no App Store Connect key. One irrelevant warning teaches someone
+    // to ignore the entire screen.
+    const { app } = await harness({
+      files: { "app/build.gradle": "" },
+      uses: async () => [{ lane: "beta", actions: [{ name: "gradle", args: { task: "assemble" } }] }],
+    });
+    const cookies = { laneyard_session: await login(app) };
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
+
+    const body = res.json() as Report;
+    expect(body.sections.map((s) => s.platform)).toEqual(["all", "android"]);
+    const ids = allChecks(body).map((c) => c.id);
+    expect(ids).toContain("android-keystore");
+    expect(ids).toContain("play-store");
+    expect(ids).not.toContain("app-store-connect");
+    expect(ids).not.toContain("match");
+  }, SLOW);
+
+  it("takes laneyard.yml's word over what the repository looks like", async () => {
+    // An Xcode project in the repository, and a laneyard.yml that says this is
+    // an Android build. The file wins: it was written on purpose.
+    const { app } = await harness({
+      files: { "Sample.xcodeproj/project.pbxproj": "", "laneyard.yml": "platforms: [android]\n" },
+      uses: async () => [{ lane: "beta", actions: [{ name: "gradle", args: {} }] }],
+    });
+    const cookies = { laneyard_session: await login(app) };
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
+
+    const body = res.json() as Report;
+    expect(body.sections.map((s) => s.platform)).toEqual(["all", "android"]);
+    expect(allChecks(body).map((c) => c.id)).not.toContain("app-store-connect");
   }, SLOW);
 
   it("is never computed on its own — only when asked for", async () => {
