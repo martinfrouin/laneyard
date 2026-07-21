@@ -7,6 +7,8 @@ export interface PtyRunOptions {
   env: NodeJS.ProcessEnv;
   onData: (chunk: string) => void;
   timeoutMs?: number;
+  /** Aborting stops the process, with the same escalation as the timeout. */
+  signal?: AbortSignal;
 }
 
 export interface PtyRunResult {
@@ -51,28 +53,42 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
 
   proc.onData(opts.onData);
 
+  /**
+   * SIGINT first so fastlane can clean up after itself; SIGKILL five seconds
+   * later if it will not. One path, so cancelling and timing out cannot drift
+   * apart — and so neither can leave the single worker blocked.
+   */
+  const stop = (): void => {
+    try {
+      proc.kill("SIGINT");
+    } catch {
+      /* already gone */
+    }
+    setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }, 5000);
+  };
+
+  opts.signal?.addEventListener("abort", stop, { once: true });
+
   const done = new Promise<PtyRunResult>((resolve) => {
     if (opts.timeoutMs !== undefined) {
       timer = setTimeout(() => {
         timedOut = true;
-        // SIGINT first: fastlane cleans up after itself. SIGKILL if it keeps stalling.
-        try {
-          proc.kill("SIGINT");
-        } catch {
-          /* the process may have died in the meantime */
-        }
-        setTimeout(() => {
-          try {
-            proc.kill("SIGKILL");
-          } catch {
-            /* same */
-          }
-        }, 5000);
+        stop();
       }, opts.timeoutMs);
     }
 
     proc.onExit(({ exitCode, signal }) => {
       if (timer) clearTimeout(timer);
+      // The listener would otherwise accumulate on every run sharing a
+      // long-lived signal (the queue's per-run AbortController is not one,
+      // but nothing here should depend on that).
+      opts.signal?.removeEventListener("abort", stop);
       // `waitpid` only reports an exit code for a normal end: a process
       // killed by a signal leaves 0, which would pass a cancellation off
       // as a success. We apply the shell convention, 128 + signal, so an

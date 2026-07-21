@@ -34,10 +34,12 @@ export interface ExecuteRunOptions {
   maskedValues?: string[];
   /** Called for each output fragment, with its position in the log. */
   onChunk: (chunk: string, offset: number) => void;
+  /** Aborting stops the run: the pseudo-terminal is signalled, as on timeout. */
+  signal?: AbortSignal;
 }
 
 export interface ExecuteRunResult {
-  status: "success" | "failed";
+  status: "success" | "failed" | "cancelled";
 }
 
 
@@ -78,16 +80,30 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   // without passing through the stream above, so it needs its own, one-shot pass.
   const hide = (text: string): string => scrub(text, opts.maskedValues ?? []);
 
-  const fail = async (message: string): Promise<ExecuteRunResult> => {
+  // Shared by every early exit, so flushing and closing the log writer cannot
+  // drift between the failure path and the two cancellation checkpoints below.
+  const finishAs = async (
+    status: "failed" | "cancelled",
+    message: string,
+  ): Promise<ExecuteRunResult> => {
     await emit(`\n${message}\n`);
     await emitRest();
     await writer.close();
-    runs.finish(runId, { status: "failed", exitCode: null, errorSummary: hide(message) });
-    return { status: "failed" };
+    runs.finish(runId, { status, exitCode: null, errorSummary: hide(message) });
+    return { status };
   };
+
+  const fail = (message: string): Promise<ExecuteRunResult> => finishAs("failed", message);
 
   // --- Preparation --------------------------------------------------------
   runs.setStatus(runId, "preparing");
+
+  // Cancelled before it even started: no point cloning or fetching a
+  // workspace nobody wants built anymore.
+  if (opts.signal?.aborted) {
+    return finishAs("cancelled", "Cancelled");
+  }
+
   const workspace = new Workspace(opts.workspacePath, opts.gitUrl, opts.gitAuth);
 
   let commitSha: string;
@@ -108,6 +124,11 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     settings = await opts.resolveSettings();
   } catch (cause) {
     return fail(`Unreadable project settings: ${(cause as Error).message}`);
+  }
+
+  // Cancelled during preparation: fastlane never gets to start.
+  if (opts.signal?.aborted) {
+    return finishAs("cancelled", "Cancelled");
   }
 
   // --- Execution -----------------------------------------------------------
@@ -137,6 +158,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     },
     onData: (chunk) => void emit(chunk),
     timeoutMs: settings.timeout_minutes * 60_000,
+    signal: opts.signal,
   });
 
   const outcome = await done;
@@ -160,6 +182,18 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   if (outcome.exitCode === 0 && !outcome.timedOut) {
     runs.finish(runId, { status: "success", exitCode: 0, errorSummary: null });
     return { status: "success" };
+  }
+
+  if (opts.signal?.aborted) {
+    // Checked ahead of the failure case: the SIGINT/SIGKILL escalation leaves
+    // fastlane with a nonzero exit code, which would otherwise read as a crash
+    // rather than the cancellation it actually was.
+    runs.finish(runId, {
+      status: "cancelled",
+      exitCode: outcome.exitCode,
+      errorSummary: "Cancelled",
+    });
+    return { status: "cancelled" };
   }
 
   const summary = outcome.timedOut

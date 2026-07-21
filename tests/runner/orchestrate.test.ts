@@ -210,4 +210,65 @@ describe("executeRun", () => {
 
     expect(broadcast.join("")).not.toContain("s3cr3t-value");
   }, 60_000);
+
+  it("stops a running build and records it as cancelled", async () => {
+    const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n", ".gitignore": "build/\n" });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    const controller = new AbortController();
+    // The `slow` scenario sleeps; abort once output proves it really started.
+    const done = executeRun({
+      runId, runs, logs,
+      workspacePath: join(root, "workspaces", "p"),
+      artifactsDir: join(root, "artifacts", String(runId)),
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => SETTINGS,
+      env: { PATH: `${FAKE_DIR}:${process.env["PATH"]}`, FAKE_FASTLANE_SCENARIO: "slow" },
+      signal: controller.signal,
+      onChunk: (chunk) => {
+        if (chunk.includes("Compiling")) controller.abort();
+      },
+    });
+
+    const result = await done;
+    expect(result.status).toBe("cancelled");
+    expect(runs.get(runId)?.status).toBe("cancelled");
+    // Cancelling is not failing: the summary must not read like a crash.
+    expect(runs.get(runId)?.errorSummary).toMatch(/cancel/i);
+  }, 60_000);
+
+  it("cancels before fastlane starts without leaving the run behind", async () => {
+    // Aborting during preparation must still produce a finished run, not a ghost.
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: join(root, "ws"),
+      artifactsDir: join(root, "art"),
+      // Bogus on purpose: if the abort check were missing, this would fail
+      // for a git reason instead, which would make the assertion pass for
+      // the wrong reason.
+      gitUrl: "/nexiste/pas/depot.git",
+      branch: "main",
+      resolveSettings: async () => SETTINGS,
+      env: {},
+      signal: controller.signal,
+      onChunk: () => {},
+    });
+
+    expect(result.status).toBe("cancelled");
+    expect(runs.get(runId)?.status).toBe("cancelled");
+  }, 60_000);
 });
