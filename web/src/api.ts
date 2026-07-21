@@ -46,6 +46,22 @@ export interface RunDetail {
   artifacts: { id: number; filename: string; size: number; kind: string }[];
 }
 
+/**
+ * What removing a project left behind.
+ *
+ * Every field is something the action did *not* do: history it kept, files it
+ * left where they were. The interface states them before asking, and names them
+ * afterwards so they can be removed by hand.
+ */
+export interface ProjectRemoval {
+  slug: string;
+  name: string;
+  /** Runs still in the database, each reachable at its own URL. */
+  runsKept: number;
+  /** Absolute paths — the clone, then one folder per run that produced artifacts. */
+  leftOnDisk: string[];
+}
+
 /** What a listing may expose. There is deliberately no value here. */
 export interface SecretSummary {
   key: string;
@@ -111,6 +127,11 @@ export const api = {
   runsOf: (slug: string) => fetch(`/api/projects/${slug}/runs`).then(json<RunDetail[]>),
   run: (id: number) => fetch(`/api/runs/${id}`).then(json<RunDetail>),
   log: (id: number, from = 0) => fetch(`/api/runs/${id}/log?from=${from}`).then((r) => r.text()),
+
+  // Refused with 409 while a run of that project is in flight, and the sentence
+  // saying so is the answer — `json` carries it through to the screen.
+  removeProject: (slug: string) =>
+    fetch(`/api/projects/${slug}`, { method: "DELETE" }).then(json<ProjectRemoval>),
 
   secrets: (slug: string) => fetch(`/api/projects/${slug}/secrets`).then(json<SecretSummary[]>),
 

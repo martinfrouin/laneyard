@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../app.js";
+import { removeProjectFromConfig } from "../../cli/setup.js";
 
 export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   app.get("/api/projects", async () =>
@@ -13,6 +15,50 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
       };
     }),
   );
+
+  /**
+   * Stops showing a project. It is the one destructive route in the product,
+   * and what it does not destroy is most of the point:
+   *
+   *  - the project's block leaves config.yml, through the YAML document so the
+   *    rest of a hand-written file is untouched;
+   *  - its runs stay in the database, still reachable at their own URL — the
+   *    history of what this machine built is not the project's to take away;
+   *  - the clone and the artifacts stay on disk, named in the answer so they
+   *    can be removed by hand. Deleting files someone may still want, from a
+   *    web page, on one click, is not a thing to do.
+   */
+  app.delete("/api/projects/:slug", async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    const entry = ctx.config.project(slug);
+    if (!entry) return reply.code(404).send({ error: "Unknown project" });
+
+    // A run that has begun is reading the workspace this project points at.
+    // Queued runs are not: the queue already fails a run whose project went
+    // away, so waiting on them would only mean refusing for longer.
+    if (ctx.runs.hasActiveRun(slug)) {
+      return reply.code(409).send({
+        error: `"${slug}" has a run in flight. Wait for it to finish, or cancel it, then remove the project.`,
+      });
+    }
+
+    const removed = await removeProjectFromConfig(ctx.config.configPath(), slug);
+    if (!removed) return reply.code(404).send({ error: "Unknown project" });
+
+    // The file is watched, but on a debounce: reloading here is what makes the
+    // very next request — the listing this page is about to ask for — truthful.
+    await ctx.config.load();
+
+    // -1 is SQLite's "no limit": the answer names every artifact folder left
+    // behind, and a project with sixty runs must not be told about fifty of them.
+    const runs = ctx.runs.listByProject(slug, -1);
+    const leftOnDisk = [
+      ctx.workspacePath(slug),
+      ...runs.map((run) => ctx.artifactsDir(run.id)),
+    ].filter((path) => existsSync(path));
+
+    return reply.send({ slug, name: entry.name, runsKept: runs.length, leftOnDisk });
+  });
 
   app.get("/api/projects/:slug/lanes", async (req, reply) => {
     const { slug } = req.params as { slug: string };

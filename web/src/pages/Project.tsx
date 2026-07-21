@@ -16,8 +16,9 @@ export function Project() {
   const onFastfile = useMatch("/p/:slug/fastfile") !== null;
   const onSecrets = useMatch("/p/:slug/secrets") !== null;
   const onReadiness = useMatch("/p/:slug/readiness") !== null;
+  const onSettings = useMatch("/p/:slug/settings") !== null;
   // Every tab but the first renders the nested route and nothing of its own.
-  const onSubTab = onFastfile || onSecrets || onReadiness;
+  const onSubTab = onFastfile || onSecrets || onReadiness || onSettings;
 
   useEffect(() => {
     // Reading lanes means going out to the repository. On another tab nobody is
@@ -60,6 +61,9 @@ export function Project() {
       </NavLink>
       <NavLink to={`/p/${slug}/readiness`} className={({ isActive }) => (isActive ? "current" : "")}>
         readiness
+      </NavLink>
+      <NavLink to={`/p/${slug}/settings`} className={({ isActive }) => (isActive ? "current" : "")}>
+        settings
       </NavLink>
     </nav>
   );

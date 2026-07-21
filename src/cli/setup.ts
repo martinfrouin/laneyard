@@ -63,7 +63,43 @@ export async function addProjectToConfig(path: string, entry: NewProjectEntry): 
   }
 
   seq.add(doc.createNode(entry));
-  await writeFile(path, doc.toString(), "utf8");
+  await writeFile(path, serialize(doc), "utf8");
+}
+
+/**
+ * The document back as text, with the line width left alone.
+ *
+ * The default folds anything past eighty columns, which means writing one
+ * project rewraps the password hash someone else's line already held — a
+ * hand-written file coming back out changed where nobody touched it. A git url
+ * or a scrypt hash is a single token; breaking it makes the file harder to read
+ * and harder to grep, and gains nothing.
+ */
+const serialize = (doc: Document.Parsed | Document): string => doc.toString({ lineWidth: 0 });
+
+/**
+ * Takes a project's block out of config.yml, leaving the rest of the file alone.
+ *
+ * Same requirement as `addProjectToConfig`, and for the same reason: the file is
+ * hand-written, so the edit goes through the YAML document and every comment,
+ * key order and blank line that isn't this project's survives it.
+ *
+ * Returns false when no block carried that slug, so the caller can answer 404
+ * rather than rewrite the file to say the same thing it already said.
+ */
+export async function removeProjectFromConfig(path: string, slug: string): Promise<boolean> {
+  const doc = parseDocument(await readFile(path, "utf8"));
+  const projects = doc.getIn(["projects"]);
+  if (!(projects instanceof YAMLSeq)) return false;
+
+  const at = projects.items.findIndex(
+    (item) => (item as { get?: (k: string) => unknown }).get?.("slug") === slug,
+  );
+  if (at === -1) return false;
+
+  projects.items.splice(at, 1);
+  await writeFile(path, serialize(doc), "utf8");
+  return true;
 }
 
 /** Entry point for `laneyard setup`. */

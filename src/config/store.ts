@@ -50,6 +50,17 @@ export class ConfigStore {
     };
   }
 
+  /**
+   * The file this store reads.
+   *
+   * Exposed because removing a project edits that very file: the route would
+   * otherwise have to rebuild the path from the data root and hope the two
+   * agree, which is exactly the kind of duplicated assumption that drifts.
+   */
+  configPath(): string {
+    return this.path;
+  }
+
   server(): ServerConfig["server"] | null {
     return this.config?.server ?? null;
   }

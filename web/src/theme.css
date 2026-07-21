@@ -253,6 +253,31 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
    The grammar is unchanged — marker, title, dim detail. */
 .checks .grow { white-space: normal; overflow: visible; }
 
+/* --- Settings ------------------------------------------------------------- */
+
+/* The consequences of removing a project, and the paths it leaves behind. Both
+   are sentences and paths, so like the checklist they wrap rather than being
+   cut at an ellipsis: a path you cannot read cannot be typed into a shell. */
+.consequences .grow { white-space: normal; overflow: visible; }
+.consequences .path { color: var(--text-bright); word-break: break-all; }
+
+/* Typing a name is the confirmation. It sits on its own line, apart from the
+   list above it, because it is the moment the reading stops and the act begins. */
+.confirm-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.confirm-form input { width: 24ch; }
+
+/* The one control in the product that destroys something. It is red only once
+   it would actually do something — a button that shouts before it can act
+   teaches people to ignore it. */
+.confirm-form button:not(:disabled) { color: var(--error); border-color: var(--error); }
+
 /* --- Fastfile editor ------------------------------------------------------- */
 
 /* The bar above the editor: state on the left, the one control on the right.
