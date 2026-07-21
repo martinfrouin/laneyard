@@ -14,7 +14,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
   return (
     <div className="login">
       <form className="panel" onSubmit={(e) => void submit(e)}>
-        <p className="section accent">laneyard</p>
+        <p className="brand">laneyard</p>
         <label>
           mot de passe{" "}
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
