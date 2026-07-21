@@ -41,6 +41,8 @@ src/
     report.ts        Lecture de fastlane/report.xml
     artifacts.ts     Collecte par motifs
     orchestrate.ts   Enchaînement complet d'un run et transitions d'état
+  sidecar/
+    ruby-env.ts      Résolution d'un environnement Ruby capable de charger fastlane
   cli/
     detect.ts        Inspection d'un projet existant : fastlane, plateforme, git
     add.ts           Écriture du bloc projet dans config.yml, commentaires préservés
@@ -1172,9 +1174,157 @@ git commit -m "feat(git): clone, fetch et checkout du workspace"
 ### Task 6 : Sidecar Ruby — commande `lanes`
 
 **Files:**
-- Create: `ruby/introspect.rb`, `tests/ruby/introspect.test.ts`
+- Create: `src/sidecar/ruby-env.ts`, `tests/sidecar/ruby-env.test.ts`, `ruby/introspect.rb`, `tests/ruby/introspect.test.ts`
 
-- [ ] **Step 1 : Écrire le test qui échoue**
+#### Pourquoi un résolveur d'environnement Ruby
+
+Le sidecar suppose que `require "fastlane"` fonctionne. Ce n'est vrai que si fastlane est un gem
+visible du Ruby courant. Or l'installation la plus répandue sur macOS, celle d'Homebrew, place
+fastlane dans un `GEM_HOME` privé et fournit un lanceur qui le positionne avant d'exécuter :
+
+```bash
+GEM_HOME="${HOME}/.local/share/fastlane/4.0.0" exec ".../libexec/bin/fastlane" "$@"
+```
+
+Avec ce type d'installation, `ruby -e 'require "fastlane"'` échoue. Le mode `system` serait donc
+inutilisable sans que rien n'explique pourquoi. En mode `bundle`, `bundle exec` règle la question
+seul — le problème ne concerne que `system`.
+
+La résolution procède par essais, du plus simple au plus spécifique, et le résultat est mémorisé :
+
+1. l'environnement courant, qui suffit dès que fastlane est installé normalement (`gem install`,
+   rbenv, rvm, asdf) ;
+2. à défaut, l'environnement extrait du lanceur `fastlane` s'il s'agit d'un script shell — cas
+   Homebrew ;
+3. sinon, un échec explicite disant quoi faire.
+
+- [ ] **Step 1 : Écrire les tests du résolveur**
+
+`tests/sidecar/ruby-env.test.ts` :
+
+```ts
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { describe, expect, it } from "vitest";
+import { resolveRubyEnv } from "../../src/sidecar/ruby-env.js";
+
+const exec = promisify(execFile);
+
+describe("resolveRubyEnv", () => {
+  it("rend un environnement où Ruby sait charger fastlane", async () => {
+    const resolved = await resolveRubyEnv();
+    expect(resolved).not.toBeNull();
+
+    const { stdout } = await exec("ruby", ["-e", 'require "fastlane"; print "ok"'], {
+      env: resolved!.env,
+      timeout: 180_000,
+    });
+    expect(stdout).toBe("ok");
+  }, 240_000);
+
+  it("indique d'où vient l'environnement retenu", async () => {
+    const resolved = await resolveRubyEnv();
+    expect(["process", "launcher"]).toContain(resolved!.source);
+  }, 240_000);
+
+  it("mémorise le résultat plutôt que de resonder à chaque appel", async () => {
+    const a = await resolveRubyEnv();
+    const b = await resolveRubyEnv();
+    expect(b).toBe(a);
+  }, 240_000);
+});
+```
+
+- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+
+Run: `npm test -- tests/sidecar/ruby-env.test.ts`
+Expected: échec — module introuvable.
+
+- [ ] **Step 3 : Implémenter le résolveur**
+
+`src/sidecar/ruby-env.ts` :
+
+```ts
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const exec = promisify(execFile);
+
+export interface RubyEnv {
+  env: NodeJS.ProcessEnv;
+  /** `process` : Ruby savait déjà. `launcher` : environnement repris du lanceur fastlane. */
+  source: "process" | "launcher";
+}
+
+async function canRequireFastlane(env: NodeJS.ProcessEnv): Promise<boolean> {
+  try {
+    await exec("ruby", ["-e", 'require "fastlane"'], { env, timeout: 180_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reconstitue l'environnement du lanceur `fastlane` quand c'en est un script shell.
+ *
+ * On n'exécute pas le lanceur : on relit ses affectations `GEM_HOME` et `GEM_PATH`
+ * et on les fait évaluer par bash, qui sait développer `${HOME}` et les valeurs par
+ * défaut. Approche volontairement étroite — deux variables, rien d'autre.
+ */
+async function envFromLauncher(): Promise<NodeJS.ProcessEnv | null> {
+  const script = `
+    shim=$(command -v fastlane) || exit 1
+    head -c 2 "$shim" | grep -q '#!' || exit 1
+    eval "$(grep -oE '(GEM_HOME|GEM_PATH)="[^"]*"' "$shim" | sed 's/^/export /')" || exit 1
+    [ -n "$GEM_HOME" ] || exit 1
+    printf '%s\\n%s\\n' "$GEM_HOME" "$GEM_PATH"
+  `;
+  try {
+    const { stdout } = await exec("bash", ["-c", script], { timeout: 30_000 });
+    const [gemHome, gemPath] = stdout.split("\n");
+    if (!gemHome) return null;
+    return { ...process.env, GEM_HOME: gemHome, GEM_PATH: gemPath || gemHome };
+  } catch {
+    return null;
+  }
+}
+
+let cached: Promise<RubyEnv | null> | null = null;
+
+/**
+ * Trouve un environnement dans lequel `ruby` peut charger fastlane, ou null.
+ *
+ * Le résultat est mémorisé : sonder coûte plusieurs secondes, fastlane étant lent
+ * à charger, et l'installation ne change pas en cours d'exécution.
+ */
+export function resolveRubyEnv(): Promise<RubyEnv | null> {
+  cached ??= (async () => {
+    if (await canRequireFastlane(process.env)) {
+      return { env: process.env, source: "process" as const };
+    }
+    const env = await envFromLauncher();
+    if (env && (await canRequireFastlane(env))) {
+      return { env, source: "launcher" as const };
+    }
+    return null;
+  })();
+  return cached;
+}
+
+/** Message unique, pour ne pas décrire le problème différemment à chaque endroit. */
+export const FASTLANE_UNAVAILABLE =
+  "Ruby ne parvient pas à charger fastlane. Installez-le pour le Ruby courant " +
+  "(`gem install fastlane`), ou déclarez un Gemfile dans le projet et passez le " +
+  "réglage `runtime` à `bundle`.";
+```
+
+- [ ] **Step 4 : Lancer les tests du résolveur**
+
+Run: `npm test -- tests/sidecar/ruby-env.test.ts`
+Expected: 3 tests passés. Le premier appel prend plusieurs secondes — fastlane est lent à charger.
+
+- [ ] **Step 5 : Écrire les tests du sidecar**
 
 `tests/ruby/introspect.test.ts` :
 
@@ -1184,6 +1334,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { resolveRubyEnv } from "../../src/sidecar/ruby-env.js";
 import { tmpDir } from "../fixtures/repos.js";
 
 const exec = promisify(execFile);
@@ -1197,9 +1348,14 @@ async function projectWithFastfile(content: string): Promise<string> {
 }
 
 async function introspect(dir: string, cmd: string): Promise<unknown> {
+  // Le sidecar tourne ici sans bundle : il lui faut l'environnement résolu.
+  const ruby = await resolveRubyEnv();
+  if (!ruby) throw new Error("fastlane introuvable pour le Ruby courant");
+
   const { stdout } = await exec("ruby", [SCRIPT, cmd, "--fastlane-dir", "fastlane"], {
     cwd: dir,
-    timeout: 120_000,
+    env: ruby.env,
+    timeout: 180_000,
   });
   return JSON.parse(stdout);
 }
@@ -1440,6 +1596,7 @@ import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { FASTLANE_UNAVAILABLE, resolveRubyEnv } from "./ruby-env.js";
 
 const exec = promisify(execFile);
 
@@ -1467,9 +1624,19 @@ export function makeInvoke(runtime: "bundle" | "system"): Invoke {
         ? ["bundle", ["exec", "ruby", SCRIPT, command, "--fastlane-dir", fastlaneDir]]
         : ["ruby", [SCRIPT, command, "--fastlane-dir", fastlaneDir]];
 
+    // En mode bundle, `bundle exec` fournit déjà le bon environnement. En mode
+    // system, il faut le trouver : selon l'installation, `ruby` ne voit pas fastlane.
+    let env = process.env;
+    if (runtime === "system") {
+      const ruby = await resolveRubyEnv();
+      if (!ruby) return { ok: false, error: FASTLANE_UNAVAILABLE };
+      env = ruby.env;
+    }
+
     try {
-      const { stdout } = await exec(bin, args, {
+      const { stdout } = await exec(bin, args as string[], {
         cwd,
+        env,
         timeout: 180_000,
         maxBuffer: 64 * 1024 * 1024,
       });
