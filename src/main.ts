@@ -34,8 +34,9 @@ export async function createServerFromConfig(root: string): Promise<Started> {
 
   const db = openDatabase(join(root, "laneyard.db"));
 
-  // No run can survive the shutdown of the process that carried it.
-  new RunStore(db).interruptActive();
+  // No run that had begun can survive the shutdown of the process that carried
+  // it. Queued runs never began, so they stay queued for the next start.
+  new RunStore(db).interruptInFlight();
 
   const cache = new CacheStore(db);
   const vault = await Vault.open(root, new SecretStore(db));

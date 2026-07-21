@@ -9,8 +9,8 @@ export type RunStatus =
   | "cancelled"
   | "interrupted";
 
-/** A run is active until it reaches a terminal state. */
-const ACTIVE: RunStatus[] = ["queued", "preparing", "running"];
+/** Statuses that mean a run has begun and cannot survive the process that started it. */
+const IN_FLIGHT: RunStatus[] = ["preparing", "running"];
 
 export interface Run {
   id: number;
@@ -139,12 +139,48 @@ export class RunStore {
       .run(r.status, now(), r.exitCode, r.errorSummary, id);
   }
 
-  /** At startup: no run can still be in progress, the process that carried it is dead. */
-  interruptActive(): number {
-    const placeholders = ACTIVE.map(() => "?").join(", ");
+  /** Runs waiting to start, oldest first. Insertion order is the queue. */
+  queued(): Run[] {
+    const rows = this.db
+      .prepare("SELECT * FROM run WHERE status = 'queued' ORDER BY id")
+      .all() as RunRow[];
+    return rows.map(toRun);
+  }
+
+  /** 1 for the next to start, null if the run is not waiting. */
+  queuePosition(id: number): number | null {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS ahead FROM run
+         WHERE status = 'queued' AND id <= ?
+           AND EXISTS (SELECT 1 FROM run r2 WHERE r2.id = ? AND r2.status = 'queued')`,
+      )
+      .get(id, id) as { ahead: number };
+    return row.ahead === 0 ? null : row.ahead;
+  }
+
+  /** How many runs have begun. The worker consults it before taking the next. */
+  activeCount(): number {
+    const placeholders = IN_FLIGHT.map(() => "?").join(", ");
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM run WHERE status IN (${placeholders})`)
+      .get(...IN_FLIGHT) as { n: number };
+    return row.n;
+  }
+
+  /**
+   * Marks as interrupted every run that had begun, leaving queued ones alone.
+   *
+   * A run that started cannot survive the process that spawned it — its
+   * pseudo-terminal died with it. A queued run never began: it still means
+   * exactly what it meant, and dropping it would be a silent surprise for
+   * someone who queued three builds and restarted the server.
+   */
+  interruptInFlight(): number {
+    const placeholders = IN_FLIGHT.map(() => "?").join(", ");
     const res = this.db
       .prepare(`UPDATE run SET status = 'interrupted', finished_at = ? WHERE status IN (${placeholders})`)
-      .run(now(), ...ACTIVE);
+      .run(now(), ...IN_FLIGHT);
     return res.changes;
   }
 

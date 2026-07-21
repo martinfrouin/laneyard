@@ -41,9 +41,54 @@ describe("RunStore", () => {
     const s = store();
     const id = s.create({ projectSlug: "p", lane: "a", platform: null, params: {} });
     s.markRunning(id, { branch: "main", commitSha: "x" });
-    expect(s.interruptActive()).toBe(1);
+    expect(s.interruptInFlight()).toBe(1);
     expect(s.get(id)?.status).toBe("interrupted");
-    expect(s.interruptActive()).toBe(0);
+    expect(s.interruptInFlight()).toBe(0);
+  });
+
+  it("lists queued runs oldest first, whatever the project", () => {
+    const s = store();
+    const a = s.create({ projectSlug: "one", lane: "beta", platform: null, params: {} });
+    const b = s.create({ projectSlug: "two", lane: "beta", platform: null, params: {} });
+    const c = s.create({ projectSlug: "one", lane: "release", platform: null, params: {} });
+    s.markRunning(b, { branch: "main", commitSha: "x" });
+
+    // b has started, so it is no longer waiting; a queued before c.
+    expect(s.queued().map((r) => r.id)).toEqual([a, c]);
+  });
+
+  it("reports where a run sits in the queue", () => {
+    const s = store();
+    const a = s.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+    const b = s.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    expect(s.queuePosition(a)).toBe(1);
+    expect(s.queuePosition(b)).toBe(2);
+    s.setStatus(a, "running");
+    expect(s.queuePosition(b)).toBe(1);
+    expect(s.queuePosition(a)).toBeNull();
+  });
+
+  it("keeps queued runs across a restart and interrupts only what was in flight", () => {
+    const s = store();
+    const waiting = s.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+    const started = s.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+    s.markRunning(started, { branch: "main", commitSha: "x" });
+
+    // A queued run never began: losing it on restart would be a silent surprise.
+    expect(s.interruptInFlight()).toBe(1);
+    expect(s.get(started)?.status).toBe("interrupted");
+    expect(s.get(waiting)?.status).toBe("queued");
+  });
+
+  it("counts what is running, so the worker knows whether the machine is busy", () => {
+    const s = store();
+    expect(s.activeCount()).toBe(0);
+    const id = s.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+    s.markRunning(id, { branch: "main", commitSha: "x" });
+    expect(s.activeCount()).toBe(1);
+    s.finish(id, { status: "success", exitCode: 0, errorSummary: null });
+    expect(s.activeCount()).toBe(0);
   });
 
   it("records steps and artifacts attached to the run", () => {
