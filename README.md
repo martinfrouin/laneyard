@@ -154,15 +154,29 @@ Read this before putting Laneyard on a network.
   put it behind a VPN or an SSH tunnel.
 - **The password** is stored as an scrypt hash and repeated failures are throttled. Sessions live
   in memory and do not survive a restart.
-- **There is no secret vault yet.** Today, fastlane sees the environment the Laneyard process was
-  started with, so credentials are managed the way you already manage them — an `.env` read by
-  your Fastfile, the system keychain, or exported variables. Do not put secrets in `config.yml`.
-- **Logs are not redacted yet.** A run's full output is written to disk under `~/.laneyard/logs/`.
-  Assume anything fastlane prints is stored in the clear. Laneyard does remove its own git remote
-  URL from error messages, so a token embedded in a repository URL does not leak that way.
+- **Secrets are encrypted at rest.** Values are stored with AES-256-GCM under a key kept in
+  `~/.laneyard/key` — outside the database, mode `600`, and Laneyard refuses to start if anyone
+  else can read it. Someone who walks off with `laneyard.db` gets ciphertext. Nothing else in the
+  process holds plaintext: the store, the API and the interface deal in names only, and no route
+  ever sends a value back — which is why the Secrets tab has no reveal button.
+- **Masked values are removed from output before it is written, not when it is displayed.** The
+  substitution happens once, at the point where a run's output fans out, so the log file on disk,
+  the live stream to your browser and the stored error summary all contain `••••••` and never the
+  value. It survives being split across two chunks of terminal output.
+- **Do not put secrets in `config.yml`.** It is a plain file with ordinary permissions. Use
+  `laneyard secret set` or the Secrets tab.
 
-The encrypted vault and log redaction are the next milestone, and the reason this section is
-this blunt.
+What this does *not* cover, stated plainly:
+
+- **Git credentials are not in the vault.** `git_auth` points at an SSH key on disk by path, and a
+  `token` kind is declared but not yet implemented. Laneyard removes the configured repository URL
+  from its own git error messages — so a token embedded in an HTTPS URL does not leak that way —
+  but that is one string, not a vault.
+- **A value shorter than four characters is refused, not protected.** Removing a two-character
+  string from a log would shred the output while hiding nothing, so Laneyard says no rather than
+  pretending. Store it unmasked if it genuinely does not matter.
+- **Anything fastlane prints that is not a stored secret is stored in the clear**, under
+  `~/.laneyard/logs/`.
 
 ## Status
 
@@ -171,7 +185,7 @@ this blunt.
 - `✓` declare a project, clone it, list its lanes, run one, watch it live, download the artifact
 - `✓` configuration entirely in files you can version and back up
 - `✓` adopt an existing fastlane project with one command
-- `▸` encrypted secret vault and log redaction
+- `✓` encrypted secret vault and log redaction
 - `▸` build queue, cancellation, timeouts surfaced in the UI
 - `○` a checklist that gets a project running unattended
 - `○` Fastfile editor in the browser

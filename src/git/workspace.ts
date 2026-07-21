@@ -35,8 +35,9 @@ export class Workspace {
    *
    * An HTTPS URL can carry a password — `https://user:token@github.com/…`
    * is perfectly legal in `config.yml`. But git errors end up in the run's
-   * log file. General secret redaction comes at the next milestone; this
-   * particular leak comes from our own formatting, and is fixed here.
+   * log file. The vault's redaction does not help here: the repository URL is
+   * configuration, not a stored secret, so this leak — which comes from our own
+   * formatting — has to be closed on the spot.
    */
   private redact(text: string): string {
     return text.split(this.gitUrl).join("<repository>");
