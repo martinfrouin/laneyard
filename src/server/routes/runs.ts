@@ -48,7 +48,7 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
       },
       env: process.env,
       onChunk: (chunk, offset) => app.broadcastRunChunk?.(id, chunk, offset),
-    });
+    }).then((r) => ctx.sockets?.finish(id, r.status));
 
     return reply.code(201).send({ id });
   });
