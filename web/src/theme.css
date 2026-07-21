@@ -110,7 +110,10 @@ code { color: var(--text-bright); }
 
 .shell {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  /* `minmax(0, 1fr)` and not `1fr`: a grid column refuses to shrink below its
+     content by default, and the terminal holds very long lines. Without this the
+     whole page gains a horizontal scrollbar and the layout is pushed off screen. */
+  grid-template-columns: 240px minmax(0, 1fr);
   grid-template-rows: 32px 1fr;
   height: 100vh;
 }
@@ -136,6 +139,7 @@ code { color: var(--text-bright); }
 }
 
 .shell > main {
+  min-width: 0;
   overflow: auto;
   padding: 16px;
 }
@@ -205,9 +209,11 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
 
 .run-body {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  /* Same reason as `.shell`: the terminal column must be allowed to shrink. */
+  grid-template-columns: 260px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+  min-width: 0;
 }
 
 .steps > li { display: flex; gap: 8px; padding: 2px 8px; }
