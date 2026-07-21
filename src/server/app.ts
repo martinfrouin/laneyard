@@ -16,6 +16,7 @@ import type { Lane } from "../sidecar/lanes.js";
 import type { LaneUses } from "../sidecar/uses.js";
 import type { Vault } from "../secrets/vault.js";
 import { LoginThrottle, SESSION_COOKIE, SessionStore, verifyPassword } from "./auth.js";
+import { registerFastfileRoutes } from "./routes/fastfile.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerReadinessRoutes } from "./routes/readiness.js";
 import { registerRunRoutes } from "./routes/runs.js";
@@ -191,6 +192,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerRunRoutes(app, ctx);
   await registerSecretRoutes(app, ctx);
   await registerReadinessRoutes(app, ctx);
+  await registerFastfileRoutes(app, ctx);
 
   // Resolved from the module's location, not from the data folder:
   // `deps.root` is ~/.laneyard, the built SPA lives in the repository. Two

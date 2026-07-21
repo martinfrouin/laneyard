@@ -64,7 +64,10 @@ describe("detectProject", () => {
     const d = await detectProject(clone);
     expect(d.gitUrl).toBe(origin);
     expect(d.defaultBranch).toBe("main");
-  });
+    // A real git clone, like the rest of the suite's git-backed tests: the
+    // default 5s budget is tight once the whole suite runs its git commands
+    // concurrently.
+  }, 30_000);
 
   it("derives a slug from the folder name", async () => {
     const dir = await projectDir({ "fastlane/Fastfile": "" });

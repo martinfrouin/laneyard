@@ -169,6 +169,21 @@ export class RunStore {
   }
 
   /**
+   * True if this project has a run that has begun and not yet finished.
+   *
+   * Used to refuse a Fastfile write while it's true: that run is reading the
+   * very file the write would replace, the same reason `prepare` refuses to
+   * touch a dirty workspace.
+   */
+  hasActiveRun(slug: string): boolean {
+    const placeholders = IN_FLIGHT.map(() => "?").join(", ");
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM run WHERE project_slug = ? AND status IN (${placeholders})`)
+      .get(slug, ...IN_FLIGHT) as { n: number };
+    return row.n > 0;
+  }
+
+  /**
    * Marks as interrupted every run that had begun, leaving queued ones alone.
    *
    * A run that started cannot survive the process that spawned it — its
