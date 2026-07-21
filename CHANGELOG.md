@@ -1,10 +1,9 @@
 # Changelog
 
-## 0.2.1 — unreleased
+## 0.3.0 — unreleased
 
-Everything below shipped in 0.2.0 except the three entries under *Changed*, which landed just
-after it went out. If you installed 0.2.0, `laneyard add` still guesses silently and writes a
-`fastlane_dir` measured from the wrong directory — upgrade.
+0.2.0 was published with a broken sidecar path: listing a project's lanes failed on any installed
+copy. If you have it, upgrade. Everything below is the difference from 0.1.0.
 
 ## 0.2.0
 
@@ -76,7 +75,7 @@ loaded, with an explanation:
 - `max_concurrent_runs` above 1 — the queue is serial; parallel builds need a working directory
   per run, which does not exist yet.
 
-### Added in 0.2.1
+### Added
 
 - **Named accounts, and a role that only builds.** `config.yml` now holds a list of accounts
   under `server.users` — a name, a password hash and one of two roles each. An **admin** does
@@ -124,7 +123,7 @@ loaded, with an explanation:
   yourself; the secrets stay in the vault and come back if you add the project again. It is
   refused while a run of that project is in flight, since that run holds the workspace.
 
-### Fixed in 0.2.1
+### Fixed
 
 - **Editing `config.yml` no longer rewraps lines nobody touched.** Adding or removing a project
   serialized the document at YAML's default width, folding the password hash across two lines. The
@@ -135,7 +134,7 @@ loaded, with an explanation:
   0.1.0 and 0.2.0 are affected: the feature the whole tool is built on was broken for everyone who
   installed it, and worked perfectly for the one person running it from a checkout.
 
-### Changed in 0.2.1
+### Changed
 
 - **`laneyard setup` writes two files, and says which is which.** Build behaviour — the fastlane
   directory, whether to use bundler, what to keep — now goes into `laneyard.yml` in the

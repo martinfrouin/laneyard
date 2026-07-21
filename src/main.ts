@@ -21,7 +21,7 @@ import { makeInvoke } from "./sidecar/bridge.js";
 import { LaneReader } from "./sidecar/lanes.js";
 import { UsesReader } from "./sidecar/uses.js";
 
-export const version = "0.2.1";
+export const version = "0.3.0";
 
 export interface Started {
   app: FastifyInstance;
