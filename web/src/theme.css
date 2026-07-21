@@ -1,0 +1,268 @@
+:root {
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --bg: #14161a;
+  --bg-raised: #1b1e24;
+  --bg-inset: #171a1f;
+  --border: #262a31;
+  --text: #c8ccd4;
+  --text-dim: #676e7b;
+  --text-bright: #e6e9ee;
+
+  --accent: #7ee787;
+  --ok: #7ee787;
+  --running: #e3b341;
+  --error: #f8746a;
+  --info: #79c0ff;
+
+  /* La zone terminal ne suit pas le thème : les couleurs ANSI de fastlane
+     sont pensées pour un fond noir, les retraduire trahirait la sortie. */
+  --term-bg: #0e1013;
+  --term-text: #c9d1d9;
+}
+
+:root[data-theme="light"] {
+  --bg: #f2efe6;
+  --bg-raised: #e7e2d5;
+  --bg-inset: #ebe7dc;
+  --border: #d9d3c4;
+  --text: #2f2b25;
+  --text-dim: #8b8375;
+  --text-bright: #14110c;
+
+  --accent: #3f7d3f;
+  --ok: #3f7d3f;
+  --running: #a76c14;
+  --error: #b03a34;
+  --info: #2f6f9e;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  /* Chasse fixe sur toute l'interface : c'est le choix le plus structurant
+     de la direction visuelle, il ne souffre pas d'exception. */
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Angles droits, filets d'un pixel, aucune ombre ni dégradé :
+   les surfaces se distinguent par la valeur, pas par la profondeur. */
+.panel { background: var(--bg-raised); border: 1px solid var(--border); }
+
+.status-success { color: var(--ok); }
+.status-running { color: var(--running); }
+.status-failed,
+.status-interrupted { color: var(--error); }
+.status-queued,
+.status-preparing { color: var(--text-dim); }
+
+/* ---------------------------------------------------------------------- */
+/* Vocabulaire commun : tout le reste de l'interface est bâti avec ces
+   quelques classes, il n'existe aucune couleur hors des jetons ci-dessus. */
+
+.dim { color: var(--text-dim); }
+.bright { color: var(--text-bright); }
+.accent { color: var(--accent); }
+.status-cancelled { color: var(--text-dim); }
+
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--text-bright); }
+
+h1, h2, h3 { font-size: 13px; font-weight: normal; margin: 0; }
+
+/* Titres de section : petites capitales espacées, jamais de gras. */
+.section {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 2px 8px;
+}
+
+button { cursor: pointer; }
+button:hover:not(:disabled) { color: var(--text-bright); border-color: var(--text-dim); }
+button:disabled,
+input:disabled { color: var(--text-dim); cursor: default; }
+
+input:focus,
+button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+ul { list-style: none; margin: 0; padding: 0; }
+
+code { color: var(--text-bright); }
+
+/* --- Coquille --------------------------------------------------------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  grid-template-rows: 32px 1fr;
+  height: 100vh;
+}
+
+.shell > header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.brand { color: var(--accent); letter-spacing: 0.12em; }
+
+.shell > nav {
+  border-right: 1px solid var(--border);
+  background: var(--bg-raised);
+  overflow-y: auto;
+  padding: 12px 0;
+}
+
+.shell > main {
+  overflow: auto;
+  padding: 16px;
+}
+
+.nav-head { padding: 0 12px 6px; }
+
+.nav-item {
+  display: block;
+  padding: 2px 12px;
+  border-left: 2px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-item:hover { background: var(--bg-inset); }
+.nav-item.current { border-left-color: var(--accent); background: var(--bg-inset); color: var(--text-bright); }
+
+/* --- Écran de connexion ----------------------------------------------- */
+
+.login {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login form {
+  width: 320px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login input { width: 100%; padding: 4px 8px; }
+
+/* --- Listes ------------------------------------------------------------ */
+
+.rows > li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.rows > li:last-child { border-bottom: none; }
+
+.grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mark { width: 1ch; display: inline-block; }
+
+table { border-collapse: collapse; width: 100%; }
+td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
+
+/* --- Écran de run ------------------------------------------------------ */
+
+.run-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.run-body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.steps > li { display: flex; gap: 8px; padding: 2px 8px; }
+.steps > li.clickable { cursor: pointer; }
+.steps > li.clickable:hover { background: var(--bg-inset); color: var(--text-bright); }
+/* Une étape sans décalage ne peut pas mener au bon endroit du log : elle se
+   montre inerte plutôt que de faire semblant. */
+.steps > li.inert { color: var(--text-dim); }
+
+.pane-title {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* --- Terminal ---------------------------------------------------------- */
+
+/* Sombre dans les deux thèmes, par respect des couleurs ANSI de fastlane. */
+.terminal {
+  background: var(--term-bg);
+  color: var(--term-text);
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 190px);
+  min-height: 260px;
+}
+
+.terminal pre {
+  margin: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+}
+
+.terminal-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.terminal-input input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--term-text);
+  padding: 0;
+}
+
+.terminal-input input:disabled { color: #4c525c; }
+.terminal-input .prompt { color: var(--accent); }
+.terminal-input .reason { color: #676e7b; }
