@@ -38,9 +38,31 @@ execution live, and edit the Fastfile without opening an editor.
 
 **Explicitly out of scope**
 
-- Multi-user, roles, permissions. A personal tool, one password.
 - Cloud hosting, exposure on the Internet.
 - Support for tools other than fastlane.
+
+**Amended in milestone 7 — named accounts and two roles**
+
+This document said, here, that multi-user was out of scope: *a personal tool, one password*.
+That is no longer true of the code, so it is no longer written here. What replaced it, and why:
+
+The single password was one password for one machine, and the machine is shared as soon as a
+second person ships from it. Sharing it meant handing over the signing chain — the vault, the
+Fastfile, the ability to remove a project — to anyone who only needed to press a button. There
+was no smaller thing to give.
+
+So `config.yml` now holds `server.users`: a list of `{ name, role, password_hash }`, with two
+roles and only two. An `admin` may do everything. A `builder` may start a build, watch it,
+cancel it and download what it produced — and nothing that changes what a build does or reveals
+a credential. Two, because a third role is easy to add and impossible to remove, and because
+two can be held in a reader's head.
+
+What is still out of scope, and deliberately: no user table, no groups, no per-project
+permissions, no password reset flow, no session store that survives a restart. The list of
+accounts is a list in a file, like everything else here.
+
+An existing `server.password_hash` keeps working, unedited, read as a single admin called
+`admin` — an upgrade must not be a migration.
 
 ## Constraints
 
@@ -114,8 +136,10 @@ real version of fastlane and the installed plugins.
 #### Server (`src/server`)
 
 Single entry point. REST for actions, WebSocket for streaming logs and forwarding
-keyboard input to the PTY. A hashed password in configuration, a cookie-based session.
-Listens on `0.0.0.0` by default.
+keyboard input to the PTY. Accounts in configuration, each with a hashed password and a role,
+and a cookie-based session. One table in `permissions.ts` names the routes an admin is required
+for, and a single hook is the only thing that reads it: a permission written as an `if` inside a
+handler is a permission nobody finds during an audit. Listens on `0.0.0.0` by default.
 
 #### Runner (`src/runner`)
 
@@ -182,7 +206,9 @@ What Laneyard needs to know before it has even cloned anything.
 server:
   port: 7890
   bind: 0.0.0.0
-  password_hash: "$argon2id$..."
+  users:
+    - { name: martin, role: admin, password_hash: "scrypt$..." }
+    - { name: lea, role: builder, password_hash: "scrypt$..." }
   max_concurrent_runs: 1
   retention: { runs: 50, artifact_days: 30 }
 
@@ -241,7 +267,9 @@ Two requirements on this write:
   able to work out, and refuses to act if the project has neither a Fastfile nor a git remote,
   with a message that says what to do.
 
-On first use, it also generates a server password and displays it once.
+On a machine that has no account yet, it also creates the first admin: it asks what to call it,
+generates its password and displays that once. It writes the `users` form and never a bare
+`password_hash` beside it — a file holding both is the one combination the loader refuses.
 
 ### Precedence and writing
 
@@ -322,8 +350,10 @@ makes it reappear intact, history included.
   It's a cache, not a source: a different hash makes it stale immediately, and
   clearing it has no consequence beyond a slower read. The interface therefore can't
   show a lane that no longer exists.
-- **No `user` table.** A hashed password in configuration. Multi-user doesn't make
-  sense for a personal self-hosted tool.
+- **No `user` table.** Accounts live in `config.yml`, like every other piece of configuration:
+  a name, a role and a hashed password each. Sessions are in memory and do not survive a
+  restart, which is a feature — there is nothing to expire, nothing to clean up, and a server
+  that has just been restarted is a server nobody is silently still signed in to.
 - **No logs in the database.** One file per run, streamed live then re-read on demand.
 
 ## Lifecycle of a run
@@ -553,7 +583,10 @@ Underlying constraint: **no real build anywhere in the test suite.**
 
 ## Security
 
-- Listens on the local network, protected by a single hashed password and a cookie session.
+- Listens on the local network, protected by named accounts — a hashed password each — and a
+  cookie session. Two roles: an admin may do everything, a builder may only run builds. The
+  last admin can be neither removed nor demoted, because a server nobody can administer cannot
+  be repaired from the interface.
 - Secrets encrypted at rest, key in a `0600` file outside the database, OS keychain as an option.
 - Secret redaction upstream of any persistence.
 - No Internet exposure planned; a tunnel remains possible but is up to the user.

@@ -78,6 +78,30 @@ loaded, with an explanation:
 
 ### Added in 0.2.1
 
+- **Named accounts, and a role that only builds.** `config.yml` now holds a list of accounts
+  under `server.users` — a name, a password hash and one of two roles each. An **admin** does
+  everything. A **builder** starts a build, watches it, cancels it and downloads what it
+  produced, and never sees a secret, cannot save a Fastfile, cannot remove a project and cannot
+  manage accounts. It is what you give someone who ships without being trusted with the signing
+  chain, which until now meant handing over the one password and everything behind it.
+  - The login form takes a name and a password, and the status bar says who is signed in, with
+    `sign out` beside it.
+  - Accounts are managed from a new accounts screen, or with
+    `echo "$PASSWORD" | laneyard user add lea --role builder` — the password is read from
+    standard input, never taken as an argument, exactly as `laneyard secret set` already did.
+  - A builder is not shown the secrets, fastfile or settings tabs, nor the accounts screen. That
+    is courtesy: one table names the routes that require an admin, one hook enforces it, and the
+    suite proves a builder is refused by every verb and every spelling of the address.
+  - Removing an account ends its sessions at once — "remove the account" and "revoke access" are
+    the same act. Editing `config.yml` by hand has the same effect: the account is looked up
+    again on every request, so a demotion takes effect immediately rather than at the next
+    restart.
+  - The last admin can be neither removed nor demoted, from the interface or from the command
+    line. A server nobody can administer cannot be repaired from the interface.
+  - **Upgrading:** an existing `server.password_hash` keeps working unedited, read as a single
+    admin called `admin`. Sign in with that name and your existing password. Adding a second
+    account rewrites the file into the `users` form, comments and all. A file holding both forms
+    is refused at load — there is no obvious winner.
 - **`platforms` is configuration, not a guess.** `laneyard.yml` takes `platforms: [ios]`,
   `[android]` or both, and `laneyard setup` writes what it detected so the value can be corrected
   by editing one line. Left out, Laneyard still looks at the repository and reports what it found
@@ -116,8 +140,11 @@ loaded, with an explanation:
 - **`laneyard setup` writes two files, and says which is which.** Build behaviour — the fastlane
   directory, whether to use bundler, what to keep — now goes into `laneyard.yml` in the
   repository, where it can be committed and where a colleague cloning the project inherits it. The
-  machine's `config.yml` keeps only what is about this machine: where to clone from, and the
-  password. Setup used to put everything in the machine's file, so nothing was ever versioned.
+  machine's `config.yml` keeps only what is about this machine: where to clone from, and who may
+  sign in. Setup used to put everything in the machine's file, so nothing was ever versioned.
+- **`laneyard setup` creates the first admin** on a machine that has none, asking what to call it
+  and printing its generated password once. It writes the `users` form and never a bare
+  `password_hash`.
 - It warns when the project is already registered, or when the repository already has a
   `laneyard.yml` — which it never overwrites.
 - Setup and startup say more, and in colour. Starting with no project configured now says how to

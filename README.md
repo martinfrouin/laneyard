@@ -63,9 +63,10 @@ laneyard         # start the server
 ```
 
 `laneyard setup` inspects what is there — the `fastlane` directory even when nested in a monorepo, a
-`Gemfile`, an Xcode project or a Gradle build — writes the matching block into
-`~/.laneyard/config.yml`, and prints a generated server password once. Write it down; it is not
-shown again.
+`Gemfile`, an Xcode project or a Gradle build — and writes the matching block into
+`~/.laneyard/config.yml`. On a machine that has no account yet, it also creates the first admin:
+it asks what to call it and prints its generated password once. Write it down; it is not shown
+again, and nothing stores it.
 
 <details>
 <summary>Running from source instead</summary>
@@ -95,7 +96,9 @@ Laneyard means copying one file, and restoring it means copying it back.
 server:
   port: 7890
   bind: 0.0.0.0
-  password_hash: "scrypt$…"      # written by `laneyard setup`
+  users:                         # written by `laneyard setup`, see Accounts
+    - { name: martin, role: admin, password_hash: "scrypt$…" }
+    - { name: lea, role: builder, password_hash: "scrypt$…" }
   max_concurrent_runs: 1         # only 1 is accepted, see below
   retention: { runs: 50, artifact_days: 30 }
 
@@ -111,6 +114,51 @@ projects:
 a time across every project — parallel runs would need a working directory per run, which does
 not exist yet. A larger number is refused when the file loads rather than silently ignored, so a
 server is never configured for builds that never happen.
+
+### Accounts
+
+Everyone who signs in has a name, a password and one of two roles. Two, because a third role is
+easy to add and impossible to remove.
+
+| | **admin** | **builder** |
+|---|---|---|
+| start a build, watch it, cancel it | ✓ | ✓ |
+| download artifacts, read logs and the Fastfile | ✓ | ✓ |
+| see the readiness checklist | ✓ | ✓ |
+| read and write secrets | ✓ | |
+| save, commit and push the Fastfile | ✓ | |
+| remove a project | ✓ | |
+| manage accounts | ✓ | |
+
+A builder is what you give someone who ships without being trusted with the signing chain: they
+can press the button and watch what happens, and they never see a credential.
+
+The interface shows a builder only what a builder can use — the secrets, fastfile and settings
+tabs are not drawn, and neither is the accounts screen. That is courtesy, not security: the
+server refuses those routes on its own, whatever the browser was shown, and the test suite
+proves it for every verb and every spelling of the address.
+
+Add and remove accounts from the accounts screen, or from the command line:
+
+```bash
+echo "$PASSWORD" | laneyard user add lea --role builder
+```
+
+The password is read from standard input, never taken as an argument — an argument lands in your
+shell history. Without `--role`, the account is a builder.
+
+Two things are refused, in the API and on the command line alike: removing the last admin, and
+demoting the last admin. A server nobody can administer cannot be repaired from the interface.
+
+Removing an account ends its sessions immediately — "remove the account" and "revoke access" are
+the same act. So does editing `config.yml` by hand: every request looks the account up again, so
+a demotion takes effect at once rather than at the next restart.
+
+**Upgrading from 0.2.** An existing `server.password_hash` keeps working, unedited. It is read as
+a single admin account called `admin` — sign in with that name and the password you already have.
+The first time you add someone, the file is rewritten into the `users` form above, comments and
+all. Do not write both forms: a file holding a `password_hash` *and* a `users` list is refused at
+load, because there is no obvious winner.
 
 ### `laneyard.yml` — in your repository, and committed
 
@@ -261,10 +309,14 @@ run still waiting in the queue will not start: it ends as failed, saying its pro
 Read this before putting Laneyard on a network.
 
 - **It is built for a local network, not the internet.** It listens on `0.0.0.0` so you can reach
-  it from your laptop, behind one password. Do not expose it publicly. If you need remote access,
+  it from your laptop, behind a password. Do not expose it publicly. If you need remote access,
   put it behind a VPN or an SSH tunnel.
-- **The password** is stored as an scrypt hash and repeated failures are throttled. Sessions live
-  in memory and do not survive a restart.
+- **Passwords** are stored as scrypt hashes and repeated failures are throttled, per account, so
+  hammering one name cannot lock out the others. Sessions live in memory and do not survive a
+  restart.
+- **A role is enforced by the server, not by the interface.** One table names the routes that
+  require an admin, and one hook is the only thing that reads it — there is no permission check
+  hidden inside a handler. What a builder is not shown is also what a builder is refused.
 - **Secrets are encrypted at rest.** Values are stored with AES-256-GCM under a key kept in
   `~/.laneyard/key` — outside the database, mode `600`, and Laneyard refuses to start if anyone
   else can read it. Someone who walks off with `laneyard.db` gets ciphertext. Nothing else in the
@@ -303,6 +355,7 @@ What this does *not* cover, stated plainly:
 - `✓` edit the Fastfile in the browser, verified on every save
 - `✓` store a signing credential straight from its `.p8` or JSON file
 - `✓` remove a project from the interface, without touching its history
+- `✓` named accounts, with a builder role that never sees a credential
 - `○` git-triggered and scheduled builds
 
 Two things worth knowing today: listing lanes does not fetch the repository, so a lane you have
