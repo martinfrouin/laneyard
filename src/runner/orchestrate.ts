@@ -85,7 +85,14 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
 
   // Le workspace existe enfin : c'est seulement maintenant que le laneyard.yml
   // du dépôt est lisible, donc seulement maintenant que les réglages sont connus.
-  const settings = await opts.resolveSettings();
+  // La résolution est protégée : le projet peut avoir disparu de config.yml
+  // pendant la préparation, et un run ne doit jamais s'évaporer sur une exception.
+  let settings: ProjectSettings;
+  try {
+    settings = await opts.resolveSettings();
+  } catch (cause) {
+    return fail(`Réglages du projet illisibles : ${(cause as Error).message}`);
+  }
 
   // --- Exécution ---------------------------------------------------------
   const useBundle = settings.runtime === "bundle";

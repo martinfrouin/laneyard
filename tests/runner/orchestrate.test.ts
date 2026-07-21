@@ -89,6 +89,34 @@ describe("executeRun", () => {
     expect(runs.steps(runId).find((s) => s.name === "build_app")?.status).toBe("failed");
   }, 60_000);
 
+  it("échoue proprement si la résolution des réglages lève", async () => {
+    const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n" });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: join(root, "ws"),
+      artifactsDir: join(root, "art"),
+      gitUrl: origin,
+      branch: "main",
+      // Cas réel : le projet a disparu de config.yml pendant la préparation.
+      resolveSettings: async () => {
+        throw new Error("projet inconnu");
+      },
+      env: {},
+      onChunk: () => {},
+    });
+
+    const run = runs.get(runId)!;
+    expect(run.status).toBe("failed");
+    expect(run.errorSummary).toMatch(/projet inconnu/);
+  }, 60_000);
+
   it("échoue avant le lancement si le dépôt est inaccessible", async () => {
     const root = await tmpDir("laneyard-root-");
     const runs = new RunStore(openDatabase(":memory:"));
