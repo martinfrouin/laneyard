@@ -2092,8 +2092,10 @@ export interface ReportStep {
 // ordre, `[^>]*` avalerait le `/` final et le corps paresseux courrait jusqu'au
 // `</testcase>` suivant, fusionnant deux actions et attribuant l'échec à la mauvaise.
 const TESTCASE = /<testcase\b([^>]*?)\/>|<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g;
+// `\b` obligatoire : sans lui, chercher `name=` trouve d'abord la fin de
+// `classname=`, que fastlane écrit systématiquement en premier attribut.
 const ATTR = (source: string, name: string): string | null =>
-  new RegExp(`${name}="([^"]*)"`).exec(source)?.[1] ?? null;
+  new RegExp(`\\b${name}="([^"]*)"`).exec(source)?.[1] ?? null;
 
 /**
  * Lit le rapport JUnit que fastlane écrit à chaque exécution.
