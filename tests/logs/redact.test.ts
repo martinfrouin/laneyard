@@ -78,3 +78,57 @@ describe("Redactor", () => {
     }
   });
 });
+
+describe("Redactor under adversarial chunking", () => {
+  /**
+   * Deterministic pseudo-random source.
+   *
+   * A fuzz test that changes every run is a fuzz test that fails on someone
+   * else's machine and passes on yours. The seed is fixed so a failure is
+   * reproducible; change it deliberately if you want a different sample.
+   */
+  function random(seed: number): () => number {
+    let state = seed >>> 0;
+    return () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 0x100000000;
+    };
+  }
+
+  it("never lets a secret through, whatever the chunking", () => {
+    const next = random(20260721);
+    const pick = (s: string) => s[Math.floor(next() * s.length)]!;
+    const ALPHABET = "abc-_0";
+
+    for (let iteration = 0; iteration < 2000; iteration += 1) {
+      const secrets = Array.from({ length: 1 + Math.floor(next() * 3) }, () =>
+        Array.from({ length: 4 + Math.floor(next() * 6) }, () => pick(ALPHABET)).join(""),
+      );
+
+      let text = "";
+      for (let piece = 0; piece < 1 + Math.floor(next() * 6); piece += 1) {
+        text += Array.from({ length: Math.floor(next() * 8) }, () => pick(ALPHABET)).join("");
+        if (next() < 0.5) text += secrets[Math.floor(next() * secrets.length)]!;
+      }
+
+      const redactor = new Redactor(secrets);
+      let emitted = "";
+      for (let pos = 0; pos < text.length; ) {
+        const take = 1 + Math.floor(next() * 5);
+        emitted += redactor.push(text.slice(pos, pos + take));
+        pos += take;
+      }
+      // Checked before the flush as well: a secret released early is already lost.
+      for (const secret of secrets) expect(emitted).not.toContain(secret);
+
+      const full = emitted + redactor.flush();
+      for (const secret of secrets) expect(full).not.toContain(secret);
+    }
+  });
+
+  it("leaves text alone when it contains no secret", () => {
+    const r = new Redactor(["s3cr3t-value"]);
+    const innocent = "a perfectly ordinary line of build output\n";
+    expect(r.push(innocent) + r.flush()).toBe(innocent);
+  });
+});
