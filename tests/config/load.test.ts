@@ -93,3 +93,31 @@ projects:
     expect(res.error).toMatch(/git_auth/);
   });
 });
+
+describe("max_concurrent_runs", () => {
+  it("refuses a concurrency the queue cannot honour", async () => {
+    // Accepting 4 would promise parallel builds that never happen. Parallel runs
+    // need a working directory per run; until then, saying no is the honest answer.
+    const res = await loadServerConfig(
+      await withConfig(`
+server: { password_hash: "x", max_concurrent_runs: 4 }
+projects: []
+`),
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    // The field is named in the message: `load.ts` prefixes it with the path,
+    // and an error reading `(root)` would leave the reader hunting for it.
+    expect(res.error).toMatch(/server\.max_concurrent_runs: only 1 is supported/);
+  });
+
+  it("accepts the one value it honours", async () => {
+    const res = await loadServerConfig(
+      await withConfig(`
+server: { password_hash: "x", max_concurrent_runs: 1 }
+projects: []
+`),
+    );
+    expect(res.ok).toBe(true);
+  });
+});

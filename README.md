@@ -95,7 +95,7 @@ server:
   port: 7890
   bind: 0.0.0.0
   password_hash: "scrypt$…"      # written by `laneyard add`
-  max_concurrent_runs: 1
+  max_concurrent_runs: 1         # only 1 is accepted, see below
   retention: { runs: 50, artifact_days: 30 }
 
 projects:
@@ -105,6 +105,11 @@ projects:
     default_branch: main
     git_auth: { kind: ssh_key, ref: ~/.ssh/id_ed25519 }
 ```
+
+`max_concurrent_runs` accepts `1` and nothing else. Runs are drained from a single queue, one at
+a time across every project — parallel runs would need a working directory per run, which does
+not exist yet. A larger number is refused when the file loads rather than silently ignored, so a
+server is never configured for builds that never happen.
 
 ### `laneyard.yml` — optional, committed in your repository
 

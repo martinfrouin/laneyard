@@ -49,7 +49,23 @@ export const serverConfigSchema = z.object({
     port: z.number().int().positive().default(7890),
     bind: z.string().default("0.0.0.0"),
     password_hash: z.string().min(1),
-    max_concurrent_runs: z.number().int().positive().default(1),
+    // Only 1 is accepted. Runs share one working directory per project, so a
+    // higher number would promise parallel builds that never happen — the
+    // queue drains one run at a time, whatever this says. Refusing at load
+    // time is the honest answer, as with `git_auth: token`.
+    max_concurrent_runs: z
+      .number()
+      .int()
+      .positive()
+      // Refined on the field itself, so zod reports `server.max_concurrent_runs`
+      // on its own: `load.ts` prefixes the message with that path, and an error
+      // saying `(root)` would leave the reader hunting for the field.
+      .refine((n) => n === 1, {
+        message:
+          "only 1 is supported: runs are executed one at a time, and accepting more would " +
+          "promise parallel builds that never happen",
+      })
+      .default(1),
     retention: z
       .object({
         runs: z.number().int().positive().default(50),
