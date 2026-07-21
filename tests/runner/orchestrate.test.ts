@@ -76,7 +76,7 @@ describe("executeRun", () => {
     const arts = runs.artifacts(runId);
 
     expect(arts).toHaveLength(1);
-    expect(arts[0]!.filename).toBe("Popotes.ipa");
+    expect(arts[0]!.filename).toBe("Sample.ipa");
     expect(arts[0]!.kind).toBe("ipa");
   }, 60_000);
 

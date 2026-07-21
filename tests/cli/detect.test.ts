@@ -41,7 +41,7 @@ describe("detectProject", () => {
   });
 
   it("proposes iOS artifact patterns on an Xcode project", async () => {
-    const dir = await projectDir({ "fastlane/Fastfile": "", "Popotes.xcodeproj/project.pbxproj": "" });
+    const dir = await projectDir({ "fastlane/Fastfile": "", "Sample.xcodeproj/project.pbxproj": "" });
     const d = await detectProject(dir);
     expect(d.artifactGlobs).toContain("**/*.ipa");
     expect(d.artifactGlobs.some((g) => g.includes("dSYM"))).toBe(true);

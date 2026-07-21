@@ -15,8 +15,8 @@ const minimal = `
 server:
   password_hash: "scrypt$aaa$bbb"
 projects:
-  - slug: popotes-ios
-    git_url: git@github.com:martin/popotes.git
+  - slug: sample-ios
+    git_url: git@github.com:martin/sample.git
 `;
 
 describe("loadServerConfig", () => {
@@ -33,7 +33,7 @@ describe("loadServerConfig", () => {
   it("derives a project's name from its slug", async () => {
     const res = await loadServerConfig(await withConfig(minimal));
     if (!res.ok) throw new Error("expected valid");
-    expect(res.config.projects[0]!.name).toBe("popotes-ios");
+    expect(res.config.projects[0]!.name).toBe("sample-ios");
     expect(res.config.projects[0]!.default_branch).toBe("main");
   });
 

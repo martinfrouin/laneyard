@@ -186,9 +186,9 @@ server:
   retention: { runs: 50, artifact_days: 30 }
 
 projects:
-  - slug: popotes-ios
-    name: Popotes iOS
-    git_url: git@github.com:martin/popotes.git
+  - slug: sample-ios
+    name: Sample iOS
+    git_url: git@github.com:martin/sample.git
     default_branch: main
     git_auth: { kind: ssh_key, ref: ~/.ssh/id_ed25519 }
     color: green

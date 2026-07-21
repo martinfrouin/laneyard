@@ -23,8 +23,8 @@ describe("full thread", () => {
 server:
   password_hash: "${hashPassword("secret")}"
 projects:
-  - slug: popotes
-    name: Popotes
+  - slug: sample
+    name: Sample
     git_url: ${origin}
 `,
       "utf8",
@@ -40,11 +40,11 @@ projects:
     const cookies = { laneyard_session: session };
 
     const projects = await app.inject({ method: "GET", url: "/api/projects", cookies });
-    expect(projects.json()).toMatchObject([{ slug: "popotes" }]);
+    expect(projects.json()).toMatchObject([{ slug: "sample" }]);
 
     const created = await app.inject({
       method: "POST",
-      url: "/api/projects/popotes/runs",
+      url: "/api/projects/sample/runs",
       cookies,
       payload: { lane: "beta", params: {} },
     });
@@ -65,7 +65,7 @@ projects:
 
     expect(body.status).toBe("success");
     expect(body.steps).toHaveLength(2);
-    expect(body.artifacts[0]!.filename).toBe("Popotes.ipa");
+    expect(body.artifacts[0]!.filename).toBe("Sample.ipa");
 
     const log = await app.inject({ method: "GET", url: `/api/runs/${id}/log`, cookies });
     expect(log.body).toContain("Step: build_app");

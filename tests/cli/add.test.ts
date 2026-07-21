@@ -23,9 +23,9 @@ async function configAt(content: string): Promise<string> {
 }
 
 const entry = {
-  slug: "popotes-ios",
-  name: "Popotes iOS",
-  git_url: "git@example.com:popotes.git",
+  slug: "sample-ios",
+  name: "Sample iOS",
+  git_url: "git@example.com:sample.git",
   default_branch: "main",
   fastlane_dir: "fastlane",
   runtime: "system" as const,
@@ -38,7 +38,7 @@ describe("addProjectToConfig", () => {
     await addProjectToConfig(path, entry);
 
     const parsed = parse(await readFile(path, "utf8")) as { projects: { slug: string }[] };
-    expect(parsed.projects.map((p) => p.slug)).toEqual(["deja-la", "popotes-ios"]);
+    expect(parsed.projects.map((p) => p.slug)).toEqual(["deja-la", "sample-ios"]);
   });
 
   it("preserves the file's comments", async () => {

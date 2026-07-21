@@ -17,8 +17,8 @@ async function harness() {
 server:
   password_hash: "${hashPassword("secret")}"
 projects:
-  - slug: popotes
-    name: Popotes
+  - slug: sample
+    name: Sample
     git_url: ${origin}
 `,
     "utf8",
@@ -69,7 +69,7 @@ describe("API", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject([{ slug: "popotes", name: "Popotes" }]);
+    expect(res.json()).toMatchObject([{ slug: "sample", name: "Sample" }]);
   });
 
   it("returns a project's lanes", async () => {
@@ -77,7 +77,7 @@ describe("API", () => {
     const session = await login(app);
     const res = await app.inject({
       method: "GET",
-      url: "/api/projects/popotes/lanes",
+      url: "/api/projects/sample/lanes",
       cookies: { laneyard_session: session },
     });
 
@@ -102,7 +102,7 @@ describe("API", () => {
 
     const created = await app.inject({
       method: "POST",
-      url: "/api/projects/popotes/runs",
+      url: "/api/projects/sample/runs",
       cookies: { laneyard_session: session },
       payload: { lane: "beta", platform: "ios", params: {} },
     });
@@ -115,7 +115,7 @@ describe("API", () => {
       url: `/api/runs/${id}`,
       cookies: { laneyard_session: session },
     });
-    expect(fetched.json()).toMatchObject({ id, lane: "beta", projectSlug: "popotes" });
+    expect(fetched.json()).toMatchObject({ id, lane: "beta", projectSlug: "sample" });
   });
 
   it("refuses to launch an unknown lane", async () => {
@@ -123,7 +123,7 @@ describe("API", () => {
     const session = await login(app);
     const res = await app.inject({
       method: "POST",
-      url: "/api/projects/popotes/runs",
+      url: "/api/projects/sample/runs",
       cookies: { laneyard_session: session },
       payload: { lane: "does-not-exist", params: {} },
     });
@@ -137,7 +137,7 @@ describe("API", () => {
 
     const first = await app.inject({
       method: "POST",
-      url: "/api/projects/popotes/runs",
+      url: "/api/projects/sample/runs",
       cookies,
       payload: { lane: "beta", params: {} },
     });
@@ -146,7 +146,7 @@ describe("API", () => {
     // The first run is still active: two runs would share the same git clone.
     const second = await app.inject({
       method: "POST",
-      url: "/api/projects/popotes/runs",
+      url: "/api/projects/sample/runs",
       cookies,
       payload: { lane: "beta", params: {} },
     });

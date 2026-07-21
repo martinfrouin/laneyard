@@ -26,7 +26,7 @@ fi
 # A build produces its artifact. The build/ folder is gitignored in the
 # fixtures, which keeps a moved artifact from dirtying the workspace.
 mkdir -p "$PWD/build"
-echo "fake binary" > "$PWD/build/Popotes.ipa"
+echo "fake binary" > "$PWD/build/Sample.ipa"
 
 write_report() {
   mkdir -p "$report_dir"

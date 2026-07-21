@@ -15,30 +15,30 @@ async function workspaceWith(files: string[]): Promise<string> {
 
 describe("guessKind", () => {
   it("recognizes the common types", () => {
-    expect(guessKind("Popotes.ipa")).toBe("ipa");
+    expect(guessKind("Sample.ipa")).toBe("ipa");
     expect(guessKind("app-release.aab")).toBe("aab");
     expect(guessKind("app.apk")).toBe("apk");
-    expect(guessKind("Popotes.app.dSYM.zip")).toBe("dsym");
+    expect(guessKind("Sample.app.dSYM.zip")).toBe("dsym");
     expect(guessKind("notes.txt")).toBe("other");
   });
 });
 
 describe("collectArtifacts", () => {
   it("moves files matching the patterns out of the workspace", async () => {
-    const ws = await workspaceWith(["build/Popotes.ipa", "build/notes.txt"]);
+    const ws = await workspaceWith(["build/Sample.ipa", "build/notes.txt"]);
     const dest = await tmpDir("laneyard-dest-");
 
     const found = await collectArtifacts(ws, ["build/**/*.ipa"], dest);
 
     expect(found).toHaveLength(1);
-    expect(found[0]!.filename).toBe("Popotes.ipa");
+    expect(found[0]!.filename).toBe("Sample.ipa");
     expect(found[0]!.kind).toBe("ipa");
     expect(found[0]!.size).toBeGreaterThan(0);
-    expect(await readdir(dest)).toEqual(["Popotes.ipa"]);
+    expect(await readdir(dest)).toEqual(["Sample.ipa"]);
   });
 
   it("returns nothing when no pattern is configured", async () => {
-    const ws = await workspaceWith(["build/Popotes.ipa"]);
+    const ws = await workspaceWith(["build/Sample.ipa"]);
     expect(await collectArtifacts(ws, [], await tmpDir())).toEqual([]);
   });
 
@@ -53,7 +53,7 @@ describe("collectArtifacts", () => {
   });
 
   it("ignores a pattern that matches nothing without failing", async () => {
-    const ws = await workspaceWith(["build/Popotes.ipa"]);
+    const ws = await workspaceWith(["build/Sample.ipa"]);
     expect(await collectArtifacts(ws, ["does-not-exist/**/*.zip"], await tmpDir())).toEqual([]);
   });
 });

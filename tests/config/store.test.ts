@@ -20,15 +20,15 @@ async function configFile(content: string): Promise<string> {
 
 describe("ConfigStore", () => {
   it("loads the configuration at startup", async () => {
-    const store = new ConfigStore(await configFile(CONFIG("popotes")));
+    const store = new ConfigStore(await configFile(CONFIG("sample")));
     await store.load();
-    expect(store.projects().map((p) => p.slug)).toEqual(["popotes"]);
+    expect(store.projects().map((p) => p.slug)).toEqual(["sample"]);
   });
 
   it("finds a project by its slug", async () => {
-    const store = new ConfigStore(await configFile(CONFIG("popotes")));
+    const store = new ConfigStore(await configFile(CONFIG("sample")));
     await store.load();
-    expect(store.project("popotes")?.git_url).toBe("u");
+    expect(store.project("sample")?.git_url).toBe("u");
     expect(store.project("unknown")).toBeNull();
   });
 

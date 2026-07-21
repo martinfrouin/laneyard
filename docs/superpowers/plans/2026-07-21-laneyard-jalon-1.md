@@ -224,8 +224,8 @@ const minimal = `
 server:
   password_hash: "scrypt$aaa$bbb"
 projects:
-  - slug: popotes-ios
-    git_url: git@github.com:martin/popotes.git
+  - slug: sample-ios
+    git_url: git@github.com:martin/sample.git
 `;
 
 describe("loadServerConfig", () => {
@@ -242,7 +242,7 @@ describe("loadServerConfig", () => {
   it("déduit le nom d'un projet depuis son slug", async () => {
     const res = await loadServerConfig(await withConfig(minimal));
     if (!res.ok) throw new Error("attendu valide");
-    expect(res.config.projects[0]!.name).toBe("popotes-ios");
+    expect(res.config.projects[0]!.name).toBe("sample-ios");
     expect(res.config.projects[0]!.default_branch).toBe("main");
   });
 
@@ -2220,30 +2220,30 @@ async function workspaceWith(files: string[]): Promise<string> {
 
 describe("guessKind", () => {
   it("reconnaît les types courants", () => {
-    expect(guessKind("Popotes.ipa")).toBe("ipa");
+    expect(guessKind("Sample.ipa")).toBe("ipa");
     expect(guessKind("app-release.aab")).toBe("aab");
     expect(guessKind("app.apk")).toBe("apk");
-    expect(guessKind("Popotes.app.dSYM.zip")).toBe("dsym");
+    expect(guessKind("Sample.app.dSYM.zip")).toBe("dsym");
     expect(guessKind("notes.txt")).toBe("other");
   });
 });
 
 describe("collectArtifacts", () => {
   it("déplace hors du workspace les fichiers correspondant aux motifs", async () => {
-    const ws = await workspaceWith(["build/Popotes.ipa", "build/notes.txt"]);
+    const ws = await workspaceWith(["build/Sample.ipa", "build/notes.txt"]);
     const dest = await tmpDir("laneyard-dest-");
 
     const found = await collectArtifacts(ws, ["build/**/*.ipa"], dest);
 
     expect(found).toHaveLength(1);
-    expect(found[0]!.filename).toBe("Popotes.ipa");
+    expect(found[0]!.filename).toBe("Sample.ipa");
     expect(found[0]!.kind).toBe("ipa");
     expect(found[0]!.size).toBeGreaterThan(0);
-    expect(await readdir(dest)).toEqual(["Popotes.ipa"]);
+    expect(await readdir(dest)).toEqual(["Sample.ipa"]);
   });
 
   it("ne renvoie rien quand aucun motif n'est configuré", async () => {
-    const ws = await workspaceWith(["build/Popotes.ipa"]);
+    const ws = await workspaceWith(["build/Sample.ipa"]);
     expect(await collectArtifacts(ws, [], await tmpDir())).toEqual([]);
   });
 
@@ -2258,7 +2258,7 @@ describe("collectArtifacts", () => {
   });
 
   it("ignore un motif qui ne correspond à rien sans échouer", async () => {
-    const ws = await workspaceWith(["build/Popotes.ipa"]);
+    const ws = await workspaceWith(["build/Sample.ipa"]);
     expect(await collectArtifacts(ws, ["nexiste/**/*.zip"], await tmpDir())).toEqual([]);
   });
 });
@@ -2407,7 +2407,7 @@ fi
 # Un build produit son artefact. Le dossier build/ est ignoré par git dans les
 # fixtures, ce qui évite qu'un artefact déplacé salisse le workspace.
 mkdir -p "$PWD/build"
-echo "faux binaire" > "$PWD/build/Popotes.ipa"
+echo "faux binaire" > "$PWD/build/Sample.ipa"
 
 write_report() {
   mkdir -p "$report_dir"
@@ -2770,7 +2770,7 @@ describe("executeRun", () => {
     const arts = runs.artifacts(runId);
 
     expect(arts).toHaveLength(1);
-    expect(arts[0]!.filename).toBe("Popotes.ipa");
+    expect(arts[0]!.filename).toBe("Sample.ipa");
     expect(arts[0]!.kind).toBe("ipa");
   }, 60_000);
 
@@ -3067,15 +3067,15 @@ async function configFile(content: string): Promise<string> {
 
 describe("ConfigStore", () => {
   it("charge la configuration au démarrage", async () => {
-    const store = new ConfigStore(await configFile(CONFIG("popotes")));
+    const store = new ConfigStore(await configFile(CONFIG("sample")));
     await store.load();
-    expect(store.projects().map((p) => p.slug)).toEqual(["popotes"]);
+    expect(store.projects().map((p) => p.slug)).toEqual(["sample"]);
   });
 
   it("retrouve un projet par son slug", async () => {
-    const store = new ConfigStore(await configFile(CONFIG("popotes")));
+    const store = new ConfigStore(await configFile(CONFIG("sample")));
     await store.load();
-    expect(store.project("popotes")?.git_url).toBe("u");
+    expect(store.project("sample")?.git_url).toBe("u");
     expect(store.project("inconnu")).toBeNull();
   });
 
@@ -3257,8 +3257,8 @@ async function harness() {
 server:
   password_hash: "${hashPassword("secret")}"
 projects:
-  - slug: popotes
-    name: Popotes
+  - slug: sample
+    name: Sample
     git_url: ${origin}
 `,
     "utf8",
@@ -3309,7 +3309,7 @@ describe("API", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject([{ slug: "popotes", name: "Popotes" }]);
+    expect(res.json()).toMatchObject([{ slug: "sample", name: "Sample" }]);
   });
 
   it("renvoie les lanes d'un projet", async () => {
@@ -3317,7 +3317,7 @@ describe("API", () => {
     const session = await login(app);
     const res = await app.inject({
       method: "GET",
-      url: "/api/projects/popotes/lanes",
+      url: "/api/projects/sample/lanes",
       cookies: { laneyard_session: session },
     });
 
@@ -3342,7 +3342,7 @@ describe("API", () => {
 
     const created = await app.inject({
       method: "POST",
-      url: "/api/projects/popotes/runs",
+      url: "/api/projects/sample/runs",
       cookies: { laneyard_session: session },
       payload: { lane: "beta", platform: "ios", params: {} },
     });
@@ -3355,7 +3355,7 @@ describe("API", () => {
       url: `/api/runs/${id}`,
       cookies: { laneyard_session: session },
     });
-    expect(fetched.json()).toMatchObject({ id, lane: "beta", projectSlug: "popotes" });
+    expect(fetched.json()).toMatchObject({ id, lane: "beta", projectSlug: "sample" });
   });
 
   it("refuse de lancer une lane inconnue", async () => {
@@ -3363,7 +3363,7 @@ describe("API", () => {
     const session = await login(app);
     const res = await app.inject({
       method: "POST",
-      url: "/api/projects/popotes/runs",
+      url: "/api/projects/sample/runs",
       cookies: { laneyard_session: session },
       payload: { lane: "nexiste-pas", params: {} },
     });
@@ -4610,8 +4610,8 @@ describe("fil complet", () => {
 server:
   password_hash: "${hashPassword("secret")}"
 projects:
-  - slug: popotes
-    name: Popotes
+  - slug: sample
+    name: Sample
     git_url: ${origin}
 `,
       "utf8",
@@ -4627,11 +4627,11 @@ projects:
     const cookies = { laneyard_session: session };
 
     const projects = await app.inject({ method: "GET", url: "/api/projects", cookies });
-    expect(projects.json()).toMatchObject([{ slug: "popotes" }]);
+    expect(projects.json()).toMatchObject([{ slug: "sample" }]);
 
     const created = await app.inject({
       method: "POST",
-      url: "/api/projects/popotes/runs",
+      url: "/api/projects/sample/runs",
       cookies,
       payload: { lane: "beta", params: {} },
     });
@@ -4652,7 +4652,7 @@ projects:
 
     expect(body.status).toBe("success");
     expect(body.steps).toHaveLength(2);
-    expect(body.artifacts[0]!.filename).toBe("Popotes.ipa");
+    expect(body.artifacts[0]!.filename).toBe("Sample.ipa");
 
     const log = await app.inject({ method: "GET", url: `/api/runs/${id}/log`, cookies });
     expect(log.body).toContain("Step: build_app");
@@ -4757,7 +4757,7 @@ describe("detectProject", () => {
   });
 
   it("propose des motifs d'artefacts iOS sur un projet Xcode", async () => {
-    const dir = await projectDir({ "fastlane/Fastfile": "", "Popotes.xcodeproj/project.pbxproj": "" });
+    const dir = await projectDir({ "fastlane/Fastfile": "", "Sample.xcodeproj/project.pbxproj": "" });
     const d = await detectProject(dir);
     expect(d.artifactGlobs).toContain("**/*.ipa");
     expect(d.artifactGlobs.some((g) => g.includes("dSYM"))).toBe(true);
@@ -4924,9 +4924,9 @@ async function configAt(content: string): Promise<string> {
 }
 
 const entry = {
-  slug: "popotes-ios",
-  name: "Popotes iOS",
-  git_url: "git@example.com:popotes.git",
+  slug: "sample-ios",
+  name: "Sample iOS",
+  git_url: "git@example.com:sample.git",
   default_branch: "main",
   fastlane_dir: "fastlane",
   runtime: "system" as const,
@@ -4939,7 +4939,7 @@ describe("addProjectToConfig", () => {
     await addProjectToConfig(path, entry);
 
     const parsed = parse(await readFile(path, "utf8")) as { projects: { slug: string }[] };
-    expect(parsed.projects.map((p) => p.slug)).toEqual(["deja-la", "popotes-ios"]);
+    expect(parsed.projects.map((p) => p.slug)).toEqual(["deja-la", "sample-ios"]);
   });
 
   it("préserve les commentaires du fichier", async () => {
