@@ -581,10 +581,24 @@ describe("Redactor", () => {
     expect(r.push("nothing to do here") + r.flush()).toBe("nothing to do here");
   });
 
-  it("flushes whatever is still held back", () => {
+  it("releases everything once the stream ends", () => {
     const r = new Redactor(["hunter2"]);
-    r.push("ends with hunte");
-    expect(r.flush()).toBe("ends with hunte");
+    // `push` legitimately emits what is unambiguous; `flush` releases the rest.
+    expect(r.push("ends with hunte") + r.flush()).toBe("ends with hunte");
+  });
+
+  it("survives splits at every position, for any secret", () => {
+    // The property the whole design rests on. A fixed pair of splits would miss
+    // an off-by-one; this walks every boundary there is.
+    const secret = "s3cr3t-value-9";
+    const text = `before ${secret} between ${secret} after`;
+
+    for (let cut = 0; cut <= text.length; cut += 1) {
+      const r = new Redactor([secret]);
+      const out = r.push(text.slice(0, cut)) + r.push(text.slice(cut)) + r.flush();
+      expect(out).not.toContain(secret);
+      expect(out).toBe("before •••••• between •••••• after");
+    }
   });
 });
 ```
@@ -623,6 +637,23 @@ const MIN_LENGTH = 4;
  * still turn out to be the beginning of a secret, and releases them only once
  * they cannot. `flush()` empties that buffer at the end of the run.
  */
+/**
+ * One-shot removal, for text that is not part of the live stream.
+ *
+ * A run's error summary is stored in the database and rendered in the interface
+ * without ever passing through the stream, so it needs its own pass. Using the
+ * live `Redactor` instance here would corrupt its buffer mid-run.
+ */
+export function scrub(text: string, values: string[]): string {
+  let out = text;
+  for (const value of [...new Set(values.filter((v) => v.length >= MIN_LENGTH))].sort(
+    (a, b) => b.length - a.length,
+  )) {
+    out = out.split(value).join(MARKER);
+  }
+  return out;
+}
+
 export class Redactor {
   private readonly values: string[];
   private readonly longest: number;
@@ -643,17 +674,33 @@ export class Redactor {
     return out;
   }
 
+  /**
+   * How many trailing characters could still turn into a secret.
+   *
+   * Holding a fixed window of `longest - 1` would be correct but wasteful: with
+   * a 200-character API key in the vault, every chunk would stall its last 199
+   * characters until the next one arrived, and the live terminal would lag
+   * visibly. So we keep only what is genuinely ambiguous — the longest suffix
+   * that is a proper prefix of some secret — which is usually nothing at all.
+   */
+  private ambiguousTail(text: string): number {
+    const max = Math.min(this.longest - 1, text.length);
+    for (let length = max; length > 0; length -= 1) {
+      const suffix = text.slice(text.length - length);
+      if (this.values.some((value) => value.startsWith(suffix))) return length;
+    }
+    return 0;
+  }
+
   /** Takes a chunk, returns the part that is safe to write out. */
   push(chunk: string): string {
     if (this.values.length === 0) return chunk;
 
     const combined = this.replaceAll(this.held + chunk);
+    const keep = this.ambiguousTail(combined);
 
-    // Keep back the tail that could still be the start of a secret. One
-    // character less than the longest value is always enough, and cheap.
-    const keep = Math.min(this.longest - 1, combined.length);
     this.held = combined.slice(combined.length - keep);
-    return combined.slice(0, combined.length - keep);
+    return keep === 0 ? combined : combined.slice(0, combined.length - keep);
   }
 
   /** Releases the tail. Call once, when the stream is over. */
@@ -751,6 +798,7 @@ Expected: failure, module not found.
 
 ```ts
 import type { SecretStore, SecretSummary } from "../db/secrets.js";
+import { scrub } from "../logs/redact.js";
 import { decrypt, encrypt } from "./cipher.js";
 import { loadOrCreateKey } from "./key.js";
 
@@ -781,6 +829,20 @@ export class Vault {
 
   list(projectSlug: string): SecretSummary[] {
     return this.store.list(projectSlug);
+  }
+
+  listGlobal(): SecretSummary[] {
+    return this.store.listGlobal();
+  }
+
+  /**
+   * Removes this project's secret values from a piece of text, in one shot.
+   *
+   * Separate from `Redactor`, which is stateful and belongs to a live stream:
+   * reusing that instance here would corrupt its buffer mid-run.
+   */
+  scrub(projectSlug: string, text: string): string {
+    return scrub(text, this.maskedValues(projectSlug));
   }
 
   /**
@@ -907,7 +969,10 @@ The fake fastlane must print the secret so the test proves it was both injected 
   }, 60_000);
 ```
 
-Extend the fixture `tests/fixtures/fake-fastlane/fastlane`, after the existing step lines:
+Extend the fixture `tests/fixtures/fake-fastlane/fastlane`. Insert this **immediately after the
+last `echo "[09:41:05]: Compiling sources"` line and before the `slow` branch** — placed any later
+and the `failure` scenario exits before printing, so the redaction test would pass for the wrong
+reason:
 
 ```bash
 # Stands in for a lane that prints a credential — the usual way secrets escape.
@@ -966,6 +1031,26 @@ import { Redactor } from "../logs/redact.js";
 Call `await emitRest()` immediately after `const outcome = await done;` and before
 `await writer.close()`, and also inside `fail()` before closing the writer.
 
+**Two consequences that are easy to miss:**
+
+The `emit` inside the timeline/artifact guard runs *after* `emitRest()`. Left alone, the redactor
+would hold back the tail of that message and never release it, so the browser would receive a
+truncated error. That call must be followed by its own `await emitRest()` — and note it currently
+also happens after `writer.close()`, so it never reaches disk at all. Move the close after it.
+
+**The error summary must be scrubbed too.** `fail()` and the final `runs.finish` store a raw
+string in `error_summary`, which `GET /api/runs/:id` serves and the interface renders. That string
+is built from git's stderr, and once token authentication is wired a credential will end up there.
+Redacting the log but not the summary would defeat the whole milestone:
+
+```ts
+  const hide = (text: string): string => scrub(text, opts.maskedValues ?? []);
+```
+
+Apply it at all three points where a summary is written: `fail()`, the timeout message, and the
+value returned by `summarizeFailure`. The same applies to the `Unexpected failure:` summary in
+`src/server/routes/runs.ts`, which must use `ctx.vault.scrub(slug, …)`.
+
 Add the secrets to the child environment:
 
 ```ts
@@ -997,8 +1082,12 @@ git commit -m "feat(runner): inject secrets and redact them at the single fan-ou
 
 **Files:**
 - Create: `src/server/routes/secrets.ts`, `tests/server/secrets.test.ts`
-- Modify: `src/server/app.ts` (build the vault, register the routes)
-- Modify: `src/server/routes/runs.ts` (pass secrets to `executeRun`)
+- Modify: `src/server/app.ts` (accept the vault, register the routes)
+- Modify: `src/server/routes/runs.ts` (pass secrets to `executeRun`, scrub the failure summary)
+- Modify: `tests/server/api.test.ts` — **required**: adding `vault` to `AppDeps` breaks its
+  existing `buildApp({ config, db, root, lanes })` call. Its harness needs
+  `vault: await Vault.open(root, new SecretStore(db))`. Forgetting this fails both this task's
+  verification and the typecheck in Task 8.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1159,6 +1248,9 @@ and that the value never appears in what the command prints.
 
 - [ ] **Step 2 to 4: implement, run, verify**
 
+The `secret` branch in `src/main.ts` must sit **above** the catch-all that rejects unknown
+commands, and `USAGE` gains a line for it.
+
 ```
 laneyard secret set MATCH_PASSWORD --project app     # reads the value from stdin
 echo "$TOKEN" | laneyard secret set GITHUB_TOKEN     # global, no shell history
@@ -1239,3 +1331,7 @@ Both. They are separate repositories and nothing enforces that they agree.
 - Redacting secrets from a log that was written *before* they were stored. Redaction happens as
   output is produced; earlier runs keep whatever they captured.
 - Secrets in `config.yml` via `$NAME`. The schema accepts the syntax; nothing resolves it yet.
+- Protecting a value shorter than four characters. The redactor declines them, because a
+  two-character match would shred the log while hiding nothing an attacker could not guess. The
+  API must say so when it happens rather than accept the tick box and quietly do nothing — a user
+  who believes they are protected is worse off than one who knows they are not.
