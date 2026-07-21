@@ -18,6 +18,7 @@ import type { LaneUses } from "../sidecar/uses.js";
 import type { Vault } from "../secrets/vault.js";
 import { authenticate, LoginThrottle, SESSION_COOKIE, SessionStore } from "./auth.js";
 import type { Identity } from "./auth.js";
+import { requiresAdmin } from "./permissions.js";
 import { registerFastfileRoutes } from "./routes/fastfile.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerReadinessRoutes } from "./routes/readiness.js";
@@ -214,6 +215,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return reply.code(401).send({ error: "Session required" });
     }
     req.identity = identity;
+
+    if (identity.role !== "admin" && requiresAdmin(req.method, req.url)) {
+      return reply.code(403).send({ error: "This action requires the admin role" });
+    }
   });
 
   app.get("/api/me", async (req) => {
