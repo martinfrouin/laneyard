@@ -42,12 +42,22 @@ export interface AppContext extends AppDeps {
   /** Clones the repository if it isn't cloned yet. Throws if the clone fails. */
   ensureWorkspace: (slug: string) => Promise<void>;
   /** The single worker. Routes ring its bell; they never run anything themselves. */
-  queue: RunQueue;
+  /**
+   * Set immediately after the context is built. Optional in the type rather than
+   * cast into existence: a lie in a type is worth less than a `?` at the two
+   * call sites that read it.
+   */
+  queue?: RunQueue;
 }
 
 declare module "fastify" {
   interface FastifyInstance {
     broadcastRunChunk?: (runId: number, chunk: string, offset: number) => void;
+    /**
+     * Always present once `buildApp` has returned — which is the only way anyone
+     * gets a `FastifyInstance` here. Required on the instance, optional on the
+     * internal context, because that is exactly where the difference lies.
+     */
     queue: RunQueue;
   }
 }
@@ -70,14 +80,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       if (!entry) throw new Error(`Unknown project: ${slug}`);
       await new Workspace(workspacePath(slug), entry.git_url, entry.git_auth).ensureCloned();
     },
-    // Assigned just below, because the job the queue drives closes over the
-    // very context it is a field of.
-    queue: undefined as unknown as RunQueue,
   };
 
   // The queue is assembled here rather than in `createServerFromConfig`: its job
   // needs `runs`, `logs`, the workspace and artifact paths and the sockets, none
-  // of which exist before `ctx` does.
+  // of which exist before `ctx` does. It is assigned after the context literal
+  // because the job it drives closes over that very context — hence the field
+  // being optional in the type rather than a cast pretending it is already set.
   ctx.queue = new RunQueue(ctx.runs, async (runId, signal) => {
     const run = ctx.runs.get(runId);
     if (!run) return;
@@ -128,11 +137,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       });
   });
 
-  app.decorate("queue", ctx.queue);
+  // `ctx.queue` is assigned immediately above; naming it here rather than
+  // reaching through the optional field is what lets every route treat the
+  // queue as simply present.
+  const queue = ctx.queue;
+  app.decorate("queue", queue);
 
   // A closed server must stop taking new work: the run in flight is left to
   // finish, but nothing behind it starts on a server nobody is listening to.
-  app.addHook("onClose", async () => ctx.queue.close());
+  app.addHook("onClose", async () => queue.close());
 
   const throttle = new LoginThrottle();
 

@@ -39,7 +39,7 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
     const queuePosition = ctx.runs.queuePosition(id);
 
     // The route creates a row and rings the bell; the worker does the rest.
-    ctx.queue.wake();
+    app.queue.wake();
 
     return reply.code(201).send({ id, queuePosition });
   });
@@ -66,7 +66,7 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
 
     // A queued run is finished on the spot; a running one is signalled and ends
     // a few moments later. Either way the caller has nothing left to wait for.
-    ctx.queue.cancel(id);
+    app.queue.cancel(id);
     return reply.code(204).send();
   });
 
