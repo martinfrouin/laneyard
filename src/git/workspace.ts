@@ -43,15 +43,33 @@ export class Workspace {
     return text.split(this.gitUrl).join("<repository>");
   }
 
-  private async git(args: string[], cwd = this.path): Promise<string> {
+  private async git(args: string[], cwd = this.path, timeout?: number): Promise<string> {
     try {
-      const { stdout } = await exec("git", args, { cwd, env: this.env(), maxBuffer: 32 * 1024 * 1024 });
+      const { stdout } = await exec("git", args, {
+        cwd,
+        env: this.env(),
+        maxBuffer: 32 * 1024 * 1024,
+        ...(timeout === undefined ? {} : { timeout }),
+      });
       return stdout.trim();
     } catch (cause) {
       const err = cause as { stderr?: string; message: string };
       const detail = (err.stderr || err.message).trim();
       throw new Error(`git ${this.redact(args.join(" "))} failed: ${this.redact(detail)}`);
     }
+  }
+
+  /**
+   * Asks the remote for its branches, and nothing else.
+   *
+   * Reads no working copy and writes nothing, so it answers the one question
+   * the readiness checklist asks: would a run reach this repository on its own?
+   * The timeout matters as much as the exit code — with `GIT_TERMINAL_PROMPT=0`
+   * git gives up on a credentials prompt, but a host that never answers would
+   * otherwise hang the checklist exactly the way it hangs a run at 2am.
+   */
+  async probeRemote(timeoutMs = 10_000): Promise<void> {
+    await this.git(["ls-remote", "--heads", this.gitUrl], process.cwd(), timeoutMs);
   }
 
   async exists(): Promise<boolean> {

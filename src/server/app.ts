@@ -13,9 +13,11 @@ import { LogStore } from "../logs/store.js";
 import { executeRun } from "../runner/orchestrate.js";
 import { RunQueue } from "../runner/queue.js";
 import type { Lane } from "../sidecar/lanes.js";
+import type { LaneUses } from "../sidecar/uses.js";
 import type { Vault } from "../secrets/vault.js";
 import { LoginThrottle, SESSION_COOKIE, SessionStore, verifyPassword } from "./auth.js";
 import { registerProjectRoutes } from "./routes/projects.js";
+import { registerReadinessRoutes } from "./routes/readiness.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerSecretRoutes } from "./routes/secrets.js";
 import { registerWebSocket } from "./ws.js";
@@ -28,6 +30,8 @@ export interface AppDeps {
   root: string;
   /** Injected so tests don't need Ruby or fastlane. */
   lanes: (slug: string, workspacePath: string, fastlaneDir: string) => Promise<Lane[]>;
+  /** What each lane calls, for the readiness checklist. Injected for the same reason. */
+  uses: (slug: string, workspacePath: string, fastlaneDir: string) => Promise<LaneUses[]>;
   /** The sole holder of plaintext secrets. Built async, so it's assembled outside `buildApp`. */
   vault: Vault;
 }
@@ -186,6 +190,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerProjectRoutes(app, ctx);
   await registerRunRoutes(app, ctx);
   await registerSecretRoutes(app, ctx);
+  await registerReadinessRoutes(app, ctx);
 
   // Resolved from the module's location, not from the data folder:
   // `deps.root` is ~/.laneyard, the built SPA lives in the repository. Two

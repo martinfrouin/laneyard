@@ -17,6 +17,7 @@ import { buildApp } from "./server/app.js";
 import { Vault } from "./secrets/vault.js";
 import { makeInvoke } from "./sidecar/bridge.js";
 import { LaneReader } from "./sidecar/lanes.js";
+import { UsesReader } from "./sidecar/uses.js";
 
 export const version = "0.2.0";
 
@@ -48,6 +49,11 @@ export async function createServerFromConfig(root: string): Promise<Started> {
     lanes: async (slug, workspacePath, fastlaneDir) => {
       const resolved = await config.resolve(slug, workspacePath);
       const reader = new LaneReader(cache, makeInvoke(resolved?.settings.runtime ?? "bundle"));
+      return reader.read(slug, workspacePath, fastlaneDir);
+    },
+    uses: async (slug, workspacePath, fastlaneDir) => {
+      const resolved = await config.resolve(slug, workspacePath);
+      const reader = new UsesReader(cache, makeInvoke(resolved?.settings.runtime ?? "bundle"));
       return reader.read(slug, workspacePath, fastlaneDir);
     },
   });
