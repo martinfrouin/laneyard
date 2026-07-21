@@ -10,6 +10,8 @@ import type { Db } from "../db/open.js";
 import { RunStore } from "../db/runs.js";
 import { Workspace } from "../git/workspace.js";
 import { LogStore } from "../logs/store.js";
+import { executeRun } from "../runner/orchestrate.js";
+import { RunQueue } from "../runner/queue.js";
 import type { Lane } from "../sidecar/lanes.js";
 import type { Vault } from "../secrets/vault.js";
 import { LoginThrottle, SESSION_COOKIE, SessionStore, verifyPassword } from "./auth.js";
@@ -39,11 +41,14 @@ export interface AppContext extends AppDeps {
   artifactsDir: (runId: number) => string;
   /** Clones the repository if it isn't cloned yet. Throws if the clone fails. */
   ensureWorkspace: (slug: string) => Promise<void>;
+  /** The single worker. Routes ring its bell; they never run anything themselves. */
+  queue: RunQueue;
 }
 
 declare module "fastify" {
   interface FastifyInstance {
     broadcastRunChunk?: (runId: number, chunk: string, offset: number) => void;
+    queue: RunQueue;
   }
 }
 
@@ -65,7 +70,69 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       if (!entry) throw new Error(`Unknown project: ${slug}`);
       await new Workspace(workspacePath(slug), entry.git_url, entry.git_auth).ensureCloned();
     },
+    // Assigned just below, because the job the queue drives closes over the
+    // very context it is a field of.
+    queue: undefined as unknown as RunQueue,
   };
+
+  // The queue is assembled here rather than in `createServerFromConfig`: its job
+  // needs `runs`, `logs`, the workspace and artifact paths and the sockets, none
+  // of which exist before `ctx` does.
+  ctx.queue = new RunQueue(ctx.runs, async (runId, signal) => {
+    const run = ctx.runs.get(runId);
+    if (!run) return;
+    const slug = run.projectSlug;
+    const entry = deps.config.project(slug);
+    if (!entry) {
+      // The project was removed from config.yml while this run waited. Ending it
+      // here is what keeps the queue from re-reading the same row for ever.
+      ctx.runs.finish(runId, {
+        status: "failed",
+        exitCode: null,
+        errorSummary: `Project "${slug}" is no longer in the configuration`,
+      });
+      return;
+    }
+
+    await executeRun({
+      runId,
+      runs: ctx.runs,
+      logs: ctx.logs,
+      workspacePath: ctx.workspacePath(slug),
+      artifactsDir: ctx.artifactsDir(runId),
+      gitUrl: entry.git_url,
+      gitAuth: entry.git_auth,
+      branch: entry.default_branch,
+      // Resolved after the clone, once the repository's laneyard.yml is finally readable.
+      resolveSettings: async () => {
+        const r = await ctx.config.resolve(slug, ctx.workspacePath(slug));
+        return r!.settings;
+      },
+      env: process.env,
+      secrets: ctx.vault.resolve(slug),
+      maskedValues: ctx.vault.maskedValues(slug),
+      signal,
+      onChunk: (chunk, offset) => app.broadcastRunChunk?.(runId, chunk, offset),
+    })
+      .then((r) => ctx.sockets?.finish(runId, r.status))
+      .catch((cause: unknown) => {
+        // Last safety net. `executeRun` commits to never throwing, but the queue
+        // cannot afford to depend on that: a run left neither finished nor
+        // failed is a row the interface polls until someone gives up.
+        ctx.runs.finish(runId, {
+          status: "failed",
+          exitCode: null,
+          errorSummary: ctx.vault.scrub(slug, `Unexpected failure: ${(cause as Error).message}`),
+        });
+        ctx.sockets?.finish(runId, "failed");
+      });
+  });
+
+  app.decorate("queue", ctx.queue);
+
+  // A closed server must stop taking new work: the run in flight is left to
+  // finish, but nothing behind it starts on a server nobody is listening to.
+  app.addHook("onClose", async () => ctx.queue.close());
 
   const throttle = new LoginThrottle();
 

@@ -34,6 +34,33 @@ describe("createServerFromConfig", () => {
     expect(new RunStore(db).get(id)?.status).toBe("interrupted");
   });
 
+  it("resumes a run left queued by a previous life", async () => {
+    // The queue is discovered from the database, never pushed to: a run queued
+    // before a restart has to start moving again on its own, without anyone
+    // happening to trigger a fourth one.
+    const root = await tmpDir("laneyard-main-");
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      join(root, "config.yml"),
+      `server: { password_hash: "${hashPassword("x")}" }\nprojects: []\n`,
+      "utf8",
+    );
+
+    const dbPath = join(root, "laneyard.db");
+    const id = new RunStore(openDatabase(dbPath)).create({
+      projectSlug: "gone",
+      lane: "beta",
+      platform: null,
+      params: {},
+    });
+
+    const { app, db } = await createServerFromConfig(root);
+    await app.queue.idle();
+    await app.close();
+
+    expect(new RunStore(db).get(id)?.status).not.toBe("queued");
+  });
+
   it("creates the vault key on first start", async () => {
     const root = await tmpDir("laneyard-main-");
     await mkdir(root, { recursive: true });

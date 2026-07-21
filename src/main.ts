@@ -52,6 +52,11 @@ export async function createServerFromConfig(root: string): Promise<Started> {
     },
   });
 
+  // Anything left queued from the previous life starts moving again now. Without
+  // this, `wake()` would only ever be called from the trigger route, and three
+  // runs queued before a restart would wait for someone to trigger a fourth.
+  app.queue.wake();
+
   return { app, db, config };
 }
 

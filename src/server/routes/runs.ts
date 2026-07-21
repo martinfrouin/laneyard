@@ -1,7 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { createReadStream } from "node:fs";
 import type { AppContext } from "../app.js";
-import { executeRun } from "../../runner/orchestrate.js";
+import type { RunStatus } from "../../db/runs.js";
+
+/** Statuses a run can still be cancelled from. */
+const CANCELLABLE: RunStatus[] = ["queued", "preparing", "running"];
 
 export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   app.post("/api/projects/:slug/runs", async (req, reply) => {
@@ -11,18 +14,6 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
     const entry = ctx.config.project(slug);
     if (!entry) return reply.code(404).send({ error: "Unknown project" });
     if (!body.lane) return reply.code(400).send({ error: "Missing lane" });
-
-    // Only one run at a time per project: they share the same git workspace.
-    // Two concurrent runs would silently trip over each other — one would
-    // change the commit out from under the other, carry off its artifacts
-    // and delete its report. The real queue comes at the next milestone;
-    // this refusal, for its part, already prevents false results.
-    const last = ctx.runs.listByProject(slug, 1)[0];
-    if (last && ["queued", "preparing", "running"].includes(last.status)) {
-      return reply.code(409).send({
-        error: `Run #${last.id} is still in progress on this project. Wait for it to finish.`,
-      });
-    }
 
     // We check that the lane genuinely exists before creating a run doomed to fail.
     try {
@@ -43,48 +34,40 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
       params: body.params ?? {},
     });
 
-    // Launched without waiting: the HTTP response mustn't take as long as a build.
-    void executeRun({
-      runId: id,
-      runs: ctx.runs,
-      logs: ctx.logs,
-      workspacePath: ctx.workspacePath(slug),
-      artifactsDir: ctx.artifactsDir(id),
-      gitUrl: entry.git_url,
-      gitAuth: entry.git_auth,
-      branch: entry.default_branch,
-      // Resolved after the clone, once the repository's laneyard.yml is finally readable.
-      resolveSettings: async () => {
-        const r = await ctx.config.resolve(slug, ctx.workspacePath(slug));
-        return r!.settings;
-      },
-      env: process.env,
-      secrets: ctx.vault.resolve(slug),
-      maskedValues: ctx.vault.maskedValues(slug),
-      onChunk: (chunk, offset) => app.broadcastRunChunk?.(id, chunk, offset),
-    })
-      .then((r) => ctx.sockets?.finish(id, r.status))
-      .catch((cause: unknown) => {
-        // Last safety net. `executeRun` commits to never throwing, but a
-        // rejected promise with no handler brings down the whole Node
-        // process — and with it, the other runs in progress. The cost of
-        // forgetting this would be disproportionate.
-        ctx.runs.finish(id, {
-          status: "failed",
-          exitCode: null,
-          errorSummary: ctx.vault.scrub(slug, `Unexpected failure: ${(cause as Error).message}`),
-        });
-        ctx.sockets?.finish(id, "failed");
-      });
+    // Read before the queue is woken, so the answer describes the line the
+    // caller just joined rather than one the worker has already moved on from.
+    const queuePosition = ctx.runs.queuePosition(id);
 
-    return reply.code(201).send({ id });
+    // The route creates a row and rings the bell; the worker does the rest.
+    ctx.queue.wake();
+
+    return reply.code(201).send({ id, queuePosition });
   });
 
   app.get("/api/runs/:id", async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     const run = ctx.runs.get(id);
     if (!run) return reply.code(404).send({ error: "Unknown run" });
-    return { ...run, steps: ctx.runs.steps(id), artifacts: ctx.runs.artifacts(id) };
+    return {
+      ...run,
+      queuePosition: ctx.runs.queuePosition(id),
+      steps: ctx.runs.steps(id),
+      artifacts: ctx.runs.artifacts(id),
+    };
+  });
+
+  app.post("/api/runs/:id/cancel", async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    const run = ctx.runs.get(id);
+    if (!run) return reply.code(404).send({ error: "Unknown run" });
+    if (!CANCELLABLE.includes(run.status)) {
+      return reply.code(409).send({ error: `Run #${id} has already finished` });
+    }
+
+    // A queued run is finished on the spot; a running one is signalled and ends
+    // a few moments later. Either way the caller has nothing left to wait for.
+    ctx.queue.cancel(id);
+    return reply.code(204).send();
   });
 
   app.get("/api/runs/:id/log", async (req, reply) => {
