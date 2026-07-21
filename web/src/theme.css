@@ -232,6 +232,17 @@ code { color: var(--text-bright); }
 .secret-form label { display: flex; align-items: baseline; gap: 6px; color: var(--text-dim); }
 .secret-form input[type="checkbox"] { accent-color: var(--accent); width: auto; padding: 0; }
 
+/* A chosen file stands where the value field stood: same line, same grammar —
+   marker, name, dim note, ✗ to undo. The name is all there is to show. */
+.file-chosen { display: flex; align-items: baseline; gap: 6px; }
+
+/* The browser's own file button is a rounded grey lozenge with a label in the
+   system's language — the one control that could not obey the grammar. It is
+   hidden, and its label is the control. */
+.file-pick { cursor: pointer; }
+.file-pick input[type="file"] { display: none; }
+.file-pick:hover .accent { color: var(--text-bright); }
+
 table { border-collapse: collapse; width: 100%; }
 td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
 

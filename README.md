@@ -153,6 +153,14 @@ The value is never an argument: a command line ends up in `~/.zsh_history` and i
 `ps`. Typing the command alone leaves you at a blank line — type or paste the value, then
 `Ctrl-D`.
 
+**Two of them are files.** An App Store Connect key arrives as a `.p8` and a Play Store service
+account as a JSON file, and pasting either into a text field is the moment you are most likely to
+paste it somewhere else by accident. The Secrets tab takes the file directly — *app store connect
+key* and *play store service account*, beside the value field. Your browser reads it and sends its
+text to the same route a typed value goes through, under the name fastlane and the readiness
+checklist both look for: `APP_STORE_CONNECT_API_KEY_P8` and `SUPPLY_JSON_KEY_DATA`. Nothing is
+uploaded, nothing is written to disk on the way, and the page only ever shows the file's name.
+
 A secret becomes an environment variable for every run of the project it belongs to. Without
 `--project` it applies to every project; a project secret of the same name wins over a global
 one. Secrets are kept out of the logs unless you pass `--no-mask`, and a masked value must be at

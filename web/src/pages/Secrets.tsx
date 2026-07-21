@@ -4,6 +4,19 @@ import { api } from "../api";
 import type { SecretSummary } from "../api";
 
 /**
+ * The two credentials the readiness checklist asks for, and that arrive as a
+ * file rather than as a string one could sensibly type.
+ *
+ * The names are the ones fastlane itself reads, and the ones the checklist
+ * looks for — a suggestion that stored the key under a name nothing recognises
+ * would leave the checklist red and the user certain they had done the work.
+ */
+const FILE_CREDENTIALS: { key: string; accept: string; what: string }[] = [
+  { key: "APP_STORE_CONNECT_API_KEY_P8", accept: ".p8", what: "app store connect key" },
+  { key: "SUPPLY_JSON_KEY_DATA", accept: ".json,application/json", what: "play store service account" },
+];
+
+/**
  * The secrets of one project.
  *
  * There is no reveal button anywhere on this screen, and no route behind it
@@ -23,6 +36,16 @@ export function Secrets() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // The chosen file, never its contents: it is read at the moment it is sent
+  // and the text is not kept anywhere the page could later show it. The page
+  // knows the file's name and nothing else about it — the same rule as the
+  // list above, where a stored value has no way back to the screen.
+  const [file, setFile] = useState<File | null>(null);
+  // Bumping this remounts the file controls, which is the only way to empty
+  // one: a control still holding a file would not fire again for that same
+  // file, and picking it twice must work.
+  const [fileControls, setFileControls] = useState(0);
+
   const load = () => {
     setLoading(true);
     api
@@ -37,16 +60,28 @@ export function Secrets() {
 
   useEffect(load, [slug]);
 
+  const forgetFile = () => {
+    setFile(null);
+    setFileControls((n) => n + 1);
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setSaving(true);
     setFormError(null);
     try {
-      await api.setSecret(slug, key.trim(), value, masked);
+      // A `.p8` and a service account JSON are both text. The browser reads the
+      // file and sends its text to the same route a typed value goes through:
+      // no upload endpoint, no multipart, and the server learns nothing new.
+      // The trailing newline every editor leaves goes, because a credential
+      // with one is a credential fastlane sometimes rejects.
+      const text = file === null ? value : (await file.text()).replace(/\r?\n$/, "");
+      await api.setSecret(slug, key.trim(), text, masked);
       // The value leaves the field as soon as it is stored: nothing to read over
       // a shoulder, and no chance of storing it twice under another name.
       setKey("");
       setValue("");
+      forgetFile();
       setMasked(true);
       load();
     } catch (e) {
@@ -117,22 +152,62 @@ export function Secrets() {
           autoComplete="off"
           aria-label="name"
         />
-        <input
-          type="password"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="value"
-          autoComplete="new-password"
-          aria-label="value"
-        />
+        {file === null ? (
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="value"
+            autoComplete="new-password"
+            aria-label="value"
+          />
+        ) : (
+          // The file's name, never a preview of what is in it. Same line
+          // grammar as a stored secret: marker, name, dim note, ✗ to undo.
+          <span className="file-chosen">
+            <span className="mark accent">✓</span> <span className="bright">{file.name}</span>{" "}
+            <span className="dim">read when you store it</span>{" "}
+            <button type="button" onClick={forgetFile} title="choose another value">
+              ✗
+            </button>
+          </span>
+        )}
         <label>
           <input type="checkbox" checked={masked} onChange={(e) => setMasked(e.target.checked)} />
           keep this out of the logs
         </label>
-        <button type="submit" disabled={saving || key.trim() === "" || value === ""}>
+        <button type="submit" disabled={saving || key.trim() === "" || (file === null && value === "")}>
           store
         </button>
       </form>
+
+      {/* A credential is a file. Pasting a `.p8` into a text field is the moment
+          someone is most likely to paste it somewhere else by accident, and the
+          file is right there. Naming the two the checklist asks for is how
+          someone arrives with the right one. */}
+      <p className="dim">
+        or from a file —{" "}
+        {FILE_CREDENTIALS.map((c, i) => (
+          <span key={`${c.key}-${fileControls}`}>
+            {i > 0 && <span className="dim">, </span>}
+            <label className="file-pick">
+              <input
+                type="file"
+                accept={c.accept}
+                onChange={(e) => {
+                  const chosen = e.target.files?.[0] ?? null;
+                  if (chosen === null) return;
+                  setKey(c.key);
+                  setValue("");
+                  setFile(chosen);
+                  setFormError(null);
+                }}
+              />
+              <span className="accent">{c.what} →</span>
+            </label>
+          </span>
+        ))}
+      </p>
       <p className="dim">an existing name is replaced.</p>
 
       {formError && <p className="status-failed">refused — {formError}</p>}
