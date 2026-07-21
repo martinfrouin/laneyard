@@ -19,6 +19,12 @@ echo "[09:41:03]: Installing certificates"
 echo "[09:41:04]: ------ Step: build_app ------"
 echo "[09:41:05]: Compiling sources"
 
+# Stands in for a lane that prints a credential — the usual way secrets escape.
+if [ -n "${FAKE_FASTLANE_ECHO:-}" ]; then
+  eval "value=\${$FAKE_FASTLANE_ECHO:-}"
+  echo "[09:41:06]: $FAKE_FASTLANE_ECHO=$value"
+fi
+
 if [ "$scenario" = "slow" ]; then
   sleep 30
 fi

@@ -6,6 +6,7 @@ import { Workspace } from "../git/workspace.js";
 import type { GitAuth } from "../git/workspace.js";
 import type { LogStore } from "../logs/store.js";
 import { summarizeFailure } from "../heuristics/error-summary.js";
+import { Redactor, scrub } from "../logs/redact.js";
 import { collectArtifacts } from "./artifacts.js";
 import { LiveStepTracker } from "./live-steps.js";
 import { startPty } from "./pty.js";
@@ -27,6 +28,10 @@ export interface ExecuteRunOptions {
    */
   resolveSettings: () => Promise<ProjectSettings>;
   env: NodeJS.ProcessEnv;
+  /** Resolved secrets, added to the run's environment. */
+  secrets?: Record<string, string>;
+  /** The values that must not appear in the log or in the browser. */
+  maskedValues?: string[];
   /** Called for each output fragment, with its position in the log. */
   onChunk: (chunk: string, offset: number) => void;
 }
@@ -47,17 +52,37 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   const { runId, runs, logs } = opts;
   const writer = await logs.open(runId);
   const tracker = new LiveStepTracker();
+  const redactor = new Redactor(opts.maskedValues ?? []);
 
+  // Redaction happens here and nowhere else: this is the single point through
+  // which every byte of output passes on its way to the file, the step tracker
+  // and the browser. Filtering further downstream would mean filtering three
+  // times, and forgetting one of them eventually.
   const emit = async (text: string): Promise<void> => {
-    const offset = await writer.append(text);
-    tracker.consume(text, offset);
-    opts.onChunk(text, offset);
+    const safe = redactor.push(text);
+    if (safe === "") return;
+    const offset = await writer.append(safe);
+    tracker.consume(safe, offset);
+    opts.onChunk(safe, offset);
   };
+
+  const emitRest = async (): Promise<void> => {
+    const rest = redactor.flush();
+    if (rest === "") return;
+    const offset = await writer.append(rest);
+    tracker.consume(rest, offset);
+    opts.onChunk(rest, offset);
+  };
+
+  // The error summary is stored in the database and rendered in the interface
+  // without passing through the stream above, so it needs its own, one-shot pass.
+  const hide = (text: string): string => scrub(text, opts.maskedValues ?? []);
 
   const fail = async (message: string): Promise<ExecuteRunResult> => {
     await emit(`\n${message}\n`);
+    await emitRest();
     await writer.close();
-    runs.finish(runId, { status: "failed", exitCode: null, errorSummary: message });
+    runs.finish(runId, { status: "failed", exitCode: null, errorSummary: hide(message) });
     return { status: "failed" };
   };
 
@@ -102,7 +127,10 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     cwd: opts.workspacePath,
     env: {
       ...opts.env,
-      // A non-interactive run fails fast instead of freezing on an invisible prompt.
+      ...(opts.secrets ?? {}),
+      // Order matters: secrets come after opts.env so a stored secret wins over
+      // a variable that happens to exist in the server's own environment, and
+      // before these three fixed variables so no secret can override CI.
       CI: "true",
       FASTLANE_SKIP_UPDATE_CHECK: "1",
       FORCE_COLOR: "1",
@@ -112,7 +140,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   });
 
   const outcome = await done;
-  await writer.close();
+  await emitRest();
 
   // --- Timeline -------------------------------------------------------------
   // Everything that follows is after-sales service: the timeline and the
@@ -124,7 +152,10 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     await recordOutcome();
   } catch (cause) {
     await emit(`\nIncomplete timeline or artifacts: ${(cause as Error).message}\n`);
+    await emitRest();
   }
+
+  await writer.close();
 
   if (outcome.exitCode === 0 && !outcome.timedOut) {
     runs.finish(runId, { status: "success", exitCode: 0, errorSummary: null });
@@ -132,8 +163,8 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   }
 
   const summary = outcome.timedOut
-    ? `Run interrupted after ${settings.timeout_minutes} minutes`
-    : summarizeFailure(await logs.read(runId), outcome.exitCode);
+    ? hide(`Run interrupted after ${settings.timeout_minutes} minutes`)
+    : hide(summarizeFailure(await logs.read(runId), outcome.exitCode));
 
   runs.finish(runId, { status: "failed", exitCode: outcome.exitCode, errorSummary: summary });
   return { status: "failed" };

@@ -142,4 +142,72 @@ describe("executeRun", () => {
     // A run that never reached fastlane has no steps.
     expect(runs.steps(runId)).toEqual([]);
   }, 60_000);
+
+  it("injects secrets into the run and keeps them out of the log", async () => {
+    const origin = await makeOriginRepo({
+      "fastlane/Fastfile": "lane :beta do\nend\n",
+      ".gitignore": "build/\n",
+    });
+    const root = await tmpDir("laneyard-root-");
+    const db = openDatabase(":memory:");
+    const runs = new RunStore(db);
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: join(root, "workspaces", "p"),
+      artifactsDir: join(root, "artifacts", String(runId)),
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => SETTINGS,
+      env: {
+        PATH: `${FAKE_DIR}:${process.env["PATH"]}`,
+        FAKE_FASTLANE_SCENARIO: "success",
+        // The fixture echoes this variable, standing in for a lane that prints
+        // a credential by accident — which is exactly how they escape in real life.
+        FAKE_FASTLANE_ECHO: "MATCH_PASSWORD",
+      },
+      secrets: { MATCH_PASSWORD: "s3cr3t-value" },
+      maskedValues: ["s3cr3t-value"],
+      onChunk: () => {},
+    });
+
+    const log = await logs.read(runId);
+    expect(log).toContain("MATCH_PASSWORD=");
+    expect(log).not.toContain("s3cr3t-value");
+    expect(log).toContain("••••••");
+  }, 60_000);
+
+  it("keeps the secret out of what the browser receives too", async () => {
+    // Redaction happens before the fan-out, so the file and the socket cannot
+    // disagree — a fix applied to only one of them would be worse than none.
+    const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n", ".gitignore": "build/\n" });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    const broadcast: string[] = [];
+    await executeRun({
+      runId, runs, logs,
+      workspacePath: join(root, "workspaces", "p"),
+      artifactsDir: join(root, "artifacts", String(runId)),
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => SETTINGS,
+      env: {
+        PATH: `${FAKE_DIR}:${process.env["PATH"]}`,
+        FAKE_FASTLANE_SCENARIO: "success",
+        FAKE_FASTLANE_ECHO: "MATCH_PASSWORD",
+      },
+      secrets: { MATCH_PASSWORD: "s3cr3t-value" },
+      maskedValues: ["s3cr3t-value"],
+      onChunk: (chunk) => broadcast.push(chunk),
+    });
+
+    expect(broadcast.join("")).not.toContain("s3cr3t-value");
+  }, 60_000);
 });
