@@ -1,104 +1,107 @@
-# Laneyard — Jalon 1 : le fil complet
+# Laneyard — Milestone 1: the full thread
+
+> This is the implementation plan followed for milestone 1. It is kept as a record of the
+> decisions made and the traps found along the way; it is not maintained.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Déclarer un projet dans `config.yml`, le cloner, lister ses lanes, en lancer une, suivre sa sortie en direct dans le navigateur et télécharger l'artefact produit.
+**Goal:** Declare a project in `config.yml`, clone it, list its lanes, trigger one, follow its output live in the browser, and download the produced artifact.
 
-**Architecture:** Serveur Fastify en TypeScript. La configuration vit dans des fichiers YAML, jamais en base ; SQLite ne garde que l'état d'exécution. Toute connaissance de fastlane vient d'un script Ruby lancé dans le bundle du projet, qui renvoie du JSON. Les runs s'exécutent dans un pseudo-terminal, leur sortie part simultanément vers un fichier de log et vers les navigateurs connectés par WebSocket.
+**Architecture:** Fastify server in TypeScript. Configuration lives in YAML files, never in the database; SQLite only keeps execution state. All fastlane knowledge comes from a Ruby script launched inside the project's bundle, which returns JSON. Runs execute inside a pseudo-terminal, their output going simultaneously to a log file and to browsers connected over WebSocket.
 
-**Tech Stack:** Node 22+ / TypeScript ESM · Fastify 5 · better-sqlite3 · node-pty · zod · yaml · tinyglobby · Vitest · React 19 + Vite · Ruby avec Prism (inclus depuis Ruby 3.3)
+**Tech Stack:** Node 22+ / TypeScript ESM · Fastify 5 · better-sqlite3 · node-pty · zod · yaml · tinyglobby · Vitest · React 19 + Vite · Ruby with Prism (included since Ruby 3.3)
 
-**Spec de référence:** `docs/superpowers/specs/2026-07-21-laneyard-design.md`
+**Reference spec:** `docs/superpowers/specs/2026-07-21-laneyard-design.md`
 
-**Hors périmètre de ce plan** (jalons 2 à 5) : caviardage des secrets, coffre, file d'attente, annulation, timeout, Préparation CI, éditeur de Fastfile, notifications, purge, thèmes, README.
+**Out of scope for this plan** (milestones 2 to 5): secret redaction, vault, queue, cancellation, timeout, CI Readiness, Fastfile editor, notifications, purge, themes, README.
 
 ---
 
-## Structure des fichiers
+## File structure
 
 ```
 src/
   config/
-    schema.ts        Schémas zod de config.yml et laneyard.yml, types dérivés
-    load.ts          Lecture + validation d'un fichier YAML → objet typé ou erreur
-    resolve.ts       Fusion laneyard.yml > bloc projet > défauts, avec provenance
-    store.ts         État vivant de la config : chargement, surveillance, accès
+    schema.ts        zod schemas for config.yml and laneyard.yml, derived types
+    load.ts          Reading + validation of a YAML file → typed object or error
+    resolve.ts       Merge of laneyard.yml > project block > defaults, with provenance
+    store.ts         Live config state: loading, watching, access
   db/
-    schema.sql       DDL des tables
-    open.ts          Ouverture, migrations, pragmas
-    runs.ts          Lecture/écriture des runs, étapes et artefacts
-    cache.ts         Cache d'introspection
+    schema.sql       Table DDL
+    open.ts          Opening, migrations, pragmas
+    runs.ts          Reading/writing runs, steps, and artifacts
+    cache.ts         Introspection cache
   git/
-    workspace.ts     Clone initial, fetch, checkout, SHA courant, état sale
+    workspace.ts     Initial clone, fetch, checkout, current SHA, dirty state
   sidecar/
-    bridge.ts        Invocation du script Ruby, parsing du JSON, erreurs typées
-    lanes.ts         Lecture des lanes avec cache indexé sur l'empreinte du fastlane_dir
+    bridge.ts        Invoking the Ruby script, JSON parsing, typed errors
+    lanes.ts         Reading lanes with a cache indexed on the fastlane_dir hash
   logs/
-    store.ts         Écriture append-only et lecture depuis un décalage
+    store.ts         Append-only writing and reading from an offset
   heuristics/
-    error-summary.ts Extraction d'une cause d'échec lisible — connaissance nommée, isolée
+    error-summary.ts Extraction of a readable failure cause — named knowledge, isolated
   runner/
-    pty.ts           Lancement d'un processus dans un PTY, flux de sortie, code de sortie
-    live-steps.ts    Repérage des séparateurs d'étape et de leur décalage en octets
-    report.ts        Lecture de fastlane/report.xml
-    artifacts.ts     Collecte par motifs
-    orchestrate.ts   Enchaînement complet d'un run et transitions d'état
+    pty.ts           Launching a process in a PTY, output stream, exit code
+    live-steps.ts    Detecting step separators and their byte offset
+    report.ts        Reading fastlane/report.xml
+    artifacts.ts     Collection by patterns
+    orchestrate.ts   Full chaining of a run and state transitions
   sidecar/
-    ruby-env.ts      Résolution d'un environnement Ruby capable de charger fastlane
+    ruby-env.ts      Resolving a Ruby environment able to load fastlane
   cli/
-    detect.ts        Inspection d'un projet existant : fastlane, plateforme, git
-    add.ts           Écriture du bloc projet dans config.yml, commentaires préservés
+    detect.ts        Inspecting an existing project: fastlane, platform, git
+    add.ts           Writing the project block into config.yml, comments preserved
   server/
-    app.ts           Construction de l'instance Fastify
-    auth.ts          Session par cookie, mot de passe scrypt
-    ws.ts            Diffusion des fragments de log par run
+    app.ts           Building the Fastify instance
+    auth.ts          Cookie session, scrypt password
+    ws.ts            Broadcasting log chunks per run
     routes/
-      projects.ts    Liste des projets, lanes d'un projet
-      runs.ts        Déclenchement, consultation, log, artefacts
-  main.ts            Point d'entrée : charge la config, ouvre la base, démarre
+      projects.ts    Project list, a project's lanes
+      runs.ts        Triggering, viewing, log, artifacts
+  main.ts            Entry point: loads config, opens the database, starts
 ruby/
-  introspect.rb      Sidecar : commandes lanes / actions / parse
-web/                 Application React (Vite)
+  introspect.rb      Sidecar: lanes / actions / parse commands
+web/                 React application (Vite)
 tests/
   fixtures/
-    fake-fastlane/   Faux exécutable rejouant une sortie enregistrée
-    repos/           Générateurs de dépôts git de test
+    fake-fastlane/   Fake executable replaying recorded output
+    repos/           Generators for test git repositories
 ```
 
-Chaque module expose des fonctions pures autant que possible ; les entrées/sorties (fichiers,
-processus, base) sont concentrées dans `store.ts`, `open.ts`, `pty.ts` et `workspace.ts`, ce qui
-rend le reste testable sans machine de build.
+Each module exposes pure functions as much as possible; I/O (files,
+processes, database) is concentrated in `store.ts`, `open.ts`, `pty.ts`, and `workspace.ts`, which
+makes the rest testable without a build machine.
 
 ---
 
-### Task 1 : Squelette du projet
+### Task 1: Project skeleton
 
 **Files:**
 - Create: `package.json`, `tsconfig.json`, `vitest.config.ts`, `.gitignore`, `src/main.ts`, `tests/smoke.test.ts`
 
-- [ ] **Step 1 : Écrire le test qui échoue**
+- [ ] **Step 1: Write the failing test**
 
-`tests/smoke.test.ts` :
+`tests/smoke.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
 import { version } from "../src/main.js";
 
 describe("laneyard", () => {
-  it("expose sa version", () => {
+  it("exposes its version", () => {
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });
 ```
 
-- [ ] **Step 2 : Lancer le test pour vérifier qu'il échoue**
+- [ ] **Step 2: Run the test to confirm it fails**
 
 Run: `npm test`
-Expected: échec — le module `src/main.ts` n'existe pas.
+Expected: failure — the `src/main.ts` module doesn't exist.
 
-- [ ] **Step 3 : Créer le squelette**
+- [ ] **Step 3: Create the skeleton**
 
-`package.json` :
+`package.json`:
 
 ```json
 {
@@ -135,10 +138,10 @@ Expected: échec — le module `src/main.ts` n'existe pas.
 }
 ```
 
-> `tsx` plutôt que `node --experimental-strip-types` : le retrait de types natif ne réécrit pas les
-> spécificateurs `./x.js` vers `./x.ts`, or c'est la forme qu'impose `moduleResolution: NodeNext`.
+> `tsx` rather than `node --experimental-strip-types`: native type stripping doesn't rewrite
+> `./x.js` specifiers to `./x.ts`, and that's the form `moduleResolution: NodeNext` requires.
 
-`tsconfig.json` :
+`tsconfig.json`:
 
 ```json
 {
@@ -158,7 +161,7 @@ Expected: échec — le module `src/main.ts` n'existe pas.
 }
 ```
 
-`vitest.config.ts` :
+`vitest.config.ts`:
 
 ```ts
 import { defineConfig } from "vitest/config";
@@ -168,7 +171,7 @@ export default defineConfig({
 });
 ```
 
-`.gitignore` — ajouter aux lignes existantes :
+`.gitignore` — add to the existing lines:
 
 ```
 node_modules/
@@ -176,35 +179,35 @@ dist/
 *.db
 ```
 
-`src/main.ts` :
+`src/main.ts`:
 
 ```ts
 export const version = "0.1.0";
 ```
 
-- [ ] **Step 4 : Installer et vérifier que le test passe**
+- [ ] **Step 4: Install and verify the test passes**
 
 Run: `npm install && npm test`
-Expected: 1 test passé. `better-sqlite3` et `node-pty` compilent des modules natifs — si
-l'installation échoue, vérifier que les outils de compilation C++ sont présents.
+Expected: 1 test passing. `better-sqlite3` and `node-pty` compile native modules — if
+the install fails, check that the C++ build tools are present.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add -A
-git commit -m "chore: squelette TypeScript, Vitest et dépendances"
+git commit -m "chore: TypeScript, Vitest skeleton and dependencies"
 ```
 
 ---
 
-### Task 2 : Schéma et chargement de la configuration serveur
+### Task 2: Server configuration schema and loading
 
 **Files:**
 - Create: `src/config/schema.ts`, `src/config/load.ts`, `tests/config/load.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/config/load.test.ts` :
+`tests/config/load.test.ts`:
 
 ```ts
 import { mkdtemp, writeFile } from "node:fs/promises";
@@ -229,7 +232,7 @@ projects:
 `;
 
 describe("loadServerConfig", () => {
-  it("applique les valeurs par défaut du serveur", async () => {
+  it("applies the server's default values", async () => {
     const res = await loadServerConfig(await withConfig(minimal));
     expect(res.ok).toBe(true);
     if (!res.ok) return;
@@ -239,14 +242,14 @@ describe("loadServerConfig", () => {
     expect(res.config.server.retention).toEqual({ runs: 50, artifact_days: 30 });
   });
 
-  it("déduit le nom d'un projet depuis son slug", async () => {
+  it("derives a project's name from its slug", async () => {
     const res = await loadServerConfig(await withConfig(minimal));
-    if (!res.ok) throw new Error("attendu valide");
+    if (!res.ok) throw new Error("expected valid");
     expect(res.config.projects[0]!.name).toBe("sample-ios");
     expect(res.config.projects[0]!.default_branch).toBe("main");
   });
 
-  it("refuse deux projets partageant le même slug", async () => {
+  it("refuses two projects sharing the same slug", async () => {
     const res = await loadServerConfig(
       await withConfig(`
 server: { password_hash: "x" }
@@ -260,7 +263,7 @@ projects:
     expect(res.error).toMatch(/slug/i);
   });
 
-  it("refuse un slug qui n'est pas utilisable dans un chemin", async () => {
+  it("refuses a slug that isn't usable in a path", async () => {
     const res = await loadServerConfig(
       await withConfig(`
 server: { password_hash: "x" }
@@ -271,33 +274,33 @@ projects:
     expect(res.ok).toBe(false);
   });
 
-  it("rapporte une erreur lisible sur un YAML invalide", async () => {
+  it("reports a readable error on invalid YAML", async () => {
     const res = await loadServerConfig(await withConfig("server: {"));
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error.length).toBeGreaterThan(0);
   });
 
-  it("rapporte un fichier absent sans lever d'exception", async () => {
-    const res = await loadServerConfig("/nexiste/pas/config.yml");
+  it("reports a missing file without throwing", async () => {
+    const res = await loadServerConfig("/does/not/exist/config.yml");
     expect(res.ok).toBe(false);
   });
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/config/load.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Écrire le schéma et le chargeur**
+- [ ] **Step 3: Write the schema and the loader**
 
-`src/config/schema.ts` :
+`src/config/schema.ts`:
 
 ```ts
 import { z } from "zod";
 
-/** Réglages de comportement de build. Ils peuvent venir du dépôt ou du serveur. */
+/** Build behaviour settings. They can come from the repository or the server. */
 export const projectSettingsSchema = z.object({
   fastlane_dir: z.string().default("fastlane"),
   runtime: z.enum(["bundle", "system"]).default("bundle"),
@@ -313,13 +316,13 @@ export const projectSettingsSchema = z.object({
     .optional(),
 });
 
-/** Même vocabulaire, mais tout est facultatif dans les fichiers. */
+/** Same vocabulary, but everything is optional in the files. */
 export const projectSettingsInputSchema = projectSettingsSchema.partial();
 
-/** Un slug sert de nom de dossier et de segment d'URL. */
+/** A slug is used as a folder name and a URL segment. */
 const slugSchema = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]*$/, "slug : minuscules, chiffres et tirets uniquement");
+  .regex(/^[a-z0-9][a-z0-9-]*$/, "slug: lowercase letters, digits and hyphens only");
 
 export const projectEntrySchema = projectSettingsInputSchema.extend({
   slug: slugSchema,
@@ -329,7 +332,7 @@ export const projectEntrySchema = projectSettingsInputSchema.extend({
   git_auth: z
     .object({
       kind: z.enum(["none", "ssh_key", "token"]),
-      /** Chemin de fichier si kind vaut ssh_key, nom de secret si kind vaut token. */
+      /** File path if kind is ssh_key, secret name if kind is token. */
       ref: z.string().optional(),
     })
     .default({ kind: "none" }),
@@ -354,7 +357,7 @@ export const serverConfigSchema = z.object({
   projects: z.array(projectEntrySchema).default([]),
 });
 
-/** Contenu de laneyard.yml : uniquement du comportement de build. */
+/** Content of laneyard.yml: build behaviour only. */
 export const repoConfigSchema = projectSettingsInputSchema;
 
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;
@@ -365,7 +368,7 @@ export type ServerConfig = Omit<z.infer<typeof serverConfigSchema>, "projects"> 
 export type RepoConfig = z.infer<typeof repoConfigSchema>;
 ```
 
-`src/config/load.ts` :
+`src/config/load.ts`:
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -376,32 +379,32 @@ import type { RepoConfig, ServerConfig } from "./schema.js";
 
 export type LoadResult<T> = { ok: true; config: T } | { ok: false; error: string };
 
-/** Lit et valide un fichier YAML. N'échoue jamais par exception : l'appelant décide. */
-// `ZodType<T, any, any>` et non `ZodType<T>` : sur un schéma comportant des `.default()`,
-// le type d'entrée diffère du type de sortie, et TypeScript infère alors `T` sur l'entrée
-// — donc avec des champs optionnels. Neutraliser les deux derniers paramètres force
-// l'inférence sur la sortie, seule pertinente ici.
+/** Reads and validates a YAML file. Never fails by throwing: the caller decides. */
+// `ZodType<T, any, any>` and not `ZodType<T>`: on a schema with `.default()` fields,
+// the input type differs from the output type, and TypeScript then infers `T` from the input
+// — so with optional fields. Neutralizing the last two parameters forces
+// inference on the output, the only one relevant here.
 async function loadYamlFile<T>(path: string, schema: ZodType<T, any, any>): Promise<LoadResult<T>> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
   } catch (cause) {
-    return { ok: false, error: `Lecture impossible de ${path} : ${(cause as Error).message}` };
+    return { ok: false, error: `Could not read ${path}: ${(cause as Error).message}` };
   }
 
   let data: unknown;
   try {
     data = parseYaml(raw);
   } catch (cause) {
-    return { ok: false, error: `YAML invalide dans ${path} : ${(cause as Error).message}` };
+    return { ok: false, error: `Invalid YAML in ${path}: ${(cause as Error).message}` };
   }
 
   const parsed = schema.safeParse(data ?? {});
   if (!parsed.success) {
     const details = parsed.error.issues
-      .map((i) => `${i.path.join(".") || "(racine)"} : ${i.message}`)
-      .join(" ; ");
-    return { ok: false, error: `Configuration invalide dans ${path} — ${details}` };
+      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+      .join("; ");
+    return { ok: false, error: `Invalid configuration in ${path} — ${details}` };
   }
   return { ok: true, config: parsed.data };
 }
@@ -413,12 +416,12 @@ export async function loadServerConfig(path: string): Promise<LoadResult<ServerC
   const seen = new Set<string>();
   for (const p of res.config.projects) {
     if (seen.has(p.slug)) {
-      return { ok: false, error: `Configuration invalide dans ${path} — slug en double : ${p.slug}` };
+      return { ok: false, error: `Invalid configuration in ${path} — duplicate slug: ${p.slug}` };
     }
     seen.add(p.slug);
   }
 
-  // Le nom affiché retombe sur le slug plutôt que d'être optionnel partout en aval.
+  // The display name falls back to the slug rather than being optional everywhere downstream.
   const projects = res.config.projects.map((p) => ({ ...p, name: p.name ?? p.slug }));
   return { ok: true, config: { ...res.config, projects } };
 }
@@ -428,31 +431,31 @@ export async function loadRepoConfig(path: string): Promise<LoadResult<RepoConfi
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/config/load.test.ts`
-Expected: 6 tests passés.
+Expected: 6 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/config tests/config
-git commit -m "feat(config): schéma et chargement de config.yml"
+git commit -m "feat(config): schema and loading for config.yml"
 ```
 
 ---
 
-### Task 3 : Résolution de la configuration d'un projet
+### Task 3: Resolving a project's configuration
 
-La précédence décrite dans la spec — `laneyard.yml` du dépôt, puis le bloc du projet, puis les
-défauts — avec la provenance de chaque champ, que l'interface affichera plus tard.
+The precedence described in the spec — the repository's `laneyard.yml`, then the project's block,
+then the defaults — with the provenance of each field, which the interface will display later.
 
 **Files:**
 - Create: `src/config/resolve.ts`, `tests/config/resolve.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/config/resolve.test.ts` :
+`tests/config/resolve.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -471,26 +474,26 @@ const entry = (over: Partial<ProjectEntry> = {}): ProjectEntry => ({
 });
 
 describe("resolveProjectSettings", () => {
-  it("retombe sur les défauts quand rien n'est défini", () => {
+  it("falls back to the defaults when nothing is set", () => {
     const r = resolveProjectSettings(entry(), null);
     expect(r.settings.fastlane_dir).toBe("fastlane");
     expect(r.settings.timeout_minutes).toBe(60);
     expect(r.provenance.fastlane_dir).toBe("default");
   });
 
-  it("le bloc du projet l'emporte sur les défauts", () => {
+  it("the project's block wins over the defaults", () => {
     const r = resolveProjectSettings(entry({ timeout_minutes: 15 }), null);
     expect(r.settings.timeout_minutes).toBe(15);
     expect(r.provenance.timeout_minutes).toBe("server");
   });
 
-  it("le dépôt l'emporte sur le bloc du projet", () => {
+  it("the repository wins over the project's block", () => {
     const r = resolveProjectSettings(entry({ timeout_minutes: 15 }), { timeout_minutes: 90 });
     expect(r.settings.timeout_minutes).toBe(90);
     expect(r.provenance.timeout_minutes).toBe("repo");
   });
 
-  it("mélange les provenances champ par champ", () => {
+  it("mixes provenances field by field", () => {
     const r = resolveProjectSettings(entry({ runtime: "system" }), {
       artifact_globs: ["build/*.ipa"],
     });
@@ -501,21 +504,21 @@ describe("resolveProjectSettings", () => {
     expect(r.provenance.fastlane_dir).toBe("default");
   });
 
-  it("traite un tableau vide comme une valeur définie, pas comme une absence", () => {
+  it("treats an empty array as a defined value, not as an absence", () => {
     const r = resolveProjectSettings(entry(), { artifact_globs: [] });
     expect(r.provenance.artifact_globs).toBe("repo");
   });
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/config/resolve.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter la résolution**
+- [ ] **Step 3: Implement the resolution**
 
-`src/config/resolve.ts` :
+`src/config/resolve.ts`:
 
 ```ts
 import { projectSettingsSchema } from "./schema.js";
@@ -527,9 +530,9 @@ export type Provenance = Record<keyof ProjectSettings, Origin>;
 const SETTING_KEYS = Object.keys(projectSettingsSchema.shape) as (keyof ProjectSettings)[];
 
 /**
- * Fusionne les trois sources champ par champ.
- * `undefined` signifie « non défini » ; toute autre valeur, y compris un tableau vide
- * ou `false`, est une décision explicite de l'utilisateur.
+ * Merges the three sources field by field.
+ * `undefined` means "not set"; any other value, including an empty array
+ * or `false`, is an explicit decision by the user.
  */
 export function resolveProjectSettings(
   entry: ProjectEntry,
@@ -553,34 +556,34 @@ export function resolveProjectSettings(
     }
   }
 
-  // Le schéma applique les défauts pour tout ce qui reste absent.
+  // The schema applies the defaults for anything still absent.
   const settings = projectSettingsSchema.parse(chosen);
   return { settings, provenance };
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/config/resolve.test.ts`
-Expected: 5 tests passés.
+Expected: 5 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/config/resolve.ts tests/config/resolve.test.ts
-git commit -m "feat(config): résolution avec précédence et provenance"
+git commit -m "feat(config): resolution with precedence and provenance"
 ```
 
 ---
 
-### Task 4 : Base de données et accès aux runs
+### Task 4: Database and access to runs
 
 **Files:**
 - Create: `src/db/schema.sql`, `src/db/open.ts`, `src/db/runs.ts`, `tests/db/runs.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/db/runs.test.ts` :
+`tests/db/runs.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -592,7 +595,7 @@ function store(): RunStore {
 }
 
 describe("RunStore", () => {
-  it("crée un run en attente et le relit", () => {
+  it("creates a queued run and reads it back", () => {
     const s = store();
     const id = s.create({ projectSlug: "p", lane: "beta", platform: "ios", params: { v: "1.2" } });
     const run = s.get(id);
@@ -601,7 +604,7 @@ describe("RunStore", () => {
     expect(run?.startedAt).toBeNull();
   });
 
-  it("horodate le passage à running et à un état terminal", () => {
+  it("timestamps the transition to running and to a terminal state", () => {
     const s = store();
     const id = s.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
     s.markRunning(id, { branch: "main", commitSha: "abc123" });
@@ -614,15 +617,15 @@ describe("RunStore", () => {
     expect(done?.finishedAt).not.toBeNull();
   });
 
-  it("liste les runs d'un projet du plus récent au plus ancien", () => {
+  it("lists a project's runs from most recent to oldest", () => {
     const s = store();
     const a = s.create({ projectSlug: "p", lane: "a", platform: null, params: {} });
     const b = s.create({ projectSlug: "p", lane: "b", platform: null, params: {} });
-    s.create({ projectSlug: "autre", lane: "c", platform: null, params: {} });
+    s.create({ projectSlug: "other", lane: "c", platform: null, params: {} });
     expect(s.listByProject("p").map((r) => r.id)).toEqual([b, a]);
   });
 
-  it("marque interrompu tout run resté actif", () => {
+  it("marks any run still active as interrupted", () => {
     const s = store();
     const id = s.create({ projectSlug: "p", lane: "a", platform: null, params: {} });
     s.markRunning(id, { branch: "main", commitSha: "x" });
@@ -631,7 +634,7 @@ describe("RunStore", () => {
     expect(s.interruptActive()).toBe(0);
   });
 
-  it("enregistre étapes et artefacts rattachés au run", () => {
+  it("records steps and artifacts attached to the run", () => {
     const s = store();
     const id = s.create({ projectSlug: "p", lane: "a", platform: null, params: {} });
     s.replaceSteps(id, [
@@ -647,14 +650,14 @@ describe("RunStore", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/db/runs.test.ts`
-Expected: échec — modules introuvables.
+Expected: failure — modules not found.
 
-- [ ] **Step 3 : Écrire le schéma et le magasin**
+- [ ] **Step 3: Write the schema and the store**
 
-`src/db/schema.sql` :
+`src/db/schema.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS run (
@@ -704,7 +707,7 @@ CREATE TABLE IF NOT EXISTS introspection_cache (
 );
 ```
 
-`src/db/open.ts` :
+`src/db/open.ts`:
 
 ```ts
 import Database from "better-sqlite3";
@@ -724,11 +727,11 @@ export function openDatabase(path: string): Db {
 }
 ```
 
-> Le fichier `schema.sql` doit être copié à côté du JS compilé — le script `build` de la tâche 1
-> s'en charge déjà. En développement, `tsx` exécute les sources : le chemin est correct sans rien
-> faire.
+> The `schema.sql` file must be copied next to the compiled JS — the `build` script from Task 1
+> already takes care of that. In development, `tsx` runs the sources: the path is correct with
+> nothing extra to do.
 
-`src/db/runs.ts` :
+`src/db/runs.ts`:
 
 ```ts
 import type { Db } from "./open.js";
@@ -742,7 +745,7 @@ export type RunStatus =
   | "cancelled"
   | "interrupted";
 
-/** Un run est actif tant qu'il n'a pas atteint un état terminal. */
+/** A run is active until it reaches a terminal state. */
 const ACTIVE: RunStatus[] = ["queued", "preparing", "running"];
 
 export interface Run {
@@ -872,7 +875,7 @@ export class RunStore {
       .run(r.status, now(), r.exitCode, r.errorSummary, id);
   }
 
-  /** Au démarrage : aucun run ne peut être en cours, le processus qui le portait est mort. */
+  /** At startup: no run can still be in progress, the process that carried it is dead. */
   interruptActive(): number {
     const placeholders = ACTIVE.map(() => "?").join(", ");
     const res = this.db
@@ -930,28 +933,28 @@ export class RunStore {
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/db/runs.test.ts`
-Expected: 5 tests passés.
+Expected: 5 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/db tests/db
-git commit -m "feat(db): schéma SQLite et magasin des runs"
+git commit -m "feat(db): SQLite schema and run store"
 ```
 
 ---
 
-### Task 5 : Gestion du workspace git
+### Task 5: Git workspace management
 
 **Files:**
 - Create: `src/git/workspace.ts`, `tests/fixtures/repos.ts`, `tests/git/workspace.test.ts`
 
-- [ ] **Step 1 : Écrire l'aide de test et les tests qui échouent**
+- [ ] **Step 1: Write the test helper and the failing tests**
 
-`tests/fixtures/repos.ts` :
+`tests/fixtures/repos.ts`:
 
 ```ts
 import { execFile } from "node:child_process";
@@ -962,7 +965,7 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 
-/** Crée un dépôt git local servant de « distant » dans les tests. */
+/** Creates a local git repository serving as a "remote" in the tests. */
 export async function makeOriginRepo(files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "laneyard-origin-"));
   await run("git", ["init", "-q", "-b", "main"], { cwd: dir });
@@ -990,7 +993,7 @@ export async function tmpDir(prefix = "laneyard-ws-"): Promise<string> {
 }
 ```
 
-`tests/git/workspace.test.ts` :
+`tests/git/workspace.test.ts`:
 
 ```ts
 import { readFile, writeFile } from "node:fs/promises";
@@ -1000,7 +1003,7 @@ import { Workspace } from "../../src/git/workspace.js";
 import { commitTo, makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
 describe("Workspace", () => {
-  it("clone au premier accès puis se déclare prêt", async () => {
+  it("clones on first access then declares itself ready", async () => {
     const origin = await makeOriginRepo({ "README.md": "hello" });
     const ws = new Workspace(join(await tmpDir(), "p"), origin);
 
@@ -1010,7 +1013,7 @@ describe("Workspace", () => {
     expect(await readFile(join(ws.path, "README.md"), "utf8")).toBe("hello");
   });
 
-  it("récupère les nouveaux commits au run suivant", async () => {
+  it("fetches new commits on the next run", async () => {
     const origin = await makeOriginRepo({ "a.txt": "v1" });
     const ws = new Workspace(join(await tmpDir(), "p"), origin);
     await ws.prepare("main");
@@ -1022,44 +1025,44 @@ describe("Workspace", () => {
     expect(await ws.headSha()).toBe(sha);
   });
 
-  it("refuse de préparer par-dessus des modifications non commitées", async () => {
+  it("refuses to prepare over uncommitted changes", async () => {
     const origin = await makeOriginRepo({ "a.txt": "v1" });
     const ws = new Workspace(join(await tmpDir(), "p"), origin);
     await ws.prepare("main");
-    await writeFile(join(ws.path, "a.txt"), "modifié à la main", "utf8");
+    await writeFile(join(ws.path, "a.txt"), "edited by hand", "utf8");
 
     expect(await ws.isDirty()).toBe(true);
-    await expect(ws.prepare("main")).rejects.toThrow(/non commit/i);
+    await expect(ws.prepare("main")).rejects.toThrow(/uncommitted/i);
   });
 
-  it("échoue lisiblement sur une branche inconnue", async () => {
+  it("fails readably on an unknown branch", async () => {
     const origin = await makeOriginRepo({ "a.txt": "v1" });
     const ws = new Workspace(join(await tmpDir(), "p"), origin);
-    await expect(ws.prepare("nexiste-pas")).rejects.toThrow(/nexiste-pas/);
+    await expect(ws.prepare("does-not-exist")).rejects.toThrow(/does-not-exist/);
   });
 
-  it("clone à la demande sans basculer de branche", async () => {
+  it("clones on demand without switching branch", async () => {
     const origin = await makeOriginRepo({ "laneyard.yml": "runtime: system\n" });
     const ws = new Workspace(join(await tmpDir(), "p"), origin);
 
     await ws.ensureCloned();
     expect(await ws.exists()).toBe(true);
 
-    // Idempotent : un second appel ne refait rien et ne lève pas.
+    // Idempotent: a second call redoes nothing and doesn't throw.
     await ws.ensureCloned();
     expect(await ws.exists()).toBe(true);
   });
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/git/workspace.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter le workspace**
+- [ ] **Step 3: Implement the workspace**
 
-`src/git/workspace.ts` :
+`src/git/workspace.ts`:
 
 ```ts
 import { execFile } from "node:child_process";
@@ -1075,8 +1078,8 @@ export interface GitAuth {
 }
 
 /**
- * Un clone géré par Laneyard, conservé entre les runs.
- * Toutes les commandes git passent par ici pour partager l'environnement d'authentification.
+ * A clone managed by Laneyard, kept between runs.
+ * All git commands go through here to share the authentication environment.
  */
 export class Workspace {
   constructor(
@@ -1086,7 +1089,7 @@ export class Workspace {
   ) {}
 
   private env(): NodeJS.ProcessEnv {
-    // Sans cela, git peut bloquer sur une demande d'identifiants et figer le run.
+    // Without this, git can block on a credentials prompt and freeze the run.
     const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
     if (this.auth.kind === "ssh_key" && this.auth.ref) {
       env["GIT_SSH_COMMAND"] = `ssh -i ${this.auth.ref} -o IdentitiesOnly=yes -o BatchMode=yes`;
@@ -1100,7 +1103,7 @@ export class Workspace {
       return stdout.trim();
     } catch (cause) {
       const err = cause as { stderr?: string; message: string };
-      throw new Error(`git ${args.join(" ")} a échoué : ${(err.stderr || err.message).trim()}`);
+      throw new Error(`git ${args.join(" ")} failed: ${(err.stderr || err.message).trim()}`);
     }
   }
 
@@ -1114,12 +1117,12 @@ export class Workspace {
   }
 
   /**
-   * Vrai s'il existe des modifications *suivies* non commitées.
+   * True if there are uncommitted changes to *tracked* files.
    *
-   * Les fichiers non suivis sont volontairement ignorés : un build en sème
-   * (fastlane réécrit `fastlane/README.md` à chaque exécution, les artefacts
-   * atterrissent dans `build/`), et surtout `git checkout` ne les détruit pas.
-   * Les compter rendrait tout second run impossible sans protéger quoi que ce soit.
+   * Untracked files are deliberately ignored: a build scatters them around
+   * (fastlane rewrites `fastlane/README.md` on every run, artifacts land in
+   * `build/`), and above all `git checkout` doesn't destroy them. Counting
+   * them would make every second run impossible without protecting anything.
    */
   async isDirty(): Promise<boolean> {
     if (!(await this.exists())) return false;
@@ -1131,20 +1134,20 @@ export class Workspace {
   }
 
   /**
-   * Garantit la présence du clone, sans toucher à la branche courante.
+   * Guarantees the clone is present, without touching the current branch.
    *
-   * Nécessaire avant toute lecture du dépôt hors run — lister les lanes, lire le
-   * laneyard.yml — puisque ces informations vivent dans les fichiers du projet.
+   * Needed before any read of the repository outside a run — listing lanes,
+   * reading laneyard.yml — since that information lives in the project's files.
    */
   async ensureCloned(onProgress?: (line: string) => void): Promise<void> {
     if (await this.exists()) return;
-    onProgress?.(`Clonage de ${this.gitUrl}…`);
+    onProgress?.(`Cloning ${this.gitUrl}…`);
     await this.git(["clone", this.gitUrl, this.path], process.cwd());
   }
 
   /**
-   * Amène le workspace sur la branche demandée, à jour.
-   * Clone au premier appel, se contente d'un fetch ensuite.
+   * Brings the workspace to the requested branch, up to date.
+   * Clones on the first call, just fetches afterwards.
    */
   async prepare(branch: string, onProgress?: (line: string) => void): Promise<string> {
     if (!(await this.exists())) {
@@ -1152,65 +1155,65 @@ export class Workspace {
     } else {
       if (await this.isDirty()) {
         throw new Error(
-          "Le workspace contient des modifications non commitées. " +
-            "Committez-les ou nettoyez le workspace avant de lancer un run.",
+          "The workspace has uncommitted changes. " +
+            "Commit them or clean the workspace before starting a run.",
         );
       }
-      onProgress?.("Récupération des nouveautés…");
+      onProgress?.("Fetching updates…");
       await this.git(["fetch", "--prune", "origin"]);
     }
 
-    onProgress?.(`Bascule sur ${branch}…`);
+    onProgress?.(`Switching to ${branch}…`);
     await this.git(["checkout", "-q", "-B", branch, `origin/${branch}`]);
     return this.headSha();
   }
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/git/workspace.test.ts`
-Expected: 5 tests passés.
+Expected: 5 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/git tests/git tests/fixtures/repos.ts
-git commit -m "feat(git): clone, fetch et checkout du workspace"
+git commit -m "feat(git): workspace clone, fetch, and checkout"
 ```
 
 ---
 
-### Task 6 : Sidecar Ruby — commande `lanes`
+### Task 6: Ruby sidecar — the `lanes` command
 
 **Files:**
 - Create: `src/sidecar/ruby-env.ts`, `tests/sidecar/ruby-env.test.ts`, `ruby/introspect.rb`, `tests/ruby/introspect.test.ts`
 
-#### Pourquoi un résolveur d'environnement Ruby
+#### Why a Ruby environment resolver
 
-Le sidecar suppose que `require "fastlane"` fonctionne. Ce n'est vrai que si fastlane est un gem
-visible du Ruby courant. Or l'installation la plus répandue sur macOS, celle d'Homebrew, place
-fastlane dans un `GEM_HOME` privé et fournit un lanceur qui le positionne avant d'exécuter :
+The sidecar assumes `require "fastlane"` works. That's only true if fastlane is a gem visible to
+the current Ruby. But the most common install on macOS, Homebrew's, puts fastlane in a private
+`GEM_HOME` and provides a launcher that sets it before running:
 
 ```bash
 GEM_HOME="${HOME}/.local/share/fastlane/4.0.0" exec ".../libexec/bin/fastlane" "$@"
 ```
 
-Avec ce type d'installation, `ruby -e 'require "fastlane"'` échoue. Le mode `system` serait donc
-inutilisable sans que rien n'explique pourquoi. En mode `bundle`, `bundle exec` règle la question
-seul — le problème ne concerne que `system`.
+With this kind of install, `ruby -e 'require "fastlane"'` fails. `system` mode would therefore be
+unusable with nothing to explain why. In `bundle` mode, `bundle exec` settles the question on its
+own — the problem only concerns `system`.
 
-La résolution procède par essais, du plus simple au plus spécifique, et le résultat est mémorisé :
+Resolution proceeds by trial, from the simplest to the most specific, and the result is memoized:
 
-1. l'environnement courant, qui suffit dès que fastlane est installé normalement (`gem install`,
-   rbenv, rvm, asdf) ;
-2. à défaut, l'environnement extrait du lanceur `fastlane` s'il s'agit d'un script shell — cas
-   Homebrew ;
-3. sinon, un échec explicite disant quoi faire.
+1. the current environment, which is enough as soon as fastlane is installed normally
+   (`gem install`, rbenv, rvm, asdf);
+2. failing that, the environment extracted from the `fastlane` launcher if it's a shell script —
+   the Homebrew case;
+3. otherwise, an explicit failure saying what to do.
 
-- [ ] **Step 1 : Écrire les tests du résolveur**
+- [ ] **Step 1: Write the resolver's tests**
 
-`tests/sidecar/ruby-env.test.ts` :
+`tests/sidecar/ruby-env.test.ts`:
 
 ```ts
 import { execFile } from "node:child_process";
@@ -1221,7 +1224,7 @@ import { resolveRubyEnv } from "../../src/sidecar/ruby-env.js";
 const exec = promisify(execFile);
 
 describe("resolveRubyEnv", () => {
-  it("rend un environnement où Ruby sait charger fastlane", async () => {
+  it("returns an environment where Ruby can load fastlane", async () => {
     const resolved = await resolveRubyEnv();
     expect(resolved).not.toBeNull();
 
@@ -1232,12 +1235,12 @@ describe("resolveRubyEnv", () => {
     expect(stdout).toBe("ok");
   }, 240_000);
 
-  it("indique d'où vient l'environnement retenu", async () => {
+  it("indicates where the chosen environment comes from", async () => {
     const resolved = await resolveRubyEnv();
     expect(["process", "launcher"]).toContain(resolved!.source);
   }, 240_000);
 
-  it("mémorise le résultat plutôt que de resonder à chaque appel", async () => {
+  it("memoizes the result rather than probing again on every call", async () => {
     const a = await resolveRubyEnv();
     const b = await resolveRubyEnv();
     expect(b).toBe(a);
@@ -1245,14 +1248,14 @@ describe("resolveRubyEnv", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/sidecar/ruby-env.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter le résolveur**
+- [ ] **Step 3: Implement the resolver**
 
-`src/sidecar/ruby-env.ts` :
+`src/sidecar/ruby-env.ts`:
 
 ```ts
 import { execFile } from "node:child_process";
@@ -1262,7 +1265,7 @@ const exec = promisify(execFile);
 
 export interface RubyEnv {
   env: NodeJS.ProcessEnv;
-  /** `process` : Ruby savait déjà. `launcher` : environnement repris du lanceur fastlane. */
+  /** `process`: Ruby already knew. `launcher`: environment recovered from the fastlane launcher. */
   source: "process" | "launcher";
 }
 
@@ -1276,11 +1279,12 @@ async function canRequireFastlane(env: NodeJS.ProcessEnv): Promise<boolean> {
 }
 
 /**
- * Reconstitue l'environnement du lanceur `fastlane` quand c'en est un script shell.
+ * Reconstructs the `fastlane` launcher's environment when it's a shell script.
  *
- * On n'exécute pas le lanceur : on relit ses affectations `GEM_HOME` et `GEM_PATH`
- * et on les fait évaluer par bash, qui sait développer `${HOME}` et les valeurs par
- * défaut. Approche volontairement étroite — deux variables, rien d'autre.
+ * We don't run the launcher: we read back its `GEM_HOME` and `GEM_PATH`
+ * assignments and have bash evaluate them, since it knows how to expand
+ * `${HOME}` and default values. Deliberately narrow approach — two
+ * variables, nothing else.
  */
 async function envFromLauncher(): Promise<NodeJS.ProcessEnv | null> {
   const script = `
@@ -1303,10 +1307,10 @@ async function envFromLauncher(): Promise<NodeJS.ProcessEnv | null> {
 let cached: Promise<RubyEnv | null> | null = null;
 
 /**
- * Trouve un environnement dans lequel `ruby` peut charger fastlane, ou null.
+ * Finds an environment in which `ruby` can load fastlane, or null.
  *
- * Le résultat est mémorisé : sonder coûte plusieurs secondes, fastlane étant lent
- * à charger, et l'installation ne change pas en cours d'exécution.
+ * The result is memoized: probing costs several seconds, since fastlane is
+ * slow to load, and the install doesn't change while the process runs.
  */
 export function resolveRubyEnv(): Promise<RubyEnv | null> {
   cached ??= (async () => {
@@ -1322,21 +1326,21 @@ export function resolveRubyEnv(): Promise<RubyEnv | null> {
   return cached;
 }
 
-/** Message unique, pour ne pas décrire le problème différemment à chaque endroit. */
+/** Single message, so the problem isn't described differently in each place. */
 export const FASTLANE_UNAVAILABLE =
-  "Ruby ne parvient pas à charger fastlane. Installez-le pour le Ruby courant " +
-  "(`gem install fastlane`), ou déclarez un Gemfile dans le projet et passez le " +
-  "réglage `runtime` à `bundle`.";
+  "Ruby cannot load fastlane. Install it for the current Ruby " +
+  "(`gem install fastlane`), or declare a Gemfile in the project and set " +
+  "the `runtime` setting to `bundle`.";
 ```
 
-- [ ] **Step 4 : Lancer les tests du résolveur**
+- [ ] **Step 4: Run the resolver's tests**
 
 Run: `npm test -- tests/sidecar/ruby-env.test.ts`
-Expected: 3 tests passés. Le premier appel prend plusieurs secondes — fastlane est lent à charger.
+Expected: 3 tests passing. The first call takes several seconds — fastlane is slow to load.
 
-- [ ] **Step 5 : Écrire les tests du sidecar**
+- [ ] **Step 5: Write the sidecar's tests**
 
-`tests/ruby/introspect.test.ts` :
+`tests/ruby/introspect.test.ts`:
 
 ```ts
 import { execFile } from "node:child_process";
@@ -1358,9 +1362,9 @@ async function projectWithFastfile(content: string): Promise<string> {
 }
 
 async function introspect(dir: string, cmd: string): Promise<unknown> {
-  // Le sidecar tourne ici sans bundle : il lui faut l'environnement résolu.
+  // The sidecar runs here without bundle: it needs the resolved environment.
   const ruby = await resolveRubyEnv();
-  if (!ruby) throw new Error("fastlane introuvable pour le Ruby courant");
+  if (!ruby) throw new Error("fastlane not found for the current Ruby");
 
   const { stdout } = await exec("ruby", [SCRIPT, cmd, "--fastlane-dir", "fastlane"], {
     cwd: dir,
@@ -1371,7 +1375,7 @@ async function introspect(dir: string, cmd: string): Promise<unknown> {
 }
 
 describe("introspect.rb lanes", () => {
-  it("liste les lanes avec plateforme et description", async () => {
+  it("lists lanes with platform and description", async () => {
     const dir = await projectWithFastfile(`
       platform :ios do
         desc "Push a new beta build to TestFlight"
@@ -1401,8 +1405,8 @@ describe("introspect.rb lanes", () => {
     expect(res.lanes.find((l) => l.name === "helper")?.private).toBe(true);
   }, 180_000);
 
-  it("renvoie une erreur structurée sur un Fastfile invalide", async () => {
-    const dir = await projectWithFastfile("lane :beta do\n  # jamais fermé\n");
+  it("returns a structured error on an invalid Fastfile", async () => {
+    const dir = await projectWithFastfile("lane :beta do\n  # never closed\n");
     const res = (await introspect(dir, "lanes")) as { ok: boolean; error: string };
     expect(res.ok).toBe(false);
     expect(res.error.length).toBeGreaterThan(0);
@@ -1410,36 +1414,36 @@ describe("introspect.rb lanes", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer le test pour vérifier qu'il échoue**
+- [ ] **Step 2: Run the test to confirm it fails**
 
 Run: `npm test -- tests/ruby/introspect.test.ts`
-Expected: échec — `ruby/introspect.rb` n'existe pas.
+Expected: failure — `ruby/introspect.rb` doesn't exist.
 
-- [ ] **Step 3 : Écrire le sidecar**
+- [ ] **Step 3: Write the sidecar**
 
-`ruby/introspect.rb` :
+`ruby/introspect.rb`:
 
 ```ruby
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Sidecar d'introspection de Laneyard.
+# Laneyard's introspection sidecar.
 #
-# Lancé dans le dossier d'un projet — idéalement via `bundle exec` — il est le seul
-# composant qui connaît fastlane. Il n'écrit jamais rien : il lit et renvoie du JSON
-# sur la sortie standard.
+# Launched in a project's folder — ideally via `bundle exec` — it's the only
+# component that knows fastlane. It never writes anything: it reads and returns
+# JSON on standard output.
 #
 #   ruby introspect.rb lanes   --fastlane-dir fastlane
 #   ruby introspect.rb actions --fastlane-dir fastlane
 #   ruby introspect.rb parse   --fastlane-dir fastlane
 #
-# Le contrat de sortie est constant : { "ok": true, ... } ou { "ok": false, "error": "..." }.
-# Une erreur est une réponse valide, jamais une trace sur stderr.
+# The output contract is constant: { "ok": true, ... } or { "ok": false, "error": "..." }.
+# An error is a valid response, never a trace on stderr.
 
 require "json"
 
-# Voir plus bas : la vraie sortie standard est mise de côté dès le départ pour que
-# rien d'autre que notre JSON ne puisse s'y glisser.
+# See below: the real standard output is set aside right from the start so
+# that nothing but our JSON can slip into it.
 REAL_STDOUT = $stdout.dup
 
 def respond(payload)
@@ -1457,18 +1461,18 @@ dir_index = ARGV.index("--fastlane-dir")
 fastlane_dir = dir_index ? ARGV[dir_index + 1] : "fastlane"
 fastfile_path = File.join(Dir.pwd, fastlane_dir, "Fastfile")
 
-fail_with("Fastfile introuvable : #{fastfile_path}") unless File.exist?(fastfile_path)
+fail_with("Fastfile not found: #{fastfile_path}") unless File.exist?(fastfile_path)
 
-# fastlane écrit volontiers sur la sortie standard — avertissements de plugin,
-# messages de dépréciation, bandeau de mise à jour. Un seul de ces messages
-# corromprait le JSON attendu par l'appelant. Tout part donc vers l'erreur standard,
-# et seule `respond` écrit sur la vraie sortie.
+# fastlane readily writes to standard output — plugin warnings, deprecation
+# messages, update banner. Just one of these messages would corrupt the JSON
+# the caller expects. Everything therefore goes to standard error, and only
+# `respond` writes to the real output.
 $stdout = $stderr
 
 begin
   require "fastlane"
 rescue LoadError => e
-  fail_with("fastlane n'est pas disponible dans cet environnement Ruby (#{e.message})")
+  fail_with("fastlane is not available in this Ruby environment (#{e.message})")
 end
 
 def collect_lanes(fastfile_path)
@@ -1492,43 +1496,43 @@ when "lanes"
   begin
     lanes = collect_lanes(fastfile_path)
   rescue Exception => e # rubocop:disable Lint/RescueException
-    # Un Fastfile est du Ruby arbitraire : son chargement peut lever n'importe quoi,
-    # y compris des erreurs de syntaxe qui ne descendent pas de StandardError.
-    fail_with("Chargement du Fastfile impossible : #{e.message}")
+    # A Fastfile is arbitrary Ruby: loading it can raise anything at all,
+    # including syntax errors that don't descend from StandardError.
+    fail_with("Could not load the Fastfile: #{e.message}")
   end
 
-  # `respond` se termine par `exit`, qui lève SystemExit — lui aussi un Exception.
-  # L'appeler à l'intérieur du bloc protégé ferait attraper sa propre sortie et
-  # écrirait un second JSON d'erreur « exit ». Il reste donc dehors.
+  # `respond` ends with `exit`, which raises SystemExit — itself an Exception.
+  # Calling it inside the protected block would catch its own exit and
+  # write a second "exit" error JSON. It therefore stays outside.
   respond({ ok: true, lanes: lanes })
 else
-  fail_with("Commande inconnue : #{command.inspect}")
+  fail_with("Unknown command: #{command.inspect}")
 end
 ```
 
-- [ ] **Step 4 : Lancer le test**
+- [ ] **Step 4: Run the test**
 
 Run: `npm test -- tests/ruby/introspect.test.ts`
-Expected: 2 tests passés. Le premier appel est lent — fastlane met plusieurs secondes à se charger,
-d'où le délai de 180 s.
+Expected: 2 tests passing. The first call is slow — fastlane takes several seconds to load,
+hence the 180s timeout.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add ruby tests/ruby src/sidecar tests/sidecar
-git commit -m "feat(sidecar): commande lanes du script d'introspection Ruby"
+git commit -m "feat(sidecar): lanes command for the Ruby introspection script"
 ```
 
 ---
 
-### Task 7 : Pont TypeScript vers le sidecar, avec cache
+### Task 7: TypeScript bridge to the sidecar, with caching
 
 **Files:**
 - Create: `src/sidecar/bridge.ts`, `src/db/cache.ts`, `src/sidecar/lanes.ts`, `tests/sidecar/lanes.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/sidecar/lanes.test.ts` :
+`tests/sidecar/lanes.test.ts`:
 
 ```ts
 import { mkdir, writeFile } from "node:fs/promises";
@@ -1551,7 +1555,7 @@ async function fastlaneDir(files: Record<string, string>): Promise<string> {
 const LANES = [{ name: "beta", platform: "ios", description: "", private: false }];
 
 describe("LaneReader", () => {
-  it("interroge le sidecar puis sert le cache au second appel", async () => {
+  it("queries the sidecar then serves the cache on the second call", async () => {
     const dir = await fastlaneDir({ Fastfile: "lane :beta do\nend\n" });
     const invoke = vi.fn().mockResolvedValue({ ok: true, lanes: LANES });
     const reader = new LaneReader(new CacheStore(openDatabase(":memory:")), invoke);
@@ -1561,7 +1565,7 @@ describe("LaneReader", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("réinterroge le sidecar quand un fichier du dossier change", async () => {
+  it("re-queries the sidecar when a file in the folder changes", async () => {
     const dir = await fastlaneDir({ Fastfile: "lane :beta do\nend\n" });
     const invoke = vi.fn().mockResolvedValue({ ok: true, lanes: LANES });
     const reader = new LaneReader(new CacheStore(openDatabase(":memory:")), invoke);
@@ -1573,7 +1577,7 @@ describe("LaneReader", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
-  it("réinterroge aussi quand un fichier voisin change, pas seulement le Fastfile", async () => {
+  it("also re-queries when a neighbouring file changes, not just the Fastfile", async () => {
     const dir = await fastlaneDir({ Fastfile: "lane :beta do\nend\n", Appfile: "app_identifier 'a'\n" });
     const invoke = vi.fn().mockResolvedValue({ ok: true, lanes: LANES });
     const reader = new LaneReader(new CacheStore(openDatabase(":memory:")), invoke);
@@ -1585,26 +1589,26 @@ describe("LaneReader", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
-  it("propage l'erreur du sidecar sans rien mettre en cache", async () => {
-    const dir = await fastlaneDir({ Fastfile: "cassé" });
-    const invoke = vi.fn().mockResolvedValue({ ok: false, error: "Fastfile illisible" });
+  it("propagates the sidecar's error without caching anything", async () => {
+    const dir = await fastlaneDir({ Fastfile: "broken" });
+    const invoke = vi.fn().mockResolvedValue({ ok: false, error: "unreadable Fastfile" });
     const reader = new LaneReader(new CacheStore(openDatabase(":memory:")), invoke);
 
-    await expect(reader.read("p", dir, "fastlane")).rejects.toThrow(/illisible/);
-    await expect(reader.read("p", dir, "fastlane")).rejects.toThrow(/illisible/);
+    await expect(reader.read("p", dir, "fastlane")).rejects.toThrow(/unreadable/);
+    await expect(reader.read("p", dir, "fastlane")).rejects.toThrow(/unreadable/);
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/sidecar/lanes.test.ts`
-Expected: échec — modules introuvables.
+Expected: failure — modules not found.
 
-- [ ] **Step 3 : Implémenter le pont, le cache et le lecteur**
+- [ ] **Step 3: Implement the bridge, the cache, and the reader**
 
-`src/sidecar/bridge.ts` :
+`src/sidecar/bridge.ts`:
 
 ```ts
 import { execFile } from "node:child_process";
@@ -1628,9 +1632,9 @@ export type Invoke = (
 ) => Promise<SidecarResponse>;
 
 /**
- * Lance le sidecar dans le contexte du projet.
- * En mode `bundle`, l'invocation passe par `bundle exec` pour voir la bonne version
- * de fastlane et les plugins déclarés par le projet.
+ * Runs the sidecar in the project's context.
+ * In `bundle` mode, the invocation goes through `bundle exec` to see the
+ * right version of fastlane and the plugins the project declares.
  */
 export function makeInvoke(runtime: "bundle" | "system"): Invoke {
   return async (command, cwd, fastlaneDir) => {
@@ -1639,8 +1643,8 @@ export function makeInvoke(runtime: "bundle" | "system"): Invoke {
         ? ["bundle", ["exec", "ruby", SCRIPT, command, "--fastlane-dir", fastlaneDir]]
         : ["ruby", [SCRIPT, command, "--fastlane-dir", fastlaneDir]];
 
-    // En mode bundle, `bundle exec` fournit déjà le bon environnement. En mode
-    // system, il faut le trouver : selon l'installation, `ruby` ne voit pas fastlane.
+    // In bundle mode, `bundle exec` already provides the right environment. In
+    // system mode, it has to be found: depending on the install, `ruby` may not see fastlane.
     let env = process.env;
     if (runtime === "system") {
       const ruby = await resolveRubyEnv();
@@ -1660,14 +1664,14 @@ export function makeInvoke(runtime: "bundle" | "system"): Invoke {
       const err = cause as { stderr?: string; message: string };
       return {
         ok: false,
-        error: `Le sidecar Ruby a échoué : ${(err.stderr || err.message).trim()}`,
+        error: `The Ruby sidecar failed: ${(err.stderr || err.message).trim()}`,
       };
     }
   };
 }
 ```
 
-`src/db/cache.ts` :
+`src/db/cache.ts`:
 
 ```ts
 import type { Db } from "./open.js";
@@ -1697,7 +1701,7 @@ export class CacheStore {
 }
 ```
 
-`src/sidecar/lanes.ts` :
+`src/sidecar/lanes.ts`:
 
 ```ts
 import { createHash } from "node:crypto";
@@ -1714,8 +1718,8 @@ export interface Lane {
 }
 
 /**
- * Empreinte de tout le dossier fastlane, pas seulement du Fastfile :
- * un Appfile, un Pluginfile ou un fichier importé changent les lanes tout autant.
+ * Hash of the whole fastlane folder, not just the Fastfile:
+ * an Appfile, a Pluginfile, or an imported file change the lanes just as much.
  */
 async function hashFastlaneDir(root: string, fastlaneDir: string): Promise<string> {
   const dir = join(root, fastlaneDir);
@@ -1754,28 +1758,28 @@ export class LaneReader {
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/sidecar/lanes.test.ts`
-Expected: 4 tests passés.
+Expected: 4 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/sidecar src/db/cache.ts tests/sidecar
-git commit -m "feat(sidecar): pont TypeScript et cache d'introspection"
+git commit -m "feat(sidecar): TypeScript bridge and introspection cache"
 ```
 
 ---
 
-### Task 8 : Magasin de logs
+### Task 8: Log store
 
 **Files:**
 - Create: `src/logs/store.ts`, `tests/logs/store.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/logs/store.test.ts` :
+`tests/logs/store.test.ts`:
 
 ```ts
 import { join } from "node:path";
@@ -1784,17 +1788,17 @@ import { LogStore } from "../../src/logs/store.js";
 import { tmpDir } from "../fixtures/repos.js";
 
 describe("LogStore", () => {
-  it("écrit et relit intégralement", async () => {
+  it("writes and reads back in full", async () => {
     const store = new LogStore(await tmpDir("laneyard-logs-"));
     const w = await store.open(1);
-    await w.append("première ligne\n");
-    await w.append("seconde ligne\n");
+    await w.append("first line\n");
+    await w.append("second line\n");
     await w.close();
 
-    expect(await store.read(1)).toBe("première ligne\nseconde ligne\n");
+    expect(await store.read(1)).toBe("first line\nsecond line\n");
   });
 
-  it("relit depuis un décalage en octets", async () => {
+  it("reads back from a byte offset", async () => {
     const store = new LogStore(await tmpDir("laneyard-logs-"));
     const w = await store.open(2);
     await w.append("abcdef");
@@ -1803,21 +1807,21 @@ describe("LogStore", () => {
     expect(await store.read(2, 3)).toBe("def");
   });
 
-  it("expose le décalage courant après chaque écriture", async () => {
+  it("exposes the current offset after every write", async () => {
     const store = new LogStore(await tmpDir("laneyard-logs-"));
     const w = await store.open(3);
     expect(w.offset).toBe(0);
-    await w.append("héllo"); // 6 octets en UTF-8, pas 5
+    await w.append("hüllo"); // 6 bytes in UTF-8, not 5
     expect(w.offset).toBe(6);
     await w.close();
   });
 
-  it("renvoie une chaîne vide pour un run sans log", async () => {
+  it("returns an empty string for a run with no log", async () => {
     const store = new LogStore(await tmpDir("laneyard-logs-"));
     expect(await store.read(999)).toBe("");
   });
 
-  it("place le fichier dans le dossier configuré", async () => {
+  it("places the file in the configured folder", async () => {
     const dir = await tmpDir("laneyard-logs-");
     const store = new LogStore(dir);
     expect(store.pathFor(7)).toBe(join(dir, "7.log"));
@@ -1825,14 +1829,14 @@ describe("LogStore", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/logs/store.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter le magasin**
+- [ ] **Step 3: Implement the store**
 
-`src/logs/store.ts` :
+`src/logs/store.ts`:
 
 ```ts
 import { createReadStream } from "node:fs";
@@ -1841,9 +1845,9 @@ import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
- * Écrivain append-only pour un run.
- * `offset` compte des octets, jamais des caractères : c'est ce que la reprise
- * de lecture côté navigateur manipule, et un accent occupe deux octets.
+ * Append-only writer for a run.
+ * `offset` counts bytes, never characters: that's what the browser-side
+ * read resumption works with, and a multi-byte character can span several bytes.
  */
 export class LogWriter {
   private _offset = 0;
@@ -1856,11 +1860,11 @@ export class LogWriter {
   }
 
   /**
-   * Réserve le décalage immédiatement puis sérialise les écritures.
+   * Reserves the offset immediately then serializes the writes.
    *
-   * Les fragments arrivent d'un PTY, sans attendre : si le décalage était calculé
-   * après l'écriture, deux fragments concurrents pourraient s'attribuer la même
-   * position et le rattrapage côté navigateur dupliquerait ou perdrait du texte.
+   * Fragments arrive from a PTY, without waiting: if the offset were computed
+   * after the write, two concurrent fragments could claim the same position
+   * and the browser-side catch-up would duplicate or lose text.
    */
   async append(chunk: string): Promise<number> {
     const buf = Buffer.from(chunk, "utf8");
@@ -1868,7 +1872,7 @@ export class LogWriter {
     this._offset += buf.byteLength;
 
     this.queue = this.queue.then(() => this.handle.write(buf)).catch(() => {
-      // Le fichier a pu être fermé pendant que le processus finissait de parler.
+      // The file may have been closed while the process was still finishing up.
     });
     await this.queue;
     return start;
@@ -1901,49 +1905,49 @@ export class LogStore {
     }
   }
 
-  /** Pour servir un gros log sans le charger entièrement en mémoire. */
+  /** For serving a large log without loading it entirely into memory. */
   stream(runId: number, fromOffset = 0): NodeJS.ReadableStream {
     return createReadStream(this.pathFor(runId), { start: fromOffset });
   }
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/logs/store.test.ts`
-Expected: 5 tests passés.
+Expected: 5 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/logs tests/logs
-git commit -m "feat(logs): écriture append-only et lecture depuis un décalage"
+git commit -m "feat(logs): append-only writing and reading from an offset"
 ```
 
 ---
 
-### Task 9 : Repérage des étapes en direct et lecture de report.xml
+### Task 9: Detecting live steps and reading report.xml
 
 **Files:**
 - Create: `src/runner/live-steps.ts`, `src/runner/report.ts`, `tests/runner/live-steps.test.ts`, `tests/runner/report.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/runner/live-steps.test.ts` :
+`tests/runner/live-steps.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
 import { LiveStepTracker } from "../../src/runner/live-steps.js";
 
 describe("LiveStepTracker", () => {
-  it("repère une étape et retient son décalage", () => {
+  it("spots a step and keeps its offset", () => {
     const t = new LiveStepTracker();
-    t.consume("[09:41:02]: bruit avant\n", 0);
+    t.consume("[09:41:02]: noise before\n", 0);
     t.consume("[09:41:03]: ------ Step: build_app ------\n", 30);
     expect(t.steps()).toEqual([{ name: "build_app", logOffset: 30 }]);
   });
 
-  it("repère plusieurs étapes dans l'ordre d'apparition", () => {
+  it("spots several steps in order of appearance", () => {
     const t = new LiveStepTracker();
     t.consume("[t]: --- Step: match ---\n[t]: --- Step: build_app ---\n", 100);
     expect(t.steps().map((s) => s.name)).toEqual(["match", "build_app"]);
@@ -1951,22 +1955,22 @@ describe("LiveStepTracker", () => {
     expect(t.steps()[1]!.logOffset).toBeGreaterThan(100);
   });
 
-  it("recolle une ligne coupée entre deux fragments", () => {
+  it("rejoins a line split across two fragments", () => {
     const t = new LiveStepTracker();
     t.consume("[t]: ------ Step: buil", 0);
     t.consume("d_app ------\n", 17);
     expect(t.steps().map((s) => s.name)).toEqual(["build_app"]);
   });
 
-  it("ignore une ligne qui mentionne Step sans être un séparateur", () => {
+  it("ignores a line that mentions Step without being a separator", () => {
     const t = new LiveStepTracker();
-    t.consume("Le mot Step: apparaît ici sans tirets\n", 0);
+    t.consume("The word Step: appears here with no dashes\n", 0);
     expect(t.steps()).toEqual([]);
   });
 });
 ```
 
-`tests/runner/report.test.ts` :
+`tests/runner/report.test.ts`:
 
 ```ts
 import { writeFile } from "node:fs/promises";
@@ -1975,7 +1979,7 @@ import { describe, expect, it } from "vitest";
 import { readReport } from "../../src/runner/report.js";
 import { tmpDir } from "../fixtures/repos.js";
 
-// Forme réelle observée : les actions réussies sont auto-fermantes.
+// Real form observed: successful actions are self-closing.
 const OK = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
   <testsuite name="fastlane.lanes">
@@ -1984,7 +1988,7 @@ const OK = `<?xml version="1.0" encoding="UTF-8"?>
   </testsuite>
 </testsuites>`;
 
-// Rapport mixte : c'est le cas qui piège un motif mal ordonné.
+// Mixed report: this is the case that traps a badly ordered pattern.
 const FAILED = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
   <testsuite name="fastlane.lanes">
@@ -1996,7 +2000,7 @@ const FAILED = `<?xml version="1.0" encoding="UTF-8"?>
 </testsuites>`;
 
 describe("readReport", () => {
-  it("extrait nom, index et durée de chaque action", async () => {
+  it("extracts name, index, and duration for each action", async () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(join(dir, "report.xml"), OK, "utf8");
     const steps = await readReport(join(dir, "report.xml"));
@@ -2007,12 +2011,12 @@ describe("readReport", () => {
     ]);
   });
 
-  it("n'attribue l'échec qu'à l'action concernée dans un rapport mixte", async () => {
+  it("attributes the failure only to the action concerned in a mixed report", async () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(join(dir, "report.xml"), FAILED, "utf8");
     const steps = await readReport(join(dir, "report.xml"));
-    // Restreint le type autant que ça vérifie : la suite indexe le tableau.
-    if (!steps) throw new Error("rapport attendu");
+    // Narrows the type as much as it verifies: the rest of the test indexes the array.
+    if (!steps) throw new Error("expected report");
 
     expect(steps).toHaveLength(2);
     expect(steps[0]!.status).toBe("success");
@@ -2020,12 +2024,12 @@ describe("readReport", () => {
     expect(steps[1]!.status).toBe("failed");
   });
 
-  it("renvoie null si le rapport n'existe pas", async () => {
+  it("returns null if the report doesn't exist", async () => {
     const dir = await tmpDir("laneyard-rep-");
     expect(await readReport(join(dir, "report.xml"))).toBeNull();
   });
 
-  it("renvoie null sur un rapport illisible plutôt que de lever", async () => {
+  it("returns null on an unreadable report rather than throwing", async () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(join(dir, "report.xml"), "<testsuites", "utf8");
     expect(await readReport(join(dir, "report.xml"))).toBeNull();
@@ -2033,29 +2037,29 @@ describe("readReport", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/runner/`
-Expected: échec — modules introuvables.
+Expected: failure — modules not found.
 
-- [ ] **Step 3 : Implémenter les deux lecteurs**
+- [ ] **Step 3: Implement the two readers**
 
-`src/runner/live-steps.ts` :
+`src/runner/live-steps.ts`:
 
 ```ts
 /**
- * Repérage des séparateurs d'étape dans la sortie de fastlane, pendant le run.
+ * Spotting of step separators in fastlane's output, during the run.
  *
- * Fragile par nature : c'est du texte destiné aux humains. On n'en conserve donc
- * qu'une seule chose, le décalage en octets où chaque étape commence — la seule
- * information que report.xml ne contient pas. Les noms et durées qui font foi
- * viendront du rapport en fin de run.
+ * Fragile by nature: this is text meant for humans. We therefore keep only
+ * one thing from it, the byte offset where each step starts — the only
+ * piece of information report.xml doesn't contain. The names and durations
+ * that count come from the report at the end of the run.
  */
-// Forme réelle observée, séquences ANSI comprises :
+// Real form observed, ANSI sequences included:
 //   [13:14:00]: \x1b[32m--- Step: mkdir -p ../build && echo x > y.ipa ---\x1b[0m
-// Le nom n'est pas un identifiant : pour une action `sh`, c'est la commande
-// entière, espaces inclus. La capture est donc paresseuse jusqu'aux tirets
-// de fermeture, et surtout pas `\S+`.
+// The name isn't an identifier: for a `sh` action, it's the entire command,
+// spaces included. The capture is therefore lazy up to the closing dashes,
+// and definitely not `\S+`.
 const SEPARATOR = /-{2,}\s+Step:\s*(.+?)\s+-{2,}/;
 
 export interface LiveStep {
@@ -2068,7 +2072,7 @@ export class LiveStepTracker {
   private pendingOffset = 0;
   private found: LiveStep[] = [];
 
-  /** `offset` est la position du fragment dans le fichier de log. */
+  /** `offset` is the fragment's position in the log file. */
   consume(chunk: string, offset: number): void {
     if (this.pending === "") this.pendingOffset = offset;
     this.pending += chunk;
@@ -2092,7 +2096,7 @@ export class LiveStepTracker {
 }
 ```
 
-`src/runner/report.ts` :
+`src/runner/report.ts`:
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -2104,19 +2108,19 @@ export interface ReportStep {
   status: "success" | "failed";
 }
 
-// La branche auto-fermante vient en premier : fastlane écrit les actions réussies
-// sous la forme `<testcase … />` et seules les échouées ont un corps. Dans l'autre
-// ordre, `[^>]*` avalerait le `/` final et le corps paresseux courrait jusqu'au
-// `</testcase>` suivant, fusionnant deux actions et attribuant l'échec à la mauvaise.
+// The self-closing branch comes first: fastlane writes successful actions
+// as `<testcase … />` and only failed ones have a body. In the other order,
+// `[^>]*` would swallow the final `/` and the lazy body would run up to the
+// next `</testcase>`, merging two actions and blaming the failure on the wrong one.
 const TESTCASE = /<testcase\b([^>]*?)\/>|<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g;
-// `\b` obligatoire : sans lui, chercher `name=` trouve d'abord la fin de
-// `classname=`, que fastlane écrit systématiquement en premier attribut.
+// `\b` is mandatory: without it, searching for `name=` first finds the end
+// of `classname=`, which fastlane systematically writes as the first attribute.
 /**
- * Décode les entités XML d'une valeur d'attribut.
+ * Decodes the XML entities of an attribute value.
  *
- * Indispensable : un nom d'action `sh` contient la commande entière, donc
- * volontiers un `&&` ou une redirection, que le rapport écrit `&amp;&amp;`
- * et `&gt;`. Sans décodage, l'interface affiche l'échappement.
+ * Essential: a `sh` action's name contains the entire command, so it
+ * readily includes a `&&` or a redirection, which the report writes as
+ * `&amp;&amp;` and `&gt;`. Without decoding, the interface would display the escaping.
  */
 const ENTITIES: Record<string, string> = {
   amp: "&",
@@ -2141,11 +2145,12 @@ const ATTR = (source: string, name: string): string | null => {
 };
 
 /**
- * Lit le rapport JUnit que fastlane écrit à chaque exécution.
- * C'est la source qui fait autorité pour les noms, l'ordre, les durées et les échecs.
+ * Reads the JUnit report that fastlane writes on every run.
+ * It's the authoritative source for names, order, durations, and failures.
  *
- * Renvoie null si le rapport est absent ou illisible — cas normal pour un run annulé,
- * expiré, interrompu, ou qui a échoué avant même d'atteindre fastlane.
+ * Returns null if the report is missing or unreadable — the normal case for
+ * a cancelled, timed-out, or interrupted run, or one that failed before even
+ * reaching fastlane.
  */
 export async function readReport(path: string): Promise<ReportStep[] | null> {
   let xml: string;
@@ -2163,7 +2168,7 @@ export async function readReport(path: string): Promise<ReportStep[] | null> {
     const rawName = ATTR(attrs, "name");
     if (rawName === null) continue;
 
-    // fastlane nomme ses cas « <index>: <action> ».
+    // fastlane names its cases "<index>: <action>".
     const named = /^(\d+):\s*(.+)$/.exec(rawName);
     const time = ATTR(attrs, "time");
 
@@ -2179,28 +2184,28 @@ export async function readReport(path: string): Promise<ReportStep[] | null> {
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/runner/`
-Expected: 8 tests passés.
+Expected: 8 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/runner tests/runner
-git commit -m "feat(runner): repérage des étapes en direct et lecture de report.xml"
+git commit -m "feat(runner): live step detection and report.xml reading"
 ```
 
 ---
 
-### Task 10 : Collecte des artefacts
+### Task 10: Artifact collection
 
 **Files:**
 - Create: `src/runner/artifacts.ts`, `tests/runner/artifacts.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/runner/artifacts.test.ts` :
+`tests/runner/artifacts.test.ts`:
 
 ```ts
 import { mkdir, readdir, writeFile } from "node:fs/promises";
@@ -2213,13 +2218,13 @@ async function workspaceWith(files: string[]): Promise<string> {
   const dir = await tmpDir("laneyard-art-");
   for (const f of files) {
     await mkdir(join(dir, f, ".."), { recursive: true });
-    await writeFile(join(dir, f), "contenu", "utf8");
+    await writeFile(join(dir, f), "content", "utf8");
   }
   return dir;
 }
 
 describe("guessKind", () => {
-  it("reconnaît les types courants", () => {
+  it("recognizes the common types", () => {
     expect(guessKind("Sample.ipa")).toBe("ipa");
     expect(guessKind("app-release.aab")).toBe("aab");
     expect(guessKind("app.apk")).toBe("apk");
@@ -2229,7 +2234,7 @@ describe("guessKind", () => {
 });
 
 describe("collectArtifacts", () => {
-  it("déplace hors du workspace les fichiers correspondant aux motifs", async () => {
+  it("moves files matching the patterns out of the workspace", async () => {
     const ws = await workspaceWith(["build/Sample.ipa", "build/notes.txt"]);
     const dest = await tmpDir("laneyard-dest-");
 
@@ -2242,12 +2247,12 @@ describe("collectArtifacts", () => {
     expect(await readdir(dest)).toEqual(["Sample.ipa"]);
   });
 
-  it("ne renvoie rien quand aucun motif n'est configuré", async () => {
+  it("returns nothing when no pattern is configured", async () => {
     const ws = await workspaceWith(["build/Sample.ipa"]);
     expect(await collectArtifacts(ws, [], await tmpDir())).toEqual([]);
   });
 
-  it("désambiguïse deux fichiers de même nom", async () => {
+  it("disambiguates two files with the same name", async () => {
     const ws = await workspaceWith(["a/app.apk", "b/app.apk"]);
     const dest = await tmpDir("laneyard-dest-");
 
@@ -2257,21 +2262,21 @@ describe("collectArtifacts", () => {
     expect(new Set(found.map((f) => f.filename)).size).toBe(2);
   });
 
-  it("ignore un motif qui ne correspond à rien sans échouer", async () => {
+  it("ignores a pattern that matches nothing without failing", async () => {
     const ws = await workspaceWith(["build/Sample.ipa"]);
-    expect(await collectArtifacts(ws, ["nexiste/**/*.zip"], await tmpDir())).toEqual([]);
+    expect(await collectArtifacts(ws, ["does-not-exist/**/*.zip"], await tmpDir())).toEqual([]);
   });
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/runner/artifacts.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter la collecte**
+- [ ] **Step 3: Implement the collection**
 
-`src/runner/artifacts.ts` :
+`src/runner/artifacts.ts`:
 
 ```ts
 import { mkdir, rename, stat } from "node:fs/promises";
@@ -2301,12 +2306,12 @@ export function guessKind(filename: string): string {
 }
 
 /**
- * Déplace hors du workspace tout fichier correspondant aux motifs configurés.
+ * Moves out of the workspace any file matching the configured patterns.
  *
- * Les motifs sont le seul contrat : Laneyard n'analyse pas la sortie du run pour
- * deviner des chemins. Le déplacement — et non la copie — évite de doubler
- * l'espace disque et garantit que le prochain build ne réutilisera pas un
- * artefact périmé par accident.
+ * The patterns are the only contract: Laneyard doesn't parse the run's
+ * output to guess paths. Moving — rather than copying — avoids doubling
+ * disk usage and guarantees the next build won't accidentally reuse a
+ * stale artifact.
  */
 export async function collectArtifacts(
   workspacePath: string,
@@ -2331,7 +2336,7 @@ export async function collectArtifacts(
   for (const source of matches.sort()) {
     let filename = basename(source);
     if (used.has(filename)) {
-      // Deux chemins peuvent produire le même nom ; on préfixe plutôt que d'écraser.
+      // Two paths can produce the same name; we prefix rather than overwrite.
       const ext = extname(filename);
       const stem = filename.slice(0, filename.length - ext.length);
       let n = 2;
@@ -2351,47 +2356,47 @@ export async function collectArtifacts(
 }
 ```
 
-> `rename` échoue entre deux systèmes de fichiers différents (`EXDEV`). Le workspace et le dossier
-> d'artefacts vivent tous deux sous `~/.laneyard/`, donc le cas ne se présente pas ici. Si un jour
-> ils divergent, remplacer par copie puis suppression.
+> `rename` fails across two different filesystems (`EXDEV`). The workspace and the artifacts
+> folder both live under `~/.laneyard/`, so the case doesn't arise here. Should they ever
+> diverge, replace with copy then delete.
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/runner/artifacts.test.ts`
-Expected: 5 tests passés.
+Expected: 5 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/runner/artifacts.ts tests/runner/artifacts.test.ts
-git commit -m "feat(runner): collecte des artefacts par motifs"
+git commit -m "feat(runner): artifact collection by patterns"
 ```
 
 ---
 
-### Task 11 : Exécution dans un pseudo-terminal
+### Task 11: Execution inside a pseudo-terminal
 
 **Files:**
 - Create: `src/runner/pty.ts`, `tests/fixtures/fake-fastlane/*`, `tests/runner/pty.test.ts`
 
-- [ ] **Step 1 : Créer le faux fastlane et écrire les tests qui échouent**
+- [ ] **Step 1: Create the fake fastlane and write the failing tests**
 
-`tests/fixtures/fake-fastlane/fastlane` (rendre exécutable : `chmod +x`) :
+`tests/fixtures/fake-fastlane/fastlane` (make it executable: `chmod +x`):
 
 ```bash
 #!/usr/bin/env bash
-# Faux fastlane pour les tests : rejoue une sortie enregistrée sans rien construire.
+# Fake fastlane for the tests: replays a recorded output without building anything.
 #
 #   FAKE_FASTLANE_SCENARIO=success|failure|slow
-#   FAKE_FASTLANE_REPORT_DIR=<dossier où écrire report.xml, défaut $PWD/fastlane>
+#   FAKE_FASTLANE_REPORT_DIR=<folder to write report.xml to, default $PWD/fastlane>
 #
-# Il imite le comportement réel : séparateurs d'étape, rapport JUnit écrit
-# relativement au dossier courant, et production d'un artefact. Aucune dépendance
-# à Xcode, la suite de tests est donc exécutable partout.
+# It mimics the real behaviour: step separators, a JUnit report written
+# relative to the current folder, and the production of an artifact. No
+# dependency on Xcode, so the test suite can run anywhere.
 set -euo pipefail
 
 scenario="${FAKE_FASTLANE_SCENARIO:-success}"
-# Comme le vrai fastlane, le rapport est écrit dans le dossier fastlane du projet.
+# Like real fastlane, the report is written into the project's fastlane folder.
 report_dir="${FAKE_FASTLANE_REPORT_DIR:-$PWD/fastlane}"
 
 echo "[09:41:01]: Driving the lane '$*'"
@@ -2404,10 +2409,10 @@ if [ "$scenario" = "slow" ]; then
   sleep 30
 fi
 
-# Un build produit son artefact. Le dossier build/ est ignoré par git dans les
-# fixtures, ce qui évite qu'un artefact déplacé salisse le workspace.
+# A build produces its artifact. The build/ folder is gitignored in the
+# fixtures, which keeps a moved artifact from dirtying the workspace.
 mkdir -p "$PWD/build"
-echo "faux binaire" > "$PWD/build/Sample.ipa"
+echo "fake binary" > "$PWD/build/Sample.ipa"
 
 write_report() {
   mkdir -p "$report_dir"
@@ -2433,7 +2438,7 @@ write_report ""
 exit 0
 ```
 
-`tests/runner/pty.test.ts` :
+`tests/runner/pty.test.ts`:
 
 ```ts
 import { join } from "node:path";
@@ -2444,7 +2449,7 @@ import { tmpDir } from "../fixtures/repos.js";
 const FAKE_DIR = join(process.cwd(), "tests", "fixtures", "fake-fastlane");
 
 describe("runInPty", () => {
-  it("diffuse la sortie et rend un code de sortie nul en cas de succès", async () => {
+  it("streams the output and returns a zero exit code on success", async () => {
     const chunks: string[] = [];
     const res = await runInPty({
       command: "fastlane",
@@ -2458,7 +2463,7 @@ describe("runInPty", () => {
     expect(chunks.join("")).toContain("Step: build_app");
   });
 
-  it("remonte le code de sortie d'un échec", async () => {
+  it("reports the exit code of a failure", async () => {
     const res = await runInPty({
       command: "fastlane",
       args: ["beta"],
@@ -2469,7 +2474,7 @@ describe("runInPty", () => {
     expect(res.exitCode).toBe(1);
   });
 
-  it("tue le processus au-delà du délai imparti", async () => {
+  it("kills the process past the allotted timeout", async () => {
     const res = await runInPty({
       command: "fastlane",
       args: ["beta"],
@@ -2479,17 +2484,17 @@ describe("runInPty", () => {
       timeoutMs: 1000,
     });
     expect(res.timedOut).toBe(true);
-    // Tué par signal : le code doit refléter la mort violente, pas valoir 0.
+    // Killed by signal: the code must reflect the violent death, not be 0.
     expect(res.exitCode).not.toBe(0);
     expect(res.signal).not.toBeNull();
   }, 20_000);
 
-  it("échoue proprement si la commande n'existe pas", async () => {
+  it("fails cleanly if the command doesn't exist", async () => {
     const res = await runInPty({
-      command: "commande-inexistante-xyz",
+      command: "nonexistent-command-xyz",
       args: [],
       cwd: await tmpDir(),
-      env: { PATH: "/nexistepas" },
+      env: { PATH: "/does-not-exist" },
       onData: () => {},
     });
     expect(res.exitCode).not.toBe(0);
@@ -2497,14 +2502,14 @@ describe("runInPty", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `chmod +x tests/fixtures/fake-fastlane/fastlane && npm test -- tests/runner/pty.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter le lancement en PTY**
+- [ ] **Step 3: Implement the PTY launch**
 
-`src/runner/pty.ts` :
+`src/runner/pty.ts`:
 
 ```ts
 import pty from "node-pty";
@@ -2530,10 +2535,10 @@ export interface PtyHandle {
 }
 
 /**
- * Lance une commande dans un pseudo-terminal.
+ * Runs a command in a pseudo-terminal.
  *
- * Le PTY sert deux buts : fastlane se croit dans un vrai terminal et garde son
- * affichage habituel, et une saisie reste possible si un jour un run en demande une.
+ * The PTY serves two purposes: fastlane believes it's in a real terminal and
+ * keeps its usual display, and input remains possible if a run ever needs one.
  */
 export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promise<PtyRunResult> } {
   let proc: pty.IPty;
@@ -2546,9 +2551,9 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
       env: opts.env as Record<string, string>,
     });
   } catch (cause) {
-    // Commande introuvable : selon la plateforme, node-pty lève ou rend 127.
-    // On uniformise pour que l'appelant n'ait qu'un seul cas à traiter.
-    opts.onData(`\nLancement impossible : ${(cause as Error).message}\n`);
+    // Command not found: depending on the platform, node-pty throws or returns 127.
+    // We normalize so the caller only has one case to handle.
+    opts.onData(`\nCould not launch: ${(cause as Error).message}\n`);
     return {
       handle: { write: () => {}, kill: () => {} },
       done: Promise.resolve({ exitCode: 127, signal: null, timedOut: false }),
@@ -2564,17 +2569,17 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
     if (opts.timeoutMs !== undefined) {
       timer = setTimeout(() => {
         timedOut = true;
-        // SIGINT d'abord : fastlane fait son ménage. SIGKILL si l'obstination persiste.
+        // SIGINT first: fastlane cleans up after itself. SIGKILL if it keeps stalling.
         try {
           proc.kill("SIGINT");
         } catch {
-          /* le processus a pu mourir entre-temps */
+          /* the process may have died in the meantime */
         }
         setTimeout(() => {
           try {
             proc.kill("SIGKILL");
           } catch {
-            /* idem */
+            /* same */
           }
         }, 5000);
       }, opts.timeoutMs);
@@ -2582,10 +2587,10 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
 
     proc.onExit(({ exitCode, signal }) => {
       if (timer) clearTimeout(timer);
-      // `waitpid` ne renseigne un code de sortie que pour une fin normale : un
-      // processus tué par signal laisse 0, ce qui ferait passer une annulation
-      // pour une réussite. On applique la convention du shell, 128 + signal,
-      // pour qu'un code de sortie reste toujours interprétable.
+      // `waitpid` only reports an exit code for a normal end: a process
+      // killed by a signal leaves 0, which would pass a cancellation off
+      // as a success. We apply the shell convention, 128 + signal, so an
+      // exit code always stays interpretable.
       const killed = signal !== undefined && signal !== 0;
       resolve({
         exitCode: killed && exitCode === 0 ? 128 + signal : exitCode,
@@ -2601,7 +2606,7 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
       try {
         proc.kill(signal);
       } catch {
-        /* déjà terminé */
+        /* already finished */
       }
     },
   };
@@ -2609,32 +2614,32 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
   return { handle, done };
 }
 
-/** Variante bloquante, pratique pour les tests et les commandes courtes. */
+/** Blocking variant, handy for tests and short commands. */
 export async function runInPty(opts: PtyRunOptions): Promise<PtyRunResult> {
   return startPty(opts).done;
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/runner/pty.test.ts`
-Expected: 4 tests passés. Sur un `PATH` sans la commande, `node-pty` remonte un code de sortie non
-nul plutôt qu'une exception — c'est ce que vérifie le dernier test.
+Expected: 4 tests passing. On a `PATH` without the command, `node-pty` reports a non-zero
+exit code rather than throwing — that's what the last test verifies.
 
-- [ ] **Step 5 : Réparer les droits du binaire de node-pty**
+- [ ] **Step 5: Fix node-pty's binary permissions**
 
-`node-pty` livre un exécutable auxiliaire, `spawn-helper`, que npm dépose parfois sans le bit
-d'exécution. Tout `spawn` échoue alors avec un `posix_spawnp failed` incompréhensible, y compris
-sur une commande aussi banale que `ls`. Le dépôt étant destiné à être public, mieux vaut réparer
-que documenter.
+`node-pty` ships an auxiliary executable, `spawn-helper`, that npm sometimes drops without the
+execute bit. Every `spawn` then fails with an incomprehensible `posix_spawnp failed`, even for a
+command as ordinary as `ls`. Since the repository is meant to be public, it's better to fix it
+than to document it.
 
-`scripts/fix-node-pty-permissions.mjs` :
+`scripts/fix-node-pty-permissions.mjs`:
 
 ```js
 #!/usr/bin/env node
-// npm dépose parfois le spawn-helper de node-pty sans droit d'exécution, ce qui
-// fait échouer tout lancement de processus avec un message opaque. On répare au
-// lieu de laisser chacun le découvrir.
+// npm sometimes drops node-pty's spawn-helper without the execute permission,
+// which makes every process launch fail with an opaque message. We fix it
+// instead of letting everyone discover it on their own.
 import { chmod, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -2645,51 +2650,51 @@ try {
     const helper = join(root, dir, "spawn-helper");
     try {
       const info = await stat(helper);
-      // 0o111 : au moins un bit d'exécution.
+      // 0o111: at least one execute bit.
       if ((info.mode & 0o111) === 0) {
         await chmod(helper, 0o755);
-        console.log(`node-pty : droit d'exécution rendu à ${helper}`);
+        console.log(`node-pty: execute permission restored on ${helper}`);
       }
     } catch {
-      // Pas de helper dans ce dossier : rien à faire.
+      // No helper in this folder: nothing to do.
     }
   }
 } catch {
-  // node-pty absent ou sans prebuilds : l'installation n'a pas à échouer pour autant.
+  // node-pty missing or without prebuilds: the install shouldn't fail because of that.
 }
 ```
 
-Ajouter à `package.json` :
+Add to `package.json`:
 
 ```json
 "postinstall": "node scripts/fix-node-pty-permissions.mjs"
 ```
 
-Vérifier ensuite que les tests passent depuis une installation propre du binaire :
+Then verify the tests pass from a clean install of the binary:
 
 Run: `chmod -x node_modules/node-pty/prebuilds/*/spawn-helper && npm run postinstall && npm test -- tests/runner/pty.test.ts`
-Expected: le script signale la réparation, puis 4 tests passés.
+Expected: the script reports the fix, then 4 tests passing.
 
-- [ ] **Step 6 : Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/runner/pty.ts tests/runner/pty.test.ts tests/fixtures/fake-fastlane scripts package.json
-git commit -m "feat(runner): exécution dans un pseudo-terminal et faux fastlane de test"
+git commit -m "feat(runner): execution inside a pseudo-terminal and a fake fastlane for tests"
 ```
 
 ---
 
-### Task 12 : Orchestration d'un run
+### Task 12: Orchestrating a run
 
-Le module qui enchaîne tout : préparer le workspace, lancer fastlane, écrire le log, réconcilier
-les étapes, collecter les artefacts, poser le statut final.
+The module that chains everything together: preparing the workspace, launching fastlane, writing
+the log, reconciling the steps, collecting the artifacts, setting the final status.
 
 **Files:**
 - Create: `src/runner/orchestrate.ts`, `tests/runner/orchestrate.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/runner/orchestrate.test.ts` :
+`tests/runner/orchestrate.test.ts`:
 
 ```ts
 import { mkdir, writeFile } from "node:fs/promises";
@@ -2715,9 +2720,9 @@ const SETTINGS = {
 async function harness(scenario: "success" | "failure") {
   const origin = await makeOriginRepo({
     "fastlane/Fastfile": "lane :beta do\nend\n",
-    // build/ est ignoré : l'artefact est produit par le faux fastlane pendant le
-    // run, comme en vrai. Rien de suivi par git n'est déplacé, le workspace
-    // reste donc propre pour le run suivant.
+    // build/ is ignored: the artifact is produced by the fake fastlane during
+    // the run, just like the real one. Nothing tracked by git is moved, so
+    // the workspace stays clean for the next run.
     ".gitignore": "build/\n",
   });
   const root = await tmpDir("laneyard-root-");
@@ -2744,7 +2749,7 @@ async function harness(scenario: "success" | "failure") {
 }
 
 describe("executeRun", () => {
-  it("mène un run au succès de bout en bout", async () => {
+  it("carries a run through to success end to end", async () => {
     const { runId, runs, logs } = await harness("success");
     const run = runs.get(runId)!;
 
@@ -2755,7 +2760,7 @@ describe("executeRun", () => {
     expect(await logs.read(runId)).toContain("Step: build_app");
   }, 60_000);
 
-  it("enregistre les étapes du rapport avec le décalage du repérage en direct", async () => {
+  it("records the report's steps with the live-spotting offset", async () => {
     const { runId, runs } = await harness("success");
     const steps = runs.steps(runId);
 
@@ -2765,7 +2770,7 @@ describe("executeRun", () => {
     expect(steps[1]!.logOffset).toBeGreaterThan(0);
   }, 60_000);
 
-  it("collecte les artefacts correspondant aux motifs", async () => {
+  it("collects the artifacts matching the patterns", async () => {
     const { runId, runs } = await harness("success");
     const arts = runs.artifacts(runId);
 
@@ -2774,7 +2779,7 @@ describe("executeRun", () => {
     expect(arts[0]!.kind).toBe("ipa");
   }, 60_000);
 
-  it("marque l'échec et retient un résumé d'erreur", async () => {
+  it("marks the failure and keeps an error summary", async () => {
     const { runId, runs } = await harness("failure");
     const run = runs.get(runId)!;
 
@@ -2783,7 +2788,7 @@ describe("executeRun", () => {
     expect(runs.steps(runId).find((s) => s.name === "build_app")?.status).toBe("failed");
   }, 60_000);
 
-  it("échoue proprement si la résolution des réglages lève", async () => {
+  it("fails cleanly if resolving settings throws", async () => {
     const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n" });
     const root = await tmpDir("laneyard-root-");
     const runs = new RunStore(openDatabase(":memory:"));
@@ -2798,9 +2803,9 @@ describe("executeRun", () => {
       artifactsDir: join(root, "art"),
       gitUrl: origin,
       branch: "main",
-      // Cas réel : le projet a disparu de config.yml pendant la préparation.
+      // Real case: the project disappeared from config.yml during preparation.
       resolveSettings: async () => {
-        throw new Error("projet inconnu");
+        throw new Error("unknown project");
       },
       env: {},
       onChunk: () => {},
@@ -2808,10 +2813,10 @@ describe("executeRun", () => {
 
     const run = runs.get(runId)!;
     expect(run.status).toBe("failed");
-    expect(run.errorSummary).toMatch(/projet inconnu/);
+    expect(run.errorSummary).toMatch(/unknown project/);
   }, 60_000);
 
-  it("échoue avant le lancement si le dépôt est inaccessible", async () => {
+  it("fails before launch if the repository is unreachable", async () => {
     const root = await tmpDir("laneyard-root-");
     const runs = new RunStore(openDatabase(":memory:"));
     const logs = new LogStore(join(root, "logs"));
@@ -2832,21 +2837,21 @@ describe("executeRun", () => {
 
     const run = runs.get(runId)!;
     expect(run.status).toBe("failed");
-    expect(run.errorSummary).toMatch(/git|dépôt|clone/i);
-    // Un run qui n'a jamais atteint fastlane n'a aucune étape.
+    expect(run.errorSummary).toMatch(/git|repository|clone/i);
+    // A run that never reached fastlane has no steps.
     expect(runs.steps(runId)).toEqual([]);
   }, 60_000);
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/runner/orchestrate.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter l'orchestration**
+- [ ] **Step 3: Implement the orchestration**
 
-`src/runner/orchestrate.ts` :
+`src/runner/orchestrate.ts`:
 
 ```ts
 import { rm } from "node:fs/promises";
@@ -2872,13 +2877,13 @@ export interface ExecuteRunOptions {
   gitAuth?: GitAuth;
   branch: string;
   /**
-   * Résout les réglages effectifs. Appelée **après** la préparation du workspace,
-   * parce que le laneyard.yml qu'elle lit vit dans le dépôt : au premier run,
-   * il n'existe pas encore sur disque au moment où le run est créé.
+   * Resolves the effective settings. Called **after** the workspace is
+   * prepared, because the laneyard.yml it reads lives in the repository:
+   * on the first run, it doesn't exist on disk yet when the run is created.
    */
   resolveSettings: () => Promise<ProjectSettings>;
   env: NodeJS.ProcessEnv;
-  /** Appelé pour chaque fragment de sortie, avec sa position dans le log. */
+  /** Called for each output fragment, with its position in the log. */
   onChunk: (chunk: string, offset: number) => void;
 }
 
@@ -2888,11 +2893,11 @@ export interface ExecuteRunResult {
 
 
 /**
- * Enchaîne un run complet et pose ses transitions d'état.
+ * Runs a complete run through and sets its state transitions.
  *
- * Ne lève jamais : toute erreur est convertie en run `failed` documenté, parce
- * qu'un run qui disparaît sans laisser de trace est le pire des comportements
- * pour un serveur de build.
+ * Never throws: every error is converted into a documented `failed` run,
+ * because a run that vanishes without a trace is the worst possible
+ * behaviour for a build server.
  */
 export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
   const { runId, runs, logs } = opts;
@@ -2912,7 +2917,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     return { status: "failed" };
   };
 
-  // --- Préparation -------------------------------------------------------
+  // --- Preparation ---------------------------------------------------------
   runs.setStatus(runId, "preparing");
   const workspace = new Workspace(opts.workspacePath, opts.gitUrl, opts.gitAuth);
 
@@ -2920,23 +2925,23 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   try {
     commitSha = await workspace.prepare(opts.branch, (line) => void emit(`${line}\n`));
   } catch (cause) {
-    return fail(`Préparation du workspace impossible : ${(cause as Error).message}`);
+    return fail(`Could not prepare the workspace: ${(cause as Error).message}`);
   }
 
   runs.markRunning(runId, { branch: opts.branch, commitSha });
 
-  // Le workspace existe enfin : c'est seulement maintenant que le laneyard.yml
-  // du dépôt est lisible, donc seulement maintenant que les réglages sont connus.
-  // La résolution est protégée : le projet peut avoir disparu de config.yml
-  // pendant la préparation, et un run ne doit jamais s'évaporer sur une exception.
+  // The workspace finally exists: only now is the repository's laneyard.yml
+  // readable, so only now are the settings known. The resolution is guarded:
+  // the project may have disappeared from config.yml during preparation,
+  // and a run must never evaporate on an exception.
   let settings: ProjectSettings;
   try {
     settings = await opts.resolveSettings();
   } catch (cause) {
-    return fail(`Réglages du projet illisibles : ${(cause as Error).message}`);
+    return fail(`Unreadable project settings: ${(cause as Error).message}`);
   }
 
-  // --- Exécution ---------------------------------------------------------
+  // --- Execution -------------------------------------------------------------
   const useBundle = settings.runtime === "bundle";
   const reportPath = join(opts.workspacePath, settings.fastlane_dir, "report.xml");
 
@@ -2948,7 +2953,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     cwd: opts.workspacePath,
     env: {
       ...opts.env,
-      // Un run non interactif échoue vite au lieu de figer sur un prompt invisible.
+      // A non-interactive run fails fast instead of freezing on an invisible prompt.
       CI: "true",
       FASTLANE_SKIP_UPDATE_CHECK: "1",
       FORCE_COLOR: "1",
@@ -2960,12 +2965,12 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   const outcome = await done;
   await writer.close();
 
-  // --- Chronologie -------------------------------------------------------
+  // --- Timeline --------------------------------------------------------------
   const report = await readReport(reportPath);
   const live = tracker.steps();
 
   if (report) {
-    // Le rapport fait autorité ; le repérage en direct n'apporte que les décalages.
+    // The report is authoritative; live spotting only contributes the offsets.
     const steps: Step[] = report.map((s, i) => ({
       idx: s.idx,
       name: s.name,
@@ -2977,7 +2982,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     runs.replaceSteps(runId, steps);
     await rm(reportPath, { force: true });
   } else if (live.length > 0) {
-    // Run annulé, expiré ou interrompu : on garde ce qui a été vu, en le signalant.
+    // Cancelled, timed out, or interrupted run: we keep what was seen, flagging it.
     runs.replaceSteps(
       runId,
       live.map((s, i) => ({
@@ -2991,7 +2996,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     );
   }
 
-  // --- Artefacts et statut final ----------------------------------------
+  // --- Artifacts and final status -------------------------------------------
   const collected = await collectArtifacts(
     opts.workspacePath,
     settings.artifact_globs,
@@ -3005,7 +3010,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   }
 
   const summary = outcome.timedOut
-    ? `Run interrompu après ${settings.timeout_minutes} minutes`
+    ? `Run interrupted after ${settings.timeout_minutes} minutes`
     : summarizeFailure(await logs.read(runId), outcome.exitCode);
 
   runs.finish(runId, { status: "failed", exitCode: outcome.exitCode, errorSummary: summary });
@@ -3021,28 +3026,28 @@ function laneArgs(opts: ExecuteRunOptions): string[] {
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/runner/orchestrate.test.ts`
-Expected: 5 tests passés.
+Expected: 5 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/runner/orchestrate.ts tests/runner/orchestrate.test.ts
-git commit -m "feat(runner): orchestration complète d'un run"
+git commit -m "feat(runner): complete orchestration of a run"
 ```
 
 ---
 
-### Task 13 : État vivant de la configuration
+### Task 13: Live configuration state
 
 **Files:**
 - Create: `src/config/store.ts`, `tests/config/store.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/config/store.test.ts` :
+`tests/config/store.test.ts`:
 
 ```ts
 import { writeFile } from "node:fs/promises";
@@ -3066,32 +3071,32 @@ async function configFile(content: string): Promise<string> {
 }
 
 describe("ConfigStore", () => {
-  it("charge la configuration au démarrage", async () => {
+  it("loads the configuration at startup", async () => {
     const store = new ConfigStore(await configFile(CONFIG("sample")));
     await store.load();
     expect(store.projects().map((p) => p.slug)).toEqual(["sample"]);
   });
 
-  it("retrouve un projet par son slug", async () => {
+  it("finds a project by its slug", async () => {
     const store = new ConfigStore(await configFile(CONFIG("sample")));
     await store.load();
     expect(store.project("sample")?.git_url).toBe("u");
-    expect(store.project("inconnu")).toBeNull();
+    expect(store.project("unknown")).toBeNull();
   });
 
-  it("prend en compte une modification du fichier", async () => {
-    const path = await configFile(CONFIG("un"));
+  it("takes a file change into account", async () => {
+    const path = await configFile(CONFIG("one"));
     const store = new ConfigStore(path);
     await store.load();
 
-    await writeFile(path, CONFIG("deux"), "utf8");
+    await writeFile(path, CONFIG("two"), "utf8");
     await store.load();
 
-    expect(store.projects().map((p) => p.slug)).toEqual(["deux"]);
+    expect(store.projects().map((p) => p.slug)).toEqual(["two"]);
   });
 
-  it("conserve la dernière configuration valide si le fichier devient invalide", async () => {
-    const path = await configFile(CONFIG("un"));
+  it("keeps the last valid configuration if the file becomes invalid", async () => {
+    const path = await configFile(CONFIG("one"));
     const store = new ConfigStore(path);
     await store.load();
 
@@ -3099,18 +3104,18 @@ describe("ConfigStore", () => {
     const res = await store.load();
 
     expect(res.ok).toBe(false);
-    expect(store.projects().map((p) => p.slug)).toEqual(["un"]);
+    expect(store.projects().map((p) => p.slug)).toEqual(["one"]);
     expect(store.lastError()).not.toBeNull();
   });
 
-  it("efface l'erreur quand le fichier redevient valide", async () => {
-    const path = await configFile(CONFIG("un"));
+  it("clears the error once the file becomes valid again", async () => {
+    const path = await configFile(CONFIG("one"));
     const store = new ConfigStore(path);
     await store.load();
     await writeFile(path, "projects: [", "utf8");
     await store.load();
 
-    await writeFile(path, CONFIG("un"), "utf8");
+    await writeFile(path, CONFIG("one"), "utf8");
     await store.load();
 
     expect(store.lastError()).toBeNull();
@@ -3118,14 +3123,14 @@ describe("ConfigStore", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/config/store.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter le magasin de configuration**
+- [ ] **Step 3: Implement the configuration store**
 
-`src/config/store.ts` :
+`src/config/store.ts`:
 
 ```ts
 import { watch } from "node:fs";
@@ -3142,11 +3147,11 @@ export interface ResolvedProject {
 }
 
 /**
- * La configuration vivante du serveur.
+ * The server's live configuration.
  *
- * Règle de sûreté : une configuration invalide ne remplace jamais une configuration
- * valide. Le serveur continue de tourner avec ce qu'il avait, et l'erreur est
- * exposée à l'interface — jamais de démarrage à moitié configuré.
+ * Safety rule: an invalid configuration never replaces a valid one. The
+ * server keeps running with what it had, and the error is exposed to the
+ * interface — never a half-configured startup.
  */
 export class ConfigStore {
   private config: ServerConfig | null = null;
@@ -3165,7 +3170,7 @@ export class ConfigStore {
     return { ok: true };
   }
 
-  /** Surveille le fichier et recharge, en absorbant les rafales d'événements. */
+  /** Watches the file and reloads, absorbing bursts of events. */
   watch(onReload: (ok: boolean) => void): () => void {
     let timer: NodeJS.Timeout | undefined;
     const watcher = watch(this.path, () => {
@@ -3197,9 +3202,9 @@ export class ConfigStore {
   }
 
   /**
-   * Résout les réglages effectifs d'un projet en lisant le laneyard.yml de son
-   * workspace s'il existe. Le workspace peut ne pas encore être cloné : on
-   * retombe alors sur le bloc du projet et les défauts.
+   * Resolves a project's effective settings by reading its workspace's
+   * laneyard.yml if it exists. The workspace may not be cloned yet: we
+   * then fall back to the project's block and the defaults.
    */
   async resolve(slug: string, workspacePath: string): Promise<ResolvedProject | null> {
     const entry = this.project(slug);
@@ -3214,28 +3219,28 @@ export class ConfigStore {
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/config/store.test.ts`
-Expected: 5 tests passés.
+Expected: 5 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/config/store.ts tests/config/store.test.ts
-git commit -m "feat(config): état vivant, rechargement et résolution par projet"
+git commit -m "feat(config): live state, reloading, and per-project resolution"
 ```
 
 ---
 
-### Task 14 : Serveur HTTP, authentification et API
+### Task 14: HTTP server, authentication, and API
 
 **Files:**
 - Create: `src/server/auth.ts`, `src/server/app.ts`, `src/server/routes/projects.ts`, `src/server/routes/runs.ts`, `tests/server/api.test.ts`
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/server/api.test.ts` :
+`tests/server/api.test.ts`:
 
 ```ts
 import { writeFile } from "node:fs/promises";
@@ -3287,19 +3292,19 @@ async function login(app: Awaited<ReturnType<typeof harness>>["app"]): Promise<s
 }
 
 describe("API", () => {
-  it("refuse l'accès sans session", async () => {
+  it("refuses access without a session", async () => {
     const { app } = await harness();
     const res = await app.inject({ method: "GET", url: "/api/projects" });
     expect(res.statusCode).toBe(401);
   });
 
-  it("refuse un mauvais mot de passe", async () => {
+  it("refuses a wrong password", async () => {
     const { app } = await harness();
-    const res = await app.inject({ method: "POST", url: "/api/login", payload: { password: "faux" } });
+    const res = await app.inject({ method: "POST", url: "/api/login", payload: { password: "wrong" } });
     expect(res.statusCode).toBe(401);
   });
 
-  it("liste les projets une fois connecté", async () => {
+  it("lists the projects once logged in", async () => {
     const { app } = await harness();
     const session = await login(app);
     const res = await app.inject({
@@ -3312,7 +3317,7 @@ describe("API", () => {
     expect(res.json()).toMatchObject([{ slug: "sample", name: "Sample" }]);
   });
 
-  it("renvoie les lanes d'un projet", async () => {
+  it("returns a project's lanes", async () => {
     const { app } = await harness();
     const session = await login(app);
     const res = await app.inject({
@@ -3325,18 +3330,18 @@ describe("API", () => {
     expect(res.json()).toMatchObject([{ name: "beta", platform: "ios" }]);
   });
 
-  it("répond 404 pour un projet absent de la configuration", async () => {
+  it("responds 404 for a project absent from the configuration", async () => {
     const { app } = await harness();
     const session = await login(app);
     const res = await app.inject({
       method: "GET",
-      url: "/api/projects/inconnu/lanes",
+      url: "/api/projects/unknown/lanes",
       cookies: { laneyard_session: session },
     });
     expect(res.statusCode).toBe(404);
   });
 
-  it("crée un run en attente et le rend consultable", async () => {
+  it("creates a queued run and makes it viewable", async () => {
     const { app } = await harness();
     const session = await login(app);
 
@@ -3358,36 +3363,36 @@ describe("API", () => {
     expect(fetched.json()).toMatchObject({ id, lane: "beta", projectSlug: "sample" });
   });
 
-  it("refuse de lancer une lane inconnue", async () => {
+  it("refuses to launch an unknown lane", async () => {
     const { app } = await harness();
     const session = await login(app);
     const res = await app.inject({
       method: "POST",
       url: "/api/projects/sample/runs",
       cookies: { laneyard_session: session },
-      payload: { lane: "nexiste-pas", params: {} },
+      payload: { lane: "does-not-exist", params: {} },
     });
     expect(res.statusCode).toBe(400);
   });
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/server/api.test.ts`
-Expected: échec — modules introuvables.
+Expected: failure — modules not found.
 
-- [ ] **Step 3 : Implémenter l'authentification et l'application**
+- [ ] **Step 3: Implement authentication and the application**
 
-`src/server/auth.ts` :
+`src/server/auth.ts`:
 
 ```ts
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 /**
- * scrypt de la bibliothèque standard : aucune dépendance native supplémentaire,
- * et une résistance au calcul suffisante pour un mot de passe unique local.
- * Format : scrypt$<sel hex>$<clé hex>.
+ * scrypt from the standard library: no extra native dependency, and enough
+ * computational resistance for a single local password.
+ * Format: scrypt$<hex salt>$<hex key>.
  */
 export function hashPassword(password: string): string {
   const salt = randomBytes(16);
@@ -3404,7 +3409,7 @@ export function verifyPassword(password: string, stored: string): boolean {
   return timingSafeEqual(expected, actual);
 }
 
-/** Sessions en mémoire : elles ne survivent pas à un redémarrage, et c'est très bien. */
+/** In-memory sessions: they don't survive a restart, and that's just fine. */
 export class SessionStore {
   private readonly tokens = new Set<string>();
 
@@ -3426,7 +3431,7 @@ export class SessionStore {
 export const SESSION_COOKIE = "laneyard_session";
 ```
 
-`src/server/app.ts` :
+`src/server/app.ts`:
 
 ```ts
 import cookie from "@fastify/cookie";
@@ -3448,9 +3453,9 @@ import type { RunSockets } from "./ws.js";
 export interface AppDeps {
   config: ConfigStore;
   db: Db;
-  /** Racine de données : workspaces, logs, artefacts. */
+  /** Data root: workspaces, logs, artifacts. */
   root: string;
-  /** Injecté pour que les tests n'aient pas besoin de Ruby ni de fastlane. */
+  /** Injected so tests don't need Ruby or fastlane. */
   lanes: (slug: string, workspacePath: string, fastlaneDir: string) => Promise<Lane[]>;
 }
 
@@ -3461,7 +3466,7 @@ export interface AppContext extends AppDeps {
   sockets?: RunSockets;
   workspacePath: (slug: string) => string;
   artifactsDir: (runId: number) => string;
-  /** Clone le dépôt s'il ne l'est pas encore. Lève si le clone échoue. */
+  /** Clones the repository if it isn't cloned yet. Throws if the clone fails. */
   ensureWorkspace: (slug: string) => Promise<void>;
 }
 
@@ -3486,7 +3491,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     artifactsDir: (runId) => join(deps.root, "artifacts", String(runId)),
     ensureWorkspace: async (slug) => {
       const entry = deps.config.project(slug);
-      if (!entry) throw new Error(`Projet inconnu : ${slug}`);
+      if (!entry) throw new Error(`Unknown project: ${slug}`);
       await new Workspace(workspacePath(slug), entry.git_url, entry.git_auth).ensureCloned();
     },
   };
@@ -3496,7 +3501,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     const hash = deps.config.server()?.password_hash;
 
     if (!password || !hash || !verifyPassword(password, hash)) {
-      return reply.code(401).send({ error: "Mot de passe incorrect" });
+      return reply.code(401).send({ error: "Incorrect password" });
     }
 
     const token = ctx.sessions.issue();
@@ -3505,11 +3510,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       .send({ ok: true });
   });
 
-  // Tout /api sauf /api/login exige une session.
+  // Every /api route except /api/login requires a session.
   app.addHook("onRequest", async (req, reply) => {
     if (!req.url.startsWith("/api") || req.url === "/api/login") return;
     if (!ctx.sessions.valid(req.cookies[SESSION_COOKIE])) {
-      return reply.code(401).send({ error: "Session requise" });
+      return reply.code(401).send({ error: "Session required" });
     }
   });
 
@@ -3522,7 +3527,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 }
 ```
 
-`src/server/routes/projects.ts` :
+`src/server/routes/projects.ts`:
 
 ```ts
 import type { FastifyInstance } from "fastify";
@@ -3544,30 +3549,30 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
   app.get("/api/projects/:slug/lanes", async (req, reply) => {
     const { slug } = req.params as { slug: string };
     const entry = ctx.config.project(slug);
-    if (!entry) return reply.code(404).send({ error: "Projet inconnu" });
+    if (!entry) return reply.code(404).send({ error: "Unknown project" });
 
     try {
-      // Les lanes vivent dans le dépôt : sans clone, il n'y a rien à lire.
-      // Un projet fraîchement déclaré doit être utilisable sans lancer un run à l'aveugle.
+      // Lanes live in the repository: with no clone, there's nothing to read.
+      // A freshly declared project must be usable without launching a run blind.
       await ctx.ensureWorkspace(slug);
       const resolved = await ctx.config.resolve(slug, ctx.workspacePath(slug));
       return await ctx.lanes(slug, ctx.workspacePath(slug), resolved!.settings.fastlane_dir);
     } catch (cause) {
-      // Workspace pas encore cloné, Fastfile cassé, sidecar en échec : l'interface
-      // doit pouvoir le dire à l'utilisateur plutôt qu'afficher une liste vide.
+      // Workspace not cloned yet, broken Fastfile, sidecar failure: the
+      // interface must be able to tell the user, rather than show an empty list.
       return reply.code(503).send({ error: (cause as Error).message });
     }
   });
 
   app.get("/api/projects/:slug/runs", async (req, reply) => {
     const { slug } = req.params as { slug: string };
-    if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Projet inconnu" });
+    if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
     return ctx.runs.listByProject(slug);
   });
 }
 ```
 
-`src/server/routes/runs.ts` :
+`src/server/routes/runs.ts`:
 
 ```ts
 import type { FastifyInstance } from "fastify";
@@ -3581,19 +3586,19 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
     const body = req.body as { lane?: string; platform?: string | null; params?: Record<string, string> };
 
     const entry = ctx.config.project(slug);
-    if (!entry) return reply.code(404).send({ error: "Projet inconnu" });
-    if (!body.lane) return reply.code(400).send({ error: "Lane manquante" });
+    if (!entry) return reply.code(404).send({ error: "Unknown project" });
+    if (!body.lane) return reply.code(400).send({ error: "Missing lane" });
 
-    // On vérifie que la lane existe vraiment avant de créer un run voué à l'échec.
+    // We check that the lane genuinely exists before creating a run doomed to fail.
     try {
       await ctx.ensureWorkspace(slug);
       const resolved = await ctx.config.resolve(slug, ctx.workspacePath(slug));
       const lanes = await ctx.lanes(slug, ctx.workspacePath(slug), resolved!.settings.fastlane_dir);
       if (!lanes.some((l) => l.name === body.lane)) {
-        return reply.code(400).send({ error: `Lane inconnue : ${body.lane}` });
+        return reply.code(400).send({ error: `Unknown lane: ${body.lane}` });
       }
     } catch {
-      // Lanes illisibles : on laisse passer, le run échouera avec un message clair.
+      // Unreadable lanes: we let it through, the run will fail with a clear message.
     }
 
     const id = ctx.runs.create({
@@ -3603,7 +3608,7 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
       params: body.params ?? {},
     });
 
-    // Lancé sans attendre : la réponse HTTP ne doit pas durer le temps d'un build.
+    // Launched without waiting: the HTTP response mustn't take as long as a build.
     void executeRun({
       runId: id,
       runs: ctx.runs,
@@ -3613,7 +3618,7 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
       gitUrl: entry.git_url,
       gitAuth: entry.git_auth,
       branch: entry.default_branch,
-      // Résolus après le clone, quand le laneyard.yml du dépôt est enfin lisible.
+      // Resolved after the clone, once the repository's laneyard.yml is finally readable.
       resolveSettings: async () => {
         const r = await ctx.config.resolve(slug, ctx.workspacePath(slug));
         return r!.settings;
@@ -3628,21 +3633,21 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
   app.get("/api/runs/:id", async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     const run = ctx.runs.get(id);
-    if (!run) return reply.code(404).send({ error: "Run inconnu" });
+    if (!run) return reply.code(404).send({ error: "Unknown run" });
     return { ...run, steps: ctx.runs.steps(id), artifacts: ctx.runs.artifacts(id) };
   });
 
   app.get("/api/runs/:id/log", async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     const from = Number((req.query as { from?: string }).from ?? 0);
-    if (!ctx.runs.get(id)) return reply.code(404).send({ error: "Run inconnu" });
+    if (!ctx.runs.get(id)) return reply.code(404).send({ error: "Unknown run" });
     return reply.type("text/plain; charset=utf-8").send(await ctx.logs.read(id, from));
   });
 
   app.get("/api/runs/:id/artifacts/:artifactId", async (req, reply) => {
     const { id, artifactId } = req.params as { id: string; artifactId: string };
     const artifact = ctx.runs.artifacts(Number(id)).find((a) => a.id === Number(artifactId));
-    if (!artifact) return reply.code(404).send({ error: "Artefact inconnu" });
+    if (!artifact) return reply.code(404).send({ error: "Unknown artifact" });
 
     return reply
       .header("Content-Disposition", `attachment; filename="${artifact.filename}"`)
@@ -3652,9 +3657,9 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
 }
 ```
 
-> `app.ts` importe `registerWebSocket` et le type `RunSockets` de la tâche 15. Pour que les tests
-> de cette tâche-ci tournent avant, créer un `src/server/ws.ts` provisoire **fonctionnel** — un
-> module vide ne suffit pas, l'import échouerait :
+> `app.ts` imports `registerWebSocket` and the `RunSockets` type from Task 15. For this task's
+> tests to run before that, create a **functional** provisional `src/server/ws.ts` — an empty
+> module isn't enough, the import would fail:
 >
 > ```ts
 > import type { FastifyInstance } from "fastify";
@@ -3664,8 +3669,8 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
 >   finish(_runId: number, _status: string): void {}
 > }
 >
-> // La signature accepte déjà les arguments du site d'appel dans `app.ts`,
-> // sinon le typage échoue avant même que la tâche 15 existe.
+> // The signature already accepts the arguments from the call site in `app.ts`,
+> // otherwise typing would fail before Task 15 even exists.
 > export async function registerWebSocket(
 >   _app?: FastifyInstance,
 >   _ctx?: unknown,
@@ -3674,31 +3679,31 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
 > }
 > ```
 >
-> La tâche 15 le remplace par la vraie implémentation et ses tests.
+> Task 15 replaces it with the real implementation and its tests.
 
-- [ ] **Step 4 : Lancer les tests**
+- [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/server/api.test.ts`
-Expected: 7 tests passés.
+Expected: 7 tests passing.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/server tests/server
-git commit -m "feat(server): authentification par session et API des projets et runs"
+git commit -m "feat(server): session authentication and the projects/runs API"
 ```
 
 ---
 
-### Task 15 : Diffusion des logs par WebSocket
+### Task 15: Broadcasting logs over WebSocket
 
 **Files:**
 - Create: `src/server/ws.ts`, `tests/server/ws.test.ts`
-- Modify: `src/server/app.ts` (enregistrer le module)
+- Modify: `src/server/app.ts` (register the module)
 
-- [ ] **Step 1 : Écrire les tests qui échouent**
+- [ ] **Step 1: Write the failing tests**
 
-`tests/server/ws.test.ts` :
+`tests/server/ws.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -3712,49 +3717,49 @@ interface FakeSocket {
 const socket = (): FakeSocket => ({ sent: [], send(d) { this.sent.push(d); } });
 
 describe("RunSockets", () => {
-  it("diffuse un fragment aux abonnés du run", () => {
+  it("broadcasts a fragment to the run's subscribers", () => {
     const hub = new RunSockets();
     const a = socket();
     hub.subscribe(1, a);
 
-    hub.broadcast(1, "sortie", 10);
+    hub.broadcast(1, "output", 10);
 
-    expect(JSON.parse(a.sent[0]!)).toEqual({ type: "chunk", offset: 10, data: "sortie" });
+    expect(JSON.parse(a.sent[0]!)).toEqual({ type: "chunk", offset: 10, data: "output" });
   });
 
-  it("n'envoie rien aux abonnés d'un autre run", () => {
+  it("sends nothing to another run's subscribers", () => {
     const hub = new RunSockets();
-    const autre = socket();
-    hub.subscribe(2, autre);
+    const other = socket();
+    hub.subscribe(2, other);
 
-    hub.broadcast(1, "sortie", 0);
+    hub.broadcast(1, "output", 0);
 
-    expect(autre.sent).toEqual([]);
+    expect(other.sent).toEqual([]);
   });
 
-  it("cesse d'écrire à un abonné désinscrit", () => {
+  it("stops writing to an unsubscribed subscriber", () => {
     const hub = new RunSockets();
     const s = socket();
     hub.subscribe(1, s);
     hub.unsubscribe(1, s);
 
-    hub.broadcast(1, "sortie", 0);
+    hub.broadcast(1, "output", 0);
 
     expect(s.sent).toEqual([]);
   });
 
-  it("survit à un abonné dont l'envoi échoue", () => {
+  it("survives a subscriber whose send fails", () => {
     const hub = new RunSockets();
-    const cassé = { send() { throw new Error("socket fermée"); } };
-    const sain = socket();
-    hub.subscribe(1, cassé);
-    hub.subscribe(1, sain);
+    const broken = { send() { throw new Error("closed socket"); } };
+    const healthy = socket();
+    hub.subscribe(1, broken);
+    hub.subscribe(1, healthy);
 
-    expect(() => hub.broadcast(1, "sortie", 0)).not.toThrow();
-    expect(sain.sent).toHaveLength(1);
+    expect(() => hub.broadcast(1, "output", 0)).not.toThrow();
+    expect(healthy.sent).toHaveLength(1);
   });
 
-  it("annonce la fin d'un run", () => {
+  it("announces the end of a run", () => {
     const hub = new RunSockets();
     const s = socket();
     hub.subscribe(1, s);
@@ -3766,14 +3771,14 @@ describe("RunSockets", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/server/ws.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter le concentrateur et le brancher**
+- [ ] **Step 3: Implement the hub and wire it in**
 
-`src/server/ws.ts` :
+`src/server/ws.ts`:
 
 ```ts
 import type { FastifyInstance } from "fastify";
@@ -3781,16 +3786,16 @@ import websocket from "@fastify/websocket";
 import type { AppContext } from "./app.js";
 import { SESSION_COOKIE } from "./auth.js";
 
-/** Tout ce dont le concentrateur a besoin d'un client : pouvoir recevoir du texte. */
+/** All the hub needs from a client: the ability to receive text. */
 export interface Sink {
   send(data: string): void;
 }
 
 /**
- * Diffuse les fragments de sortie aux navigateurs qui regardent un run.
+ * Broadcasts output fragments to browsers watching a run.
  *
- * Chaque message porte son décalage en octets : un client qui se reconnecte
- * demande le log depuis son dernier décalage connu et ne perd rien.
+ * Every message carries its byte offset: a client that reconnects requests
+ * the log from its last known offset and loses nothing.
  */
 export class RunSockets {
   private readonly byRun = new Map<number, Set<Sink>>();
@@ -3816,7 +3821,7 @@ export class RunSockets {
       try {
         sink.send(data);
       } catch {
-        // Un client mort ne doit jamais interrompre la diffusion aux autres.
+        // A dead client must never interrupt the broadcast to the others.
         set.delete(sink);
       }
     }
@@ -3836,12 +3841,13 @@ export async function registerWebSocket(app: FastifyInstance, ctx: AppContext): 
   await app.register(websocket);
 
   app.get("/api/runs/:id/stream", { websocket: true }, (socket, req) => {
-    // Redondance assumée : le hook global d'`app.ts` refuse déjà tout `/api`
-    // sans session, et le fait dès la poignée de main — un client non authentifié
-    // reçoit un 401 HTTP et n'arrive jamais ici. Ce garde ne coûte rien et évite
-    // qu'une exemption future de ce hook ouvre silencieusement le flux.
+    // Deliberate redundancy: `app.ts`'s global hook already refuses every
+    // `/api` route without a session, and does so right at the handshake —
+    // an unauthenticated client gets a 401 HTTP response and never reaches
+    // here. This guard costs nothing and prevents a future exemption of
+    // that hook from silently opening the stream.
     if (!ctx.sessions.valid(req.cookies[SESSION_COOKIE])) {
-      socket.close(4001, "Session requise");
+      socket.close(4001, "Session required");
       return;
     }
 
@@ -3860,35 +3866,35 @@ export async function registerWebSocket(app: FastifyInstance, ctx: AppContext): 
 }
 ```
 
-`src/server/app.ts` appelle déjà `registerWebSocket` (tâche 14) : remplacer le module provisoire
-par celui-ci suffit. Dans `routes/runs.ts`, notifier la fin du run :
+`src/server/app.ts` already calls `registerWebSocket` (Task 14): replacing the provisional module
+with this one is enough. In `routes/runs.ts`, notify the run's end:
 
 ```ts
 void executeRun({ /* … */ }).then((r) => ctx.sockets?.finish(id, r.status));
 ```
 
-- [ ] **Step 4 : Lancer toute la suite**
+- [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: tous les tests passent, y compris les 5 nouveaux.
+Expected: all tests pass, including the 5 new ones.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/server tests/server/ws.test.ts
-git commit -m "feat(server): diffusion des logs par WebSocket"
+git commit -m "feat(server): broadcasting logs over WebSocket"
 ```
 
 ---
 
-### Task 16 : Point d'entrée
+### Task 16: Entry point
 
 **Files:**
-- Create: `src/main.ts` (remplacer le contenu de la tâche 1), `tests/main.test.ts`
+- Create: `src/main.ts` (replaces Task 1's content), `tests/main.test.ts`
 
-- [ ] **Step 1 : Écrire le test qui échoue**
+- [ ] **Step 1: Write the failing test**
 
-`tests/main.test.ts` :
+`tests/main.test.ts`:
 
 ```ts
 import { mkdir, writeFile } from "node:fs/promises";
@@ -3901,13 +3907,13 @@ import { RunStore } from "../src/db/runs.js";
 import { tmpDir } from "./fixtures/repos.js";
 
 describe("createServerFromConfig", () => {
-  it("refuse de démarrer si la configuration est invalide", async () => {
+  it("refuses to start if the configuration is invalid", async () => {
     const root = await tmpDir("laneyard-main-");
     await writeFile(join(root, "config.yml"), "projects: [", "utf8");
     await expect(createServerFromConfig(root)).rejects.toThrow(/configuration/i);
   });
 
-  it("marque interrompus les runs restés actifs au démarrage", async () => {
+  it("marks runs still active at startup as interrupted", async () => {
     const root = await tmpDir("laneyard-main-");
     await mkdir(root, { recursive: true });
     await writeFile(
@@ -3929,14 +3935,14 @@ describe("createServerFromConfig", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer le test pour vérifier qu'il échoue**
+- [ ] **Step 2: Run the test to confirm it fails**
 
 Run: `npm test -- tests/main.test.ts`
-Expected: échec — `createServerFromConfig` n'existe pas.
+Expected: failure — `createServerFromConfig` doesn't exist.
 
-- [ ] **Step 3 : Écrire le point d'entrée**
+- [ ] **Step 3: Write the entry point**
 
-`src/main.ts` :
+`src/main.ts`:
 
 ```ts
 import { homedir } from "node:os";
@@ -3959,15 +3965,15 @@ export interface Started {
   config: ConfigStore;
 }
 
-/** Assemble le serveur à partir d'un dossier de données. */
+/** Assembles the server from a data folder. */
 export async function createServerFromConfig(root: string): Promise<Started> {
   const config = new ConfigStore(join(root, "config.yml"));
   const loaded = await config.load();
-  if (!loaded.ok) throw new Error(`Configuration illisible : ${loaded.error}`);
+  if (!loaded.ok) throw new Error(`Unreadable configuration: ${loaded.error}`);
 
   const db = openDatabase(join(root, "laneyard.db"));
 
-  // Aucun run ne peut survivre à l'arrêt du processus qui le portait.
+  // No run can survive the shutdown of the process that carried it.
   new RunStore(db).interruptActive();
 
   const cache = new CacheStore(db);
@@ -3985,18 +3991,18 @@ export async function createServerFromConfig(root: string): Promise<Started> {
   return { app, db, config };
 }
 
-/** Démarrage réel, hors tests. */
+/** Real startup, outside tests. */
 async function main(): Promise<void> {
   const root = process.env["LANEYARD_HOME"] ?? join(homedir(), ".laneyard");
   const { app, config } = await createServerFromConfig(root);
 
   config.watch((ok) => {
-    if (!ok) console.error(`Configuration invalide, l'ancienne reste active : ${config.lastError()}`);
+    if (!ok) console.error(`Invalid configuration, the previous one stays active: ${config.lastError()}`);
   });
 
   const server = config.server()!;
   await app.listen({ port: server.port, host: server.bind });
-  console.log(`Laneyard écoute sur http://localhost:${server.port}`);
+  console.log(`Laneyard is listening on http://localhost:${server.port}`);
 }
 
 if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.js")) {
@@ -4007,29 +4013,29 @@ if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.js")
 }
 ```
 
-Adapter `tests/smoke.test.ts` si nécessaire : `version` est toujours exporté.
+Adapt `tests/smoke.test.ts` if needed: `version` is still exported.
 
-- [ ] **Step 4 : Lancer toute la suite**
+- [ ] **Step 4: Run the whole suite**
 
 Run: `npm test && npm run typecheck`
-Expected: tous les tests passent, aucune erreur de types.
+Expected: all tests pass, no type errors.
 
-- [ ] **Step 5 : Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/main.ts tests/main.test.ts
-git commit -m "feat: point d'entrée et assemblage du serveur"
+git commit -m "feat: entry point and server assembly"
 ```
 
 ---
 
-### Task 17 : Interface — squelette et thème
+### Task 17: Interface — skeleton and theme
 
 **Files:**
 - Create: `web/index.html`, `web/vite.config.ts`, `web/src/main.tsx`, `web/src/App.tsx`, `web/src/components/Login.tsx`, `web/src/theme.css`, `web/src/api.ts`
-- Modify: `package.json` (dépendances et scripts du front)
+- Modify: `package.json` (frontend dependencies and scripts)
 
-- [ ] **Step 1 : Installer le front**
+- [ ] **Step 1: Install the frontend**
 
 ```bash
 npm install --save-dev @vitejs/plugin-react vite
@@ -4037,7 +4043,7 @@ npm install react react-dom react-router-dom
 npm install --save-dev @types/react @types/react-dom
 ```
 
-Ajouter à `package.json` :
+Add to `package.json`:
 
 ```json
 "scripts": {
@@ -4046,10 +4052,10 @@ Ajouter à `package.json` :
 }
 ```
 
-- [ ] **Step 2 : Écrire le thème**
+- [ ] **Step 2: Write the theme**
 
-`web/src/theme.css` — les jetons de la direction visuelle validée. Sombre par défaut, clair
-disponible, zone terminal sombre dans les deux cas.
+`web/src/theme.css` — the tokens for the validated visual direction. Dark by default, light
+available, terminal area dark in both cases.
 
 ```css
 :root {
@@ -4069,8 +4075,8 @@ disponible, zone terminal sombre dans les deux cas.
   --error: #f8746a;
   --info: #79c0ff;
 
-  /* La zone terminal ne suit pas le thème : les couleurs ANSI de fastlane
-     sont pensées pour un fond noir, les retraduire trahirait la sortie. */
+  /* The terminal area doesn't follow the theme: fastlane's ANSI colors
+     are designed for a black background, re-translating them would betray the output. */
   --term-bg: #0e1013;
   --term-text: #c9d1d9;
 }
@@ -4097,15 +4103,15 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  /* Chasse fixe sur toute l'interface : c'est le choix le plus structurant
-     de la direction visuelle, il ne souffre pas d'exception. */
+  /* Fixed-width type across the whole interface: it's the most structural
+     choice in the visual direction, it tolerates no exception. */
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
 }
 
-/* Angles droits, filets d'un pixel, aucune ombre ni dégradé :
-   les surfaces se distinguent par la valeur, pas par la profondeur. */
+/* Right angles, one-pixel rules, no shadow or gradient:
+   surfaces are told apart by value, not by depth. */
 .panel { background: var(--bg-raised); border: 1px solid var(--border); }
 
 .status-success { color: var(--ok); }
@@ -4116,7 +4122,7 @@ body {
 .status-preparing { color: var(--text-dim); }
 ```
 
-`web/src/api.ts` :
+`web/src/api.ts`:
 
 ```ts
 const json = async <T>(res: Response): Promise<T> => {
@@ -4175,7 +4181,7 @@ export const api = {
 };
 ```
 
-`web/index.html` :
+`web/index.html`:
 
 ```html
 <!doctype html>
@@ -4192,7 +4198,7 @@ export const api = {
 </html>
 ```
 
-`web/src/main.tsx` :
+`web/src/main.tsx`:
 
 ```tsx
 import { StrictMode } from "react";
@@ -4210,8 +4216,8 @@ createRoot(document.getElementById("root")!).render(
 );
 ```
 
-`web/src/App.tsx` — coquille de navigation. Les écrans arrivent aux tâches 18 et 19 ; à ce stade,
-des composants vides suffisent à faire construire le projet.
+`web/src/App.tsx` — navigation shell. The screens arrive in Tasks 18 and 19; at this stage,
+empty components are enough to get the project building.
 
 ```tsx
 import { useEffect, useState } from "react";
@@ -4223,29 +4229,29 @@ export function App() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // Un 401 sur le premier appel signifie qu'il faut se connecter.
+    // A 401 on this call means it's time to log in.
     api
       .projects()
       .then(() => setAuthenticated(true))
       .catch(() => setAuthenticated(false));
   }, []);
 
-  if (authenticated === null) return <p className="dim">chargement…</p>;
+  if (authenticated === null) return <p className="dim">loading…</p>;
   if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
 
   return (
     <div className="shell">
       <header>laneyard</header>
       <Routes>
-        <Route path="/" element={<p className="dim">projets</p>} />
+        <Route path="/" element={<p className="dim">projects</p>} />
       </Routes>
     </div>
   );
 }
 ```
 
-`web/vite.config.ts` — la racine se résout depuis le dossier du fichier de configuration, il ne
-faut donc surtout pas y remettre `"web"`.
+`web/vite.config.ts` — the root resolves from the configuration file's folder, so it must
+absolutely not be re-added as `"web"` there.
 
 ```ts
 import react from "@vitejs/plugin-react";
@@ -4267,31 +4273,31 @@ export default defineConfig({
 });
 ```
 
-`web/src/components/Login.tsx` doit exister avant que ce squelette construise : le prendre tel
-quel dans la tâche 18, ou écrire une version minimale ici et la compléter ensuite.
+`web/src/components/Login.tsx` must exist before this skeleton builds: either take it as-is
+from Task 18, or write a minimal version here and complete it afterwards.
 
-- [ ] **Step 3 : Vérifier que le front se construit**
+- [ ] **Step 3: Verify the frontend builds**
 
 Run: `npm run build:web`
-Expected: build réussi, fichiers émis dans `dist/web`.
+Expected: successful build, files emitted in `dist/web`.
 
-- [ ] **Step 4 : Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add web package.json package-lock.json
-git commit -m "feat(web): squelette Vite, thème et client d'API"
+git commit -m "feat(web): Vite skeleton, theme, and API client"
 ```
 
 ---
 
-### Task 18 : Interface — liste des projets, lanes et déclenchement
+### Task 18: Interface — project list, lanes, and triggering
 
 **Files:**
 - Create: `web/src/App.tsx`, `web/src/pages/Projects.tsx`, `web/src/pages/Project.tsx`, `web/src/components/Login.tsx`
 
-- [ ] **Step 1 : Écrire les écrans**
+- [ ] **Step 1: Write the screens**
 
-`web/src/pages/Projects.tsx` :
+`web/src/pages/Projects.tsx`:
 
 ```tsx
 import { useEffect, useState } from "react";
@@ -4321,7 +4327,7 @@ export function Projects() {
   if (projects.length === 0) {
     return (
       <p className="dim">
-        Aucun projet déclaré. Ajoutez un bloc dans <code>~/.laneyard/config.yml</code>.
+        No projects declared. Add a block in <code>~/.laneyard/config.yml</code>.
       </p>
     );
   }
@@ -4344,7 +4350,7 @@ export function Projects() {
 }
 ```
 
-`web/src/pages/Project.tsx` :
+`web/src/pages/Project.tsx`:
 
 ```tsx
 import { useEffect, useState } from "react";
@@ -4372,8 +4378,8 @@ export function Project() {
   return (
     <>
       <h2>lanes</h2>
-      {/* Une erreur de lecture des lanes est dite, jamais masquée par une liste vide. */}
-      {lanesError && <p className="status-failed">Lanes illisibles — {lanesError}</p>}
+      {/* A lane-reading error is stated, never hidden behind an empty list. */}
+      {lanesError && <p className="status-failed">Unreadable lanes — {lanesError}</p>}
       <ul>
         {lanes
           .filter((l) => !l.private)
@@ -4401,7 +4407,7 @@ export function Project() {
 }
 ```
 
-`web/src/components/Login.tsx` :
+`web/src/components/Login.tsx`:
 
 ```tsx
 import { useState } from "react";
@@ -4420,20 +4426,20 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
   return (
     <form onSubmit={(e) => void submit(e)}>
       <label>
-        mot de passe{" "}
+        password{" "}
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
       </label>
-      <button type="submit">entrer</button>
-      {failed && <p className="status-failed">Mot de passe incorrect</p>}
+      <button type="submit">enter</button>
+      {failed && <p className="status-failed">Incorrect password</p>}
     </form>
   );
 }
 ```
 
-`web/src/App.tsx` et `web/src/main.tsx` : routage entre `/`, `/p/:slug` et `/r/:id`, avec la
-barre latérale des projets et l'écran de connexion affiché tant qu'un appel renvoie 401.
+`web/src/App.tsx` and `web/src/main.tsx`: routing between `/`, `/p/:slug`, and `/r/:id`, with the
+projects sidebar and the login screen shown as long as a call returns 401.
 
-- [ ] **Step 2 : Vérifier manuellement**
+- [ ] **Step 2: Verify manually**
 
 ```bash
 # Terminal 1
@@ -4442,37 +4448,37 @@ LANEYARD_HOME=/tmp/laneyard-demo npm run dev
 npm run dev:web
 ```
 
-Créer `/tmp/laneyard-demo/config.yml` avec un projet pointant vers un vrai dépôt, puis ouvrir
-`http://localhost:5173`. Vérifier : connexion, liste des projets, liste des lanes, déclenchement.
+Create `/tmp/laneyard-demo/config.yml` with a project pointing at a real repository, then open
+`http://localhost:5173`. Verify: login, project list, lane list, triggering.
 
-- [ ] **Step 3 : Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add web/src
-git commit -m "feat(web): liste des projets, lanes et déclenchement d'un run"
+git commit -m "feat(web): project list, lanes, and triggering a run"
 ```
 
 ---
 
-### Task 19 : Interface — écran de run et terminal en direct
+### Task 19: Interface — run screen and live terminal
 
 **Files:**
 - Create: `web/src/pages/Run.tsx`, `web/src/components/Terminal.tsx`, `web/src/useRunStream.ts`
 
-- [ ] **Step 1 : Écrire le suivi de flux**
+- [ ] **Step 1: Write the stream tracking**
 
-`web/src/useRunStream.ts` :
+`web/src/useRunStream.ts`:
 
 ```ts
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 
 /**
- * Suit la sortie d'un run.
+ * Follows a run's output.
  *
- * Le décalage en octets est la clé de la reprise : à la connexion comme après une
- * coupure, on redemande le log depuis le dernier décalage connu, puis on repart
- * du flux. Rien n'est perdu, rien n'est dupliqué.
+ * The byte offset is the key to resuming: on connection as after a drop,
+ * we request the log again from the last known offset, then pick back up
+ * from the stream. Nothing is lost, nothing is duplicated.
  */
 export function useRunStream(runId: number): { log: string; finished: string | null } {
   const [log, setLog] = useState("");
@@ -4500,7 +4506,7 @@ export function useRunStream(runId: number): { log: string; finished: string | n
           | { type: "finished"; status: string };
 
         if (msg.type === "chunk") {
-          // Un fragment déjà couvert par le rattrapage est ignoré.
+          // A fragment already covered by the catch-up is ignored.
           if (msg.offset < offset.current) return;
           offset.current = msg.offset + new TextEncoder().encode(msg.data).byteLength;
           setLog((prev) => prev + msg.data);
@@ -4525,23 +4531,23 @@ export function useRunStream(runId: number): { log: string; finished: string | n
 }
 ```
 
-`web/src/components/Terminal.tsx` : `<pre>` sur fond `--term-bg`, défilement automatique tant que
-l'utilisateur n'a pas remonté manuellement, et une ligne de saisie désactivée portant sa raison —
-« mode interactif désactivé » — conformément à la spec.
+`web/src/components/Terminal.tsx`: `<pre>` on a `--term-bg` background, auto-scrolling as long as
+the user hasn't scrolled up manually, and a disabled input line carrying its reason —
+"interactive mode disabled" — in line with the spec.
 
-`web/src/pages/Run.tsx` : en-tête (lane, branche, commit, statut, durée), chronologie des étapes à
-gauche, terminal à droite, artefacts téléchargeables en bas. Les étapes ayant un `logOffset`
-défilent le terminal jusqu'à la bonne position au clic.
+`web/src/pages/Run.tsx`: header (lane, branch, commit, status, duration), step timeline on the
+left, terminal on the right, downloadable artifacts at the bottom. Steps with a `logOffset`
+scroll the terminal to the right position on click.
 
-- [ ] **Step 2 : Vérifier manuellement**
+- [ ] **Step 2: Verify manually**
 
-Lancer un run depuis l'interface et vérifier : la sortie arrive en direct, les étapes apparaissent
-en fin de run, l'artefact se télécharge, et recharger la page en plein run ne perd aucune ligne.
+Trigger a run from the interface and verify: the output arrives live, the steps appear
+at the end of the run, the artifact downloads, and reloading the page mid-run loses no line.
 
-- [ ] **Step 3 : Servir la SPA construite depuis le serveur**
+- [ ] **Step 3: Serve the built SPA from the server**
 
-Sans cela, l'application n'est accessible que derrière le serveur de développement Vite, et un
-rechargement sur `/r/42` renvoie 404. Dans `src/server/app.ts`, après les routes :
+Without this, the application is only accessible behind the Vite dev server, and
+reloading on `/r/42` returns 404. In `src/server/app.ts`, after the routes:
 
 ```ts
 import fastifyStatic from "@fastify/static";
@@ -4549,40 +4555,40 @@ import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 // …
-// Résolu depuis l'emplacement du module, pas depuis le dossier de données :
-// `deps.root` est ~/.laneyard, la SPA construite vit dans le dépôt.
+// Resolved from the module's location, not from the data folder:
+// `deps.root` is ~/.laneyard, the built SPA lives in the repository.
 const webRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dist", "web");
 if (existsSync(webRoot)) {
   await app.register(fastifyStatic, { root: webRoot });
-  // Le routage vit côté navigateur : toute URL inconnue rend l'application.
+  // Routing lives on the browser side: any unknown URL renders the app.
   app.setNotFoundHandler((req, reply) => {
-    if (req.url.startsWith("/api")) return reply.code(404).send({ error: "Route inconnue" });
+    if (req.url.startsWith("/api")) return reply.code(404).send({ error: "Unknown route" });
     return reply.sendFile("index.html");
   });
 }
 ```
 
-En développement, `dist/web` n'existe pas et le bloc est simplement ignoré : le proxy Vite prend
-le relais.
+In development, `dist/web` doesn't exist and the block is simply skipped: the Vite proxy takes
+over.
 
-- [ ] **Step 4 : Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add web/src src/server/app.ts
-git commit -m "feat(web): écran de run, terminal en direct et artefacts"
+git commit -m "feat(web): run screen, live terminal, and artifacts"
 ```
 
 ---
 
-### Task 20 : Vérification de bout en bout
+### Task 20: End-to-end verification
 
 **Files:**
 - Create: `tests/e2e/full-thread.test.ts`
 
-- [ ] **Step 1 : Écrire le test qui échoue**
+- [ ] **Step 1: Write the failing test**
 
-`tests/e2e/full-thread.test.ts` — le fil complet du jalon, sans navigateur : configuration sur
-disque, dépôt git réel, faux fastlane, API HTTP.
+`tests/e2e/full-thread.test.ts` — the milestone's full thread, without a browser: configuration on
+disk, a real git repository, a fake fastlane, the HTTP API.
 
 ```ts
 import { writeFile } from "node:fs/promises";
@@ -4595,8 +4601,8 @@ import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
 const FAKE_DIR = join(process.cwd(), "tests", "fixtures", "fake-fastlane");
 
-describe("fil complet", () => {
-  it("déclare, clone, liste, lance, suit et récupère l'artefact", async () => {
+describe("full thread", () => {
+  it("declares, clones, lists, triggers, follows, and retrieves the artifact", async () => {
     const origin = await makeOriginRepo({
       "fastlane/Fastfile": "lane :beta do\nend\n",
       "laneyard.yml": 'runtime: system\nartifact_globs: ["build/**/*.ipa"]\n',
@@ -4638,7 +4644,7 @@ projects:
     expect(created.statusCode).toBe(201);
     const { id } = created.json() as { id: number };
 
-    // Le run est asynchrone : on attend qu'il atteigne un état terminal.
+    // The run is asynchronous: we wait for it to reach a terminal state.
     const runs = new RunStore(db);
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
@@ -4663,55 +4669,56 @@ projects:
       cookies,
     });
     expect(download.statusCode).toBe(200);
-    expect(download.body.trim()).toBe("faux binaire");
+    expect(download.body.trim()).toBe("fake binary");
 
     await app.close();
   }, 120_000);
 });
 ```
 
-Ce test vérifie au passage deux choses non évidentes : que le `laneyard.yml` du dépôt est pris en
-compte — sans lui, `runtime` vaudrait `bundle` et les motifs d'artefacts seraient vides — et qu'il
-l'est **dès le premier run**, alors que le fichier n'existait pas sur disque au moment où le run a
-été créé. C'est le scénario que la résolution tardive des réglages est là pour couvrir.
+Along the way, this test verifies two non-obvious things: that the repository's `laneyard.yml` is
+taken into account — without it, `runtime` would be `bundle` and the artifact patterns would be
+empty — and that it is **from the very first run**, even though the file didn't exist on disk at
+the moment the run was created. This is the scenario that the late resolution of settings exists
+to cover.
 
-Il vérifie aussi que le workspace reste propre : l'artefact est produit par le run dans un dossier
-ignoré par git, donc son déplacement ne laisse pas de modification non commitée qui ferait échouer
-le run suivant.
+It also verifies that the workspace stays clean: the artifact is produced by the run in a folder
+ignored by git, so moving it doesn't leave an uncommitted change that would make the next run
+fail.
 
-- [ ] **Step 2 : Lancer le test**
+- [ ] **Step 2: Run the test**
 
 Run: `npm test -- tests/e2e/full-thread.test.ts`
-Expected: 1 test passé. En cas d'échec, lire le log du run — il est dans
-`<root>/logs/<id>.log` et contient la sortie du faux fastlane.
+Expected: 1 test passing. On failure, read the run's log — it's in
+`<root>/logs/<id>.log` and contains the fake fastlane's output.
 
-- [ ] **Step 3 : Lancer toute la suite et le contrôle de types**
+- [ ] **Step 3: Run the whole suite and the type check**
 
 Run: `npm test && npm run typecheck`
-Expected: tout passe.
+Expected: everything passes.
 
-- [ ] **Step 4 : Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add tests/e2e
-git commit -m "test: vérification de bout en bout du fil complet"
+git commit -m "test: end-to-end verification of the full thread"
 ```
 
 ---
 
-### Task 21 : Commande `laneyard add` — adopter un projet fastlane existant
+### Task 21: The `laneyard add` command — adopting an existing fastlane project
 
-Le cas d'usage réel n'est pas de partir d'une page blanche mais d'un projet qui utilise déjà
-fastlane. La commande s'exécute depuis le dossier du projet, détecte ce qu'elle peut et écrit le
-bloc correspondant dans `config.yml` — sans jamais toucher au reste du fichier.
+The real use case isn't starting from a blank page but from a project that already uses
+fastlane. The command runs from the project's folder, detects what it can, and writes the
+corresponding block into `config.yml` — without ever touching the rest of the file.
 
 **Files:**
 - Create: `src/cli/detect.ts`, `src/cli/add.ts`, `tests/cli/detect.test.ts`, `tests/cli/add.test.ts`
-- Modify: `src/main.ts` (aiguillage de commande), `package.json` (champ `bin`)
+- Modify: `src/main.ts` (command dispatch), `package.json` (`bin` field)
 
-- [ ] **Step 1 : Écrire les tests de détection**
+- [ ] **Step 1: Write the detection tests**
 
-`tests/cli/detect.test.ts` :
+`tests/cli/detect.test.ts`:
 
 ```ts
 import { mkdir, writeFile } from "node:fs/promises";
@@ -4730,47 +4737,47 @@ async function projectDir(files: Record<string, string>): Promise<string> {
 }
 
 describe("detectProject", () => {
-  it("trouve le dossier fastlane à la racine", async () => {
+  it("finds the fastlane folder at the root", async () => {
     const dir = await projectDir({ "fastlane/Fastfile": "lane :beta do\nend\n" });
     const d = await detectProject(dir);
     expect(d.fastlaneDir).toBe("fastlane");
   });
 
-  it("trouve un dossier fastlane imbriqué dans un monorepo", async () => {
+  it("finds a fastlane folder nested in a monorepo", async () => {
     const dir = await projectDir({ "apps/ios/fastlane/Fastfile": "lane :beta do\nend\n" });
     const d = await detectProject(dir);
     expect(d.fastlaneDir).toBe("apps/ios/fastlane");
   });
 
-  it("signale l'absence de fastlane plutôt que de deviner", async () => {
-    const dir = await projectDir({ "README.md": "rien" });
+  it("reports the absence of fastlane rather than guessing", async () => {
+    const dir = await projectDir({ "README.md": "nothing" });
     const d = await detectProject(dir);
     expect(d.fastlaneDir).toBeNull();
   });
 
-  it("choisit bundle quand un Gemfile est présent, system sinon", async () => {
-    const avec = await projectDir({ "fastlane/Fastfile": "", Gemfile: 'gem "fastlane"' });
-    expect((await detectProject(avec)).runtime).toBe("bundle");
+  it("chooses bundle when a Gemfile is present, system otherwise", async () => {
+    const withGemfile = await projectDir({ "fastlane/Fastfile": "", Gemfile: 'gem "fastlane"' });
+    expect((await detectProject(withGemfile)).runtime).toBe("bundle");
 
-    const sans = await projectDir({ "fastlane/Fastfile": "" });
-    expect((await detectProject(sans)).runtime).toBe("system");
+    const without = await projectDir({ "fastlane/Fastfile": "" });
+    expect((await detectProject(without)).runtime).toBe("system");
   });
 
-  it("propose des motifs d'artefacts iOS sur un projet Xcode", async () => {
+  it("proposes iOS artifact patterns on an Xcode project", async () => {
     const dir = await projectDir({ "fastlane/Fastfile": "", "Sample.xcodeproj/project.pbxproj": "" });
     const d = await detectProject(dir);
     expect(d.artifactGlobs).toContain("**/*.ipa");
     expect(d.artifactGlobs.some((g) => g.includes("dSYM"))).toBe(true);
   });
 
-  it("propose des motifs Android sur un projet Gradle", async () => {
+  it("proposes Android patterns on a Gradle project", async () => {
     const dir = await projectDir({ "fastlane/Fastfile": "", "app/build.gradle": "" });
     const d = await detectProject(dir);
     expect(d.artifactGlobs).toContain("**/*.apk");
     expect(d.artifactGlobs).toContain("**/*.aab");
   });
 
-  it("lit l'URL du distant et la branche courante", async () => {
+  it("reads the remote's URL and the current branch", async () => {
     const origin = await makeOriginRepo({ "fastlane/Fastfile": "" });
     const clone = await tmpDir("laneyard-clone-");
     const { execFile } = await import("node:child_process");
@@ -4782,7 +4789,7 @@ describe("detectProject", () => {
     expect(d.defaultBranch).toBe("main");
   });
 
-  it("déduit un slug du nom de dossier", async () => {
+  it("derives a slug from the folder name", async () => {
     const dir = await projectDir({ "fastlane/Fastfile": "" });
     const d = await detectProject(dir);
     expect(d.slug).toMatch(/^[a-z0-9][a-z0-9-]*$/);
@@ -4790,14 +4797,14 @@ describe("detectProject", () => {
 });
 ```
 
-- [ ] **Step 2 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 2: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/cli/detect.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 3 : Implémenter la détection**
+- [ ] **Step 3: Implement the detection**
 
-`src/cli/detect.ts` :
+`src/cli/detect.ts`:
 
 ```ts
 import { execFile } from "node:child_process";
@@ -4812,7 +4819,7 @@ export interface Detection {
   slug: string;
   gitUrl: string | null;
   defaultBranch: string;
-  /** Chemin relatif du dossier contenant le Fastfile, ou null si introuvable. */
+  /** Relative path of the folder containing the Fastfile, or null if not found. */
   fastlaneDir: string | null;
   runtime: "bundle" | "system";
   artifactGlobs: string[];
@@ -4837,23 +4844,23 @@ const gitOr = async (args: string[], cwd: string, fallback: string | null): Prom
   }
 };
 
-/** Un nom de dossier n'est pas un slug : on le normalise sans jamais échouer. */
+/** A folder name isn't a slug: normalize it, but never fail. */
 function slugify(name: string): string {
   const s = name
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return s === "" ? "projet" : s;
+  return s === "" ? "project" : s;
 }
 
 /**
- * Inspecte un projet existant et propose une configuration.
+ * Inspects an existing project and proposes a configuration.
  *
- * Ne décide rien d'irréversible : tout ce qu'elle renvoie est une proposition que
- * l'utilisateur voit et peut corriger avant écriture.
+ * Decides nothing irreversible: everything it returns is a proposal the
+ * user sees and can correct before it's written.
  */
 export async function detectProject(dir: string): Promise<Detection> {
-  // Le Fastfile peut être à la racine ou sous un sous-dossier, cas des monorepos.
+  // The Fastfile can be at the root or under a subfolder, for monorepos.
   const fastfiles = await glob(["fastlane/Fastfile", "*/fastlane/Fastfile", "*/*/fastlane/Fastfile"], {
     cwd: dir,
     absolute: true,
@@ -4889,14 +4896,14 @@ export async function detectProject(dir: string): Promise<Detection> {
 }
 ```
 
-- [ ] **Step 4 : Lancer les tests de détection**
+- [ ] **Step 4: Run the detection tests**
 
 Run: `npm test -- tests/cli/detect.test.ts`
-Expected: 8 tests passés.
+Expected: 8 tests passing.
 
-- [ ] **Step 5 : Écrire les tests d'écriture**
+- [ ] **Step 5: Write the writing tests**
 
-`tests/cli/add.test.ts` :
+`tests/cli/add.test.ts`:
 
 ```ts
 import { readFile, writeFile } from "node:fs/promises";
@@ -4906,10 +4913,10 @@ import { parse } from "yaml";
 import { addProjectToConfig } from "../../src/cli/add.js";
 import { tmpDir } from "../fixtures/repos.js";
 
-const EXISTING = `# Ma configuration Laneyard
+const EXISTING = `# My Laneyard configuration
 server:
   port: 7890
-  password_hash: "scrypt$a$b"   # mot de passe du serveur
+  password_hash: "scrypt$a$b"   # server password
 
 projects:
   - slug: deja-la
@@ -4934,7 +4941,7 @@ const entry = {
 };
 
 describe("addProjectToConfig", () => {
-  it("ajoute le projet sans supprimer les projets existants", async () => {
+  it("adds the project without removing existing projects", async () => {
     const path = await configAt(EXISTING);
     await addProjectToConfig(path, entry);
 
@@ -4942,21 +4949,21 @@ describe("addProjectToConfig", () => {
     expect(parsed.projects.map((p) => p.slug)).toEqual(["deja-la", "sample-ios"]);
   });
 
-  it("préserve les commentaires du fichier", async () => {
+  it("preserves the file's comments", async () => {
     const path = await configAt(EXISTING);
     await addProjectToConfig(path, entry);
 
     const raw = await readFile(path, "utf8");
-    expect(raw).toContain("# Ma configuration Laneyard");
-    expect(raw).toContain("# mot de passe du serveur");
+    expect(raw).toContain("# My Laneyard configuration");
+    expect(raw).toContain("# server password");
   });
 
-  it("refuse un slug déjà pris", async () => {
+  it("refuses an already-taken slug", async () => {
     const path = await configAt(EXISTING);
     await expect(addProjectToConfig(path, { ...entry, slug: "deja-la" })).rejects.toThrow(/deja-la/);
   });
 
-  it("crée le fichier et la section serveur s'il n'existe pas", async () => {
+  it("creates the file and the server section if they don't exist", async () => {
     const dir = await tmpDir("laneyard-add-");
     const path = join(dir, "config.yml");
 
@@ -4967,11 +4974,11 @@ describe("addProjectToConfig", () => {
       projects: unknown[];
     };
     expect(parsed.projects).toHaveLength(1);
-    // Un mot de passe doit exister, sinon le serveur refuserait toute connexion.
+    // A password must exist, otherwise the server would refuse every connection.
     expect(parsed.server.password_hash).toMatch(/^scrypt\$/);
   });
 
-  it("ajoute une section projects absente d'un fichier existant", async () => {
+  it("adds a projects section missing from an existing file", async () => {
     const path = await configAt('server:\n  password_hash: "scrypt$a$b"\n');
     await addProjectToConfig(path, entry);
 
@@ -4981,14 +4988,14 @@ describe("addProjectToConfig", () => {
 });
 ```
 
-- [ ] **Step 6 : Lancer les tests pour vérifier qu'ils échouent**
+- [ ] **Step 6: Run the tests to confirm they fail**
 
 Run: `npm test -- tests/cli/add.test.ts`
-Expected: échec — module introuvable.
+Expected: failure — module not found.
 
-- [ ] **Step 7 : Implémenter l'écriture et la commande**
+- [ ] **Step 7: Implement the writing and the command**
 
-`src/cli/add.ts` :
+`src/cli/add.ts`:
 
 ```ts
 import { readFile, writeFile } from "node:fs/promises";
@@ -5008,12 +5015,12 @@ export interface NewProjectEntry {
 }
 
 /**
- * Ajoute un bloc projet à config.yml en préservant le reste du fichier.
+ * Adds a project block to config.yml while preserving the rest of the file.
  *
- * L'édition passe par le document YAML plutôt que par un aller-retour
- * parse/serialize : les commentaires de l'utilisateur — et l'ordre de ses clés —
- * survivent. C'est la même exigence que pour le Fastfile : un fichier écrit à la
- * main ne doit jamais ressortir abîmé.
+ * The edit goes through the YAML document rather than a parse/serialize
+ * round trip: the user's comments — and the order of their keys — survive.
+ * It's the same requirement as for the Fastfile: a hand-written file must
+ * never come back out damaged.
  */
 export async function addProjectToConfig(path: string, entry: NewProjectEntry): Promise<void> {
   let doc: Document.Parsed | Document;
@@ -5025,11 +5032,11 @@ export async function addProjectToConfig(path: string, entry: NewProjectEntry): 
   if (doc.contents === null) doc = new Document({});
 
   if (!doc.hasIn(["server", "password_hash"])) {
-    // Un serveur sans mot de passe refuserait toute connexion : on en génère un
-    // et on l'affiche une seule fois, à l'appelant de le noter.
+    // A server with no password would refuse every connection: we generate one
+    // and print it once, leaving it to the caller to note it down.
     const generated = randomBytes(9).toString("base64url");
     doc.setIn(["server", "password_hash"], hashPassword(generated));
-    process.stdout.write(`\nMot de passe généré : ${generated}\n  (notez-le, il ne sera plus affiché)\n`);
+    process.stdout.write(`\nGenerated password: ${generated}\n  (write it down, it won't be shown again)\n`);
   }
 
   const projects = doc.getIn(["projects"]);
@@ -5039,7 +5046,7 @@ export async function addProjectToConfig(path: string, entry: NewProjectEntry): 
   for (const item of seq.items) {
     const slug = (item as { get?: (k: string) => unknown }).get?.("slug");
     if (slug === entry.slug) {
-      throw new Error(`Un projet porte déjà le slug « ${entry.slug} » dans ${path}`);
+      throw new Error(`A project already uses the slug "${entry.slug}" in ${path}`);
     }
   }
 
@@ -5047,21 +5054,21 @@ export async function addProjectToConfig(path: string, entry: NewProjectEntry): 
   await writeFile(path, doc.toString(), "utf8");
 }
 
-/** Point d'entrée de `laneyard add`. */
+/** Entry point for `laneyard add`. */
 export async function runAddCommand(cwd: string, configPath: string, slugOverride?: string): Promise<number> {
   const d = await detectProject(cwd);
 
   if (d.fastlaneDir === null) {
     process.stderr.write(
-      "Aucun Fastfile trouvé ici. Laneyard pilote fastlane : lancez la commande depuis un projet " +
-        "qui l'utilise déjà, ou exécutez d'abord `fastlane init`.\n",
+      "No Fastfile found here. Laneyard drives fastlane: run the command from a project " +
+        "that already uses it, or run `fastlane init` first.\n",
     );
     return 1;
   }
   if (d.gitUrl === null) {
     process.stderr.write(
-      "Aucun distant git nommé « origin ». Laneyard clone les projets depuis leur dépôt : " +
-        "ajoutez un distant, ou renseignez git_url à la main dans config.yml.\n",
+      "No git remote named \"origin\". Laneyard clones projects from their repository: " +
+        "add a remote, or set git_url by hand in config.yml.\n",
     );
     return 1;
   }
@@ -5078,18 +5085,18 @@ export async function runAddCommand(cwd: string, configPath: string, slugOverrid
   });
 
   process.stdout.write(
-    `\nProjet « ${slug} » ajouté à ${configPath}\n` +
-      `  dépôt        ${d.gitUrl} (${d.defaultBranch})\n` +
+    `\nProject "${slug}" added to ${configPath}\n` +
+      `  repository   ${d.gitUrl} (${d.defaultBranch})\n` +
       `  fastlane     ${d.fastlaneDir}\n` +
-      `  exécution    ${d.runtime}\n` +
-      `  artefacts    ${d.artifactGlobs.join(", ") || "aucun motif détecté — à compléter"}\n` +
-      `\nRelancez Laneyard ou attendez le rechargement automatique, le projet apparaîtra dans l'interface.\n`,
+      `  runtime      ${d.runtime}\n` +
+      `  artifacts    ${d.artifactGlobs.join(", ") || "no pattern detected — fill in manually"}\n` +
+      `\nRestart Laneyard or wait for the automatic reload, the project will appear in the interface.\n`,
   );
   return 0;
 }
 ```
 
-Dans `src/main.ts`, aiguiller avant le démarrage du serveur :
+In `src/main.ts`, dispatch before starting the server:
 
 ```ts
 const [, , command, ...rest] = process.argv;
@@ -5102,46 +5109,46 @@ if (command === "add") {
 }
 ```
 
-Et dans `package.json` :
+And in `package.json`:
 
 ```json
 "bin": { "laneyard": "dist/src/main.js" }
 ```
 
-- [ ] **Step 8 : Lancer les tests**
+- [ ] **Step 8: Run the tests**
 
 Run: `npm test -- tests/cli/`
-Expected: 13 tests passés.
+Expected: 13 tests passing.
 
-- [ ] **Step 9 : Vérifier sur un vrai projet**
+- [ ] **Step 9: Verify on a real project**
 
-Depuis un projet mobile existant qui utilise fastlane :
+From an existing mobile project that uses fastlane:
 
 ```bash
-LANEYARD_HOME=/tmp/laneyard-demo npx tsx /chemin/vers/laneyard/src/main.ts add
+LANEYARD_HOME=/tmp/laneyard-demo npx tsx /path/to/laneyard/src/main.ts add
 ```
 
-Vérifier que `/tmp/laneyard-demo/config.yml` contient un bloc cohérent, que le mot de passe généré
-s'affiche une fois, et qu'une seconde exécution refuse le doublon de slug.
+Verify that `/tmp/laneyard-demo/config.yml` contains a coherent block, that the generated password
+is shown once, and that a second run refuses the duplicate slug.
 
-- [ ] **Step 10 : Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/cli tests/cli src/main.ts package.json
-git commit -m "feat(cli): commande add pour adopter un projet fastlane existant"
+git commit -m "feat(cli): add command to adopt an existing fastlane project"
 ```
 
 ---
 
-## Ce que le jalon 1 laisse volontairement de côté
+## What milestone 1 deliberately leaves out
 
-À traiter dans les plans suivants, dans cet ordre :
+To be handled in the following plans, in this order:
 
-- **Jalon 2 — fiabilité** : caviardage des secrets avec tampon glissant, file d'attente et limite
-  globale, annulation depuis l'interface, purge des runs orphelins au démarrage exposée dans l'UI.
-- **Jalon 3 — secrets et Préparation CI** : coffre chiffré, injection dans l'environnement du run,
-  module `src/heuristics/`, les cinq items de la check-list.
-- **Jalon 4 — éditeur** : commandes `actions` et `parse` du sidecar, éditeur texte avec
-  vérification, puis vue structurée et réécriture chirurgicale.
-- **Jalon 5 — finitions et publication** : notifications, purge, thème clair, installation en
-  service, README, CONTRIBUTING, licence.
+- **Milestone 2 — reliability**: secret redaction with a sliding buffer, queue and global limit,
+  cancellation from the interface, orphaned-run purge at startup exposed in the UI.
+- **Milestone 3 — secrets and CI Readiness**: encrypted vault, injection into the run's
+  environment, the `src/heuristics/` module, the five checklist items.
+- **Milestone 4 — editor**: the sidecar's `actions` and `parse` commands, text editor with
+  verification, then the structured view and surgical rewriting.
+- **Milestone 5 — polish and publishing**: notifications, purge, light theme, service
+  installation, README, CONTRIBUTING, license.

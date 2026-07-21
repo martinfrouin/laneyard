@@ -1,139 +1,139 @@
-# Laneyard — conception
+# Laneyard — design
 
-**Date** : 2026-07-21
-**État** : validé, prêt pour la planification d'implémentation
+**Date**: 2026-07-21
+**Status**: validated, ready for implementation planning
 
-## Le problème
+## The problem
 
-Déclencher, suivre et modifier des builds mobiles impose aujourd'hui de passer soit par un
-terminal sur la machine de dev, soit par un service hébergé type Bitrise — facturé, opaque et
-propriétaire de la chaîne de signature.
+Triggering, following, and editing mobile builds today means going through either a terminal
+on the dev machine, or a hosted service like Bitrise — billed, opaque, and the owner of the
+signing chain.
 
-Laneyard est un serveur de build auto-hébergé bâti sur fastlane. Il tourne sur une machine que
-tu possèdes, expose une interface web sur ton réseau local, et te permet de lancer des lanes,
-d'en suivre l'exécution en direct et de modifier le Fastfile sans ouvrir d'éditeur.
+Laneyard is a self-hosted build server built on fastlane. It runs on a machine you own,
+exposes a web interface on your local network, and lets you trigger lanes, follow their
+execution live, and edit the Fastfile without opening an editor.
 
-## Périmètre
+## Scope
 
-**Dans la v1**
+**In v1**
 
-- Plusieurs projets enregistrés, chacun cloné depuis son dépôt git.
-- Déclenchement manuel d'une lane depuis l'interface, avec ses paramètres.
-- Suivi en direct : logs diffusés, chronologie des actions, statut, durée.
-- Historique des runs avec artefacts téléchargeables.
-- Édition du Fastfile : vue structurée par actions et éditeur texte, puis commit et push.
-- Configuration intégralement pilotable par fichiers, secrets exclus — sauvegardable et
-  versionnable, l'interface n'étant qu'un éditeur de ces fichiers.
-- `laneyard add` : adoption d'un projet fastlane existant par détection, depuis son dossier.
-- Coffre de secrets injectés en variables d'environnement.
-- Notifications de fin de run : notification du navigateur, plus webhook optionnel par projet.
-- Écran « Préparation CI » : check-list d'autonomie par projet.
-- Documentation publique : README, CONTRIBUTING, licence MIT — le dépôt est public dès le départ.
+- Several registered projects, each cloned from its git repository.
+- Manual triggering of a lane from the interface, with its parameters.
+- Live follow-up: streamed logs, action timeline, status, duration.
+- Run history with downloadable artifacts.
+- Fastfile editing: structured view by actions and a text editor, then commit and push.
+- Configuration entirely file-driven, secrets excluded — backupable and
+  versionable, with the interface being nothing more than an editor for these files.
+- `laneyard add`: adopting an existing fastlane project by detection, from its folder.
+- Vault of secrets injected as environment variables.
+- End-of-run notifications: browser notification, plus an optional webhook per project.
+- "CI Readiness" screen: per-project autonomy checklist.
+- Public documentation: README, CONTRIBUTING, MIT license — the repository is public from the start.
 
-**Hors v1, mais la conception ne doit pas les rendre impossibles**
+**Out of v1, but the design must not make them impossible**
 
-- Déclencheurs git (scrutation de branches, webhooks) — la colonne `trigger` existe déjà.
-- Runs planifiés.
-- Plusieurs machines d'exécution.
+- Git triggers (branch polling, webhooks) — the `trigger` column already exists.
+- Scheduled runs.
+- Multiple execution machines.
 
-**Explicitement hors périmètre**
+**Explicitly out of scope**
 
-- Multi-utilisateur, rôles, permissions. Un outil personnel, un mot de passe.
-- Hébergement cloud, exposition sur Internet.
-- Support d'autres outils que fastlane.
+- Multi-user, roles, permissions. A personal tool, one password.
+- Cloud hosting, exposure on the Internet.
+- Support for tools other than fastlane.
 
-## Contraintes
+## Constraints
 
-- Tourne sur macOS **et** Linux — un projet Android n'a aucune raison d'exiger un Mac.
-- Cible : une machine dédiée qui reste allumée, pilotée depuis un navigateur sur le réseau local.
-- Aucune connaissance de fastlane codée en dur **dans le sidecar et dans l'éditeur** : ni noms
-  d'actions, ni paramètres, ni lanes. Voir « Frontière des heuristiques » pour les deux endroits où
-  des noms connus sont autorisés.
-- Un secret ne doit jamais atterrir dans un fichier de log.
-- Le Fastfile de l'utilisateur ne doit jamais ressortir abîmé d'une édition.
+- Runs on macOS **and** Linux — an Android project has no reason to require a Mac.
+- Target: a dedicated machine that stays on, driven from a browser on the local network.
+- No fastlane knowledge hardcoded **in the sidecar and in the editor**: no action
+  names, no parameters, no lanes. See "Heuristics boundary" for the two places where
+  known names are allowed.
+- A secret must never end up in a log file.
+- The user's Fastfile must never come out of an edit damaged.
 
-### Frontière des heuristiques
+### Heuristics boundary
 
-Deux fonctionnalités ont besoin de connaître fastlane par son nom : la check-list Préparation CI
-(qui parle de `match`, de `MATCH_PASSWORD`, de l'App Store Connect) et l'extraction du résumé
-d'erreur. Cette connaissance est autorisée, à trois conditions strictes :
+Two features need to know fastlane by name: the CI Readiness checklist
+(which talks about `match`, `MATCH_PASSWORD`, App Store Connect) and the error-summary
+extraction. This knowledge is allowed, under three strict conditions:
 
-1. Elle vit dans un module unique et isolé, `src/heuristics/`, jamais dispersée dans le runner,
-   le sidecar ou l'éditeur.
-2. Elle **ne bloque jamais et ne modifie jamais**. Une heuristique ne refuse pas un run, ne masque
-   pas une lane, ne touche pas à un Fastfile. Elle produit de l'information : un avertissement
-   dans la check-list, un résumé d'erreur à côté du log intégral, qui lui fait toujours foi.
-3. Elle est décrite comme une table de règles déclaratives, pas comme du code impératif éparpillé,
-   pour rester relisable quand fastlane évolue.
+1. It lives in a single, isolated module, `src/heuristics/`, never scattered across the runner,
+   the sidecar, or the editor.
+2. It **never blocks and never modifies**. A heuristic does not refuse a run, does not hide
+   a lane, does not touch a Fastfile. It produces information: a warning
+   in the checklist, an error summary next to the full log, which always remains authoritative.
+3. It is described as a table of declarative rules, not as scattered imperative code,
+   so it stays readable as fastlane evolves.
 
-Le sidecar et l'éditeur, eux, restent à zéro connaissance codée en dur. C'est une règle absolue :
-un plugin fastlane inconnu doit être aussi bien traité qu'une action officielle.
+The sidecar and the editor, meanwhile, stay at zero hardcoded knowledge. This is an absolute rule:
+an unknown fastlane plugin must be treated just as well as an official action.
 
 ## Architecture
 
 ```
-Navigateur (machine de travail)
-        │  HTTP + WebSocket sur le LAN, cookie de session
+Browser (workstation)
+        │  HTTP + WebSocket over the LAN, session cookie
         ▼
 ┌─────────────────────────────────────────────────────┐
-│ Machine hôte — launchd (macOS) ou systemd (Linux)   │
+│ Host machine — launchd (macOS) or systemd (Linux)   │
 │                                                      │
-│  Serveur Fastify + WebSocket                        │
+│  Fastify + WebSocket server                         │
 │      │                    │                          │
 │      ▼                    ▼                          │
-│  Runner              Sidecar Ruby                    │
+│  Runner              Ruby sidecar                    │
 │  (node-pty,          (bundle exec ruby               │
-│   file d'attente)     introspect.rb)                 │
+│   queue)              introspect.rb)                 │
 │      │                    ┆                          │
 │      ▼                    ┆                          │
-│  SQLite · workspaces git · logs · artefacts          │
+│  SQLite · git workspaces · logs · artifacts          │
 └──────┼────────────────────┼──────────────────────────┘
-       ▼ PTY                ┆ API Ruby
-    fastlane — celui du Gemfile du projet
+       ▼ PTY                ┆ Ruby API
+    fastlane — the project's own, from its Gemfile
 ```
 
-### Choix : Node/TypeScript avec un sidecar Ruby
+### Choice: Node/TypeScript with a Ruby sidecar
 
-Le backend est en TypeScript (Fastify). Toute connaissance de fastlane provient d'un script Ruby
-lancé **dans le bundle du projet concerné**.
+The backend is in TypeScript (Fastify). All fastlane knowledge comes from a Ruby script
+launched **inside the bundle of the project concerned**.
 
-Deux alternatives ont été écartées :
+Two alternatives were ruled out:
 
-- **Backend tout-Ruby** — accès natif à l'API fastlane, mais Laneyard deviendrait prisonnier d'un
-  environnement Ruby précis, cohabiterait mal avec les Gemfile des projets, et l'écosystème
-  temps-réel y est moins praticable.
-- **Binaire Go/Rust parsant la sortie texte** — déploiement idéal, mais sans l'API Ruby les
-  métadonnées d'actions sont perdues et l'éditeur structuré retomberait sur une liste codée en
-  dur qui se périme à chaque version de fastlane. Rédhibitoire.
+- **All-Ruby backend** — native access to the fastlane API, but Laneyard would become a prisoner
+  of a specific Ruby environment, would coexist poorly with projects' Gemfiles, and the
+  real-time ecosystem is less practical there.
+- **Go/Rust binary parsing text output** — ideal deployment, but without the Ruby API the
+  action metadata is lost and the structured editor would fall back to a hardcoded
+  list that goes stale with every fastlane version. A dealbreaker.
 
-Le sidecar isole entièrement Laneyard du Ruby de chaque projet tout en lui donnant accès à la
-vraie version de fastlane et aux plugins installés.
+The sidecar entirely isolates Laneyard from each project's Ruby while giving it access to the
+real version of fastlane and the installed plugins.
 
-### Composants
+### Components
 
-#### Serveur (`src/server`)
+#### Server (`src/server`)
 
-Unique porte d'entrée. REST pour les actions, WebSocket pour la diffusion des logs et la remontée
-de saisie clavier vers le PTY. Un mot de passe haché en configuration, une session par cookie.
-Écoute sur `0.0.0.0` par défaut.
+Single entry point. REST for actions, WebSocket for streaming logs and forwarding
+keyboard input to the PTY. A hashed password in configuration, a cookie-based session.
+Listens on `0.0.0.0` by default.
 
 #### Runner (`src/runner`)
 
-Exécute les jobs. File d'attente avec **un run à la fois par projet** — deux builds ne peuvent pas
-partager un workspace git — et une limite globale configurable, à 1 par défaut, parce qu'un build
-Xcode monopolise la machine.
+Runs the jobs. Queue with **one run at a time per project** — two builds can't
+share a git workspace — and a configurable global limit, 1 by default, because an Xcode
+build hogs the machine.
 
-#### Sidecar Ruby (`ruby/introspect.rb`)
+#### Ruby sidecar (`ruby/introspect.rb`)
 
-Le seul composant qui connaît fastlane. Trois commandes, sortie JSON, ne modifie jamais rien :
+The only component that knows fastlane. Three commands, JSON output, never modifies anything:
 
-| Commande  | Sortie |
+| Command   | Output |
 |-----------|--------|
-| `lanes`   | Lanes du projet : nom, plateforme, description, paramètres attendus |
-| `actions` | Toutes les actions disponibles avec leurs options typées (clé, type, description, défaut, variable d'environnement), plugins du projet inclus |
-| `parse`   | Arbre syntaxique du Fastfile avec les positions en octets de chaque instruction |
+| `lanes`   | The project's lanes: name, platform, description, expected parameters |
+| `actions` | All available actions with their typed options (key, type, description, default, environment variable), project plugins included |
+| `parse`   | Fastfile syntax tree with the byte positions of each statement |
 
-L'API sous-jacente est vérifiée :
+The underlying API is verified:
 
 ```ruby
 require "fastlane"
@@ -144,38 +144,39 @@ klass.available_options.map { |o| { key: o.key, desc: o.description,
                                     env: o.env_name } }
 ```
 
-L'analyse syntaxique utilise Prism, l'analyseur officiel de Ruby, pour obtenir les positions
-exactes dans le fichier.
+The syntax analysis uses Prism, Ruby's official parser, to get the exact
+positions in the file.
 
-#### Front (`src/web`)
+#### Frontend (`src/web`)
 
-SPA React. Trois niveaux de navigation : projets → projet → run.
+React SPA. Three levels of navigation: projects → project → run.
 
-### Stockage
+### Storage
 
-SQLite pour l'état d'exécution. Fichiers sur disque pour la configuration, les logs et les
-artefacts : un log de build pèse plusieurs mégaoctets et n'a rien à faire en base.
+SQLite for execution state. Files on disk for configuration, logs, and
+artifacts: a build log weighs several megabytes and has no business being in the database.
 
 ```
 ~/.laneyard/
-  config.yml             # configuration du serveur et des projets — versionnable
-  laneyard.db            # runs, étapes, artefacts, secrets chiffrés, cache
-  key                    # clé de chiffrement des secrets, 0600
-  workspaces/<slug>/     # clones git, conservés entre les runs
+  config.yml             # server and project configuration — versionable
+  laneyard.db            # runs, steps, artifacts, encrypted secrets, cache
+  key                    # secret encryption key, 0600
+  workspaces/<slug>/     # git clones, kept between runs
   logs/<run>.log
   artifacts/<run>/
 ```
 
-## Configuration par fichiers
+## File-based configuration
 
-**Toute la configuration, secrets exclus, vit dans des fichiers texte.** L'interface est un
-éditeur de ces fichiers, jamais une source de vérité parallèle. Sauvegarder un serveur Laneyard,
-c'est copier un seul fichier, `config.yml` ; le restaurer ailleurs, c'est le recopier et ressaisir
-les secrets. Le reste de la configuration voyage déjà avec le code, dans les dépôts.
+**All configuration, secrets excluded, lives in text files.** The interface is an
+editor for these files, never a parallel source of truth. Backing up a Laneyard server
+means copying a single file, `config.yml`; restoring it elsewhere means copying it back and
+re-entering the secrets. The rest of the configuration already travels with the code, in the
+repositories.
 
-### `~/.laneyard/config.yml` — le serveur et ses projets
+### `~/.laneyard/config.yml` — the server and its projects
 
-Ce que Laneyard doit savoir avant même d'avoir cloné quoi que ce soit.
+What Laneyard needs to know before it has even cloned anything.
 
 ```yaml
 server:
@@ -193,20 +194,20 @@ projects:
     git_auth: { kind: ssh_key, ref: ~/.ssh/id_ed25519 }
     color: green
     notify_browser: true
-    webhook_url: $SLACK_WEBHOOK      # référence de secret, jamais la valeur
-    # tout champ de laneyard.yml peut aussi figurer ici
+    webhook_url: $SLACK_WEBHOOK      # secret reference, never the value
+    # any field from laneyard.yml can also appear here
     artifact_globs: ["build/**/*.ipa"]
 ```
 
-`git_auth.ref` se lit selon `kind` : un chemin de fichier pour `ssh_key`, un nom de secret pour
-`token`. Le `slug` est la clé d'identité de tout l'historique : le renommer dans le fichier
-détacherait runs et secrets, il est donc traité comme immuable. Renommer un projet passe par une
-opération explicite de l'interface qui met les références à jour.
+`git_auth.ref` is read according to `kind`: a file path for `ssh_key`, a secret name for
+`token`. The `slug` is the identity key for all of the history: renaming it in the file
+would detach runs and secrets, so it's treated as immutable. Renaming a project goes through an
+explicit operation in the interface that updates the references.
 
-### `laneyard.yml` dans le dépôt — le comportement de build
+### `laneyard.yml` in the repository — build behavior
 
-Facultatif, à la racine du dépôt, versionné avec le code. Il décrit comment ce projet se
-construit — donc il a sa place à côté du code, comme un `bitrise.yml`.
+Optional, at the root of the repository, versioned with the code. It describes how this project
+builds — so it belongs next to the code, like a `bitrise.yml`.
 
 ```yaml
 fastlane_dir: fastlane
@@ -216,400 +217,402 @@ interactive_default: false
 artifact_globs:
   - "build/**/*.ipa"
   - "build/**/*.app.dSYM.zip"
-required_secrets:                    # noms seulement, jamais de valeurs
+required_secrets:                    # names only, never values
   - MATCH_PASSWORD
   - APP_STORE_CONNECT_API_KEY_ID
 ```
 
-### Adopter un projet existant
+### Adopting an existing project
 
-Personne ne part d'une page blanche : un projet qui mérite Laneyard utilise déjà fastlane. Écrire
-le bloc `config.yml` à la main est donc le mauvais premier contact.
+Nobody starts from a blank page: a project that deserves Laneyard already uses fastlane. Writing
+the `config.yml` block by hand is therefore the wrong first contact.
 
-`laneyard add`, lancée depuis le dossier du projet, inspecte ce qui est là — dossier `fastlane`, y
-compris imbriqué dans un monorepo ; présence d'un `Gemfile` pour choisir entre `bundle` et
-`system` ; nature du projet, Xcode ou Gradle, pour proposer des motifs d'artefacts ; distant git et
-branche courante — puis ajoute le bloc correspondant à `config.yml`.
+`laneyard add`, run from the project's folder, inspects what's there — a `fastlane`
+folder, including one nested in a monorepo; presence of a `Gemfile` to choose between `bundle`
+and `system`; the nature of the project, Xcode or Gradle, to propose artifact patterns; git
+remote and current branch — then adds the corresponding block to `config.yml`.
 
-Deux exigences sur cette écriture :
+Two requirements on this write:
 
-- **Le fichier n'est jamais réécrit en entier.** L'édition passe par le document YAML, pas par un
-  aller-retour parse/serialize : commentaires et ordre des clés survivent. C'est la même règle que
-  pour le Fastfile — un fichier écrit à la main ne doit jamais ressortir abîmé.
-- **Rien n'est deviné en silence.** La commande affiche ce qu'elle a détecté et ce qu'elle n'a pas
-  su déduire, et refuse d'agir si le projet n'a ni Fastfile ni distant git, avec un message qui dit
-  quoi faire.
+- **The file is never rewritten in full.** The edit goes through the YAML document, not through
+  a parse/serialize round-trip: comments and key order survive. It's the same rule as
+  for the Fastfile — a hand-written file must never come out damaged.
+- **Nothing is silently guessed.** The command displays what it detected and what it wasn't
+  able to work out, and refuses to act if the project has neither a Fastfile nor a git remote,
+  with a message that says what to do.
 
-À la première utilisation, elle génère aussi un mot de passe serveur et l'affiche une seule fois.
+On first use, it also generates a server password and displays it once.
 
-### Précédence et écriture
+### Precedence and writing
 
-Champ par champ : `laneyard.yml` du dépôt, puis le bloc du projet dans `config.yml`, puis les
-valeurs par défaut. Les deux fichiers partagent le même vocabulaire — n'importe quel champ de
-`laneyard.yml` peut aussi être écrit dans le bloc du projet, ce qui permet de configurer un dépôt
-sans y ajouter de fichier. Un `retention` propre à un projet y trouve également sa place et
-l'emporte alors sur celui du serveur.
+Field by field: the repository's `laneyard.yml`, then the project's block in `config.yml`, then
+default values. The two files share the same vocabulary — any field from
+`laneyard.yml` can also be written in the project's block, which lets you configure a repository
+without adding a file to it. A project-specific `retention` also has its place there and
+then takes precedence over the server's.
 
-L'interface affiche la provenance de chaque réglage — un réglage venu du dépôt
-est signalé comme tel, et le modifier produit une modification git à committer, exactement comme
-une édition du Fastfile. Les réglages de `config.yml` sont écrits directement.
+The interface shows where each setting comes from — a setting coming from the repository
+is flagged as such, and changing it produces a git change to commit, exactly like
+a Fastfile edit. Settings from `config.yml` are written directly.
 
-Les fichiers sont surveillés : une modification à la main est prise en compte sans redémarrage.
-Un fichier invalide est signalé dans l'interface et l'ancienne configuration valide reste active —
-jamais de démarrage à moitié configuré. **Un run en cours conserve la configuration résolue à son
-démarrage**, y compris si son projet est modifié ou retiré du fichier entre-temps.
+Files are watched: a hand-made change is picked up without a restart.
+An invalid file is flagged in the interface and the old valid configuration stays active —
+never a half-configured startup. **A run in progress keeps the configuration resolved at its
+start**, even if its project is changed or removed from the file in the meantime.
 
-**Un secret ne figure jamais dans un fichier de configuration.** Ces fichiers ne peuvent que
-déclarer des noms de secrets ou y faire référence par `$NOM`.
+**A secret never appears in a configuration file.** These files can only
+declare secret names or reference them with `$NAME`.
 
-## Modèle de données
+## Data model
 
-SQLite ne contient que l'état d'exécution et les secrets. Aucune table `project` : la liste des
-projets vient de `config.yml`, et les runs référencent un projet par son `slug`. Retirer un projet
-du fichier ne détruit pas son historique : les runs restent en base et accessibles par leur URL
-`/r/<id>`, mais le projet disparaît de la navigation. Le remettre dans le fichier le fait
-réapparaître intact, historique compris.
+SQLite only contains execution state and secrets. No `project` table: the list of
+projects comes from `config.yml`, and runs reference a project by its `slug`. Removing a project
+from the file doesn't destroy its history: the runs stay in the database and remain accessible at
+their URL `/r/<id>`, but the project disappears from navigation. Putting it back in the file
+makes it reappear intact, history included.
 
 ### `secret`
 
-| Champ | Type | Rôle |
+| Field | Type | Role |
 |---|---|---|
-| `project_slug` | text? | Portée : un projet, ou nul pour un secret global |
-| `key` | text | Nom de la variable d'environnement |
-| `value_enc` | blob | Chiffré au repos, AES-GCM, clé hors base |
-| `masked` | bool | Si vrai : jamais réaffiché dans l'UI, caviardé dans les logs |
+| `project_slug` | text? | Scope: a project, or null for a global secret |
+| `key` | text | Environment variable name |
+| `value_enc` | blob | Encrypted at rest, AES-GCM, key outside the database |
+| `masked` | bool | If true: never shown again in the UI, redacted in logs |
 
 ### `run`
 
-| Champ | Type | Rôle |
+| Field | Type | Role |
 |---|---|---|
-| `project_slug`, `lane`, `platform` | — | Ce qui a été lancé |
-| `params` | json | Options passées à la lane |
+| `project_slug`, `lane`, `platform` | — | What was launched |
+| `params` | json | Options passed to the lane |
 | `status` | text | `queued` · `preparing` · `running` · `success` · `failed` · `cancelled` · `interrupted` |
-| `branch`, `commit_sha` | text | État exact du code au moment du build |
-| `trigger` | text | `manual` en v1 ; la colonne existe pour la suite |
-| `interactive` | bool | Mode de ce run |
-| `queued_at`, `started_at`, `finished_at` | ts | Attente et durée réelle, séparées |
-| `exit_code`, `error_summary` | — | Cause d'échec extraite du log |
+| `branch`, `commit_sha` | text | The exact state of the code at build time |
+| `trigger` | text | `manual` in v1; the column exists for later |
+| `interactive` | bool | This run's mode |
+| `queued_at`, `started_at`, `finished_at` | ts | Wait time and actual duration, kept separate |
+| `exit_code`, `error_summary` | — | Failure cause extracted from the log |
 
 ### `run_step`
 
-| Champ | Type | Rôle |
+| Field | Type | Role |
 |---|---|---|
-| `run_id`, `idx`, `name` | — | Ordre et nom de l'action, issus de `report.xml` |
-| `duration_ms`, `status` | — | Issus de `report.xml`. Repérer l'étape lente ou fautive |
-| `started_at` | ts | Calculé par cumul des durées depuis le début du run |
-| `log_offset` | int? | Position dans le log, issue du repérage en direct. Nulle si l'étape n'a pas été repérée |
-| `source` | text | `report` ou `live` — d'où vient la ligne, voir ci-dessous |
+| `run_id`, `idx`, `name` | — | Order and name of the action, from `report.xml` |
+| `duration_ms`, `status` | — | From `report.xml`. Spot the slow or failing step |
+| `started_at` | ts | Computed by accumulating durations from the start of the run |
+| `log_offset` | int? | Position in the log, from live detection. Null if the step wasn't detected |
+| `source` | text | `report` or `live` — where the line comes from, see below |
 
 ### `artifact`
 
-| Champ | Type | Rôle |
+| Field | Type | Role |
 |---|---|---|
-| `run_id`, `filename`, `path`, `size` | — | Fichier déplacé hors du workspace |
+| `run_id`, `filename`, `path`, `size` | — | File moved out of the workspace |
 | `kind` | text | `ipa` · `apk` · `aab` · `dsym` · `other` |
 
-### Quatre absences volontaires
+### Four deliberate absences
 
-- **Aucune table `project`.** La configuration vit dans les fichiers, jamais en base. Voir
-  « Configuration par fichiers ».
-- **Aucune table `lane`.** Les lanes vivent dans le Fastfile. Laneyard les lit via le sidecar et
-  met le résultat en cache dans une table `introspection_cache` (`project_slug`, `config_hash`,
-  `payload` JSON, `fetched_at`), une ligne par projet, écrasée à chaque changement d'empreinte.
-  L'empreinte couvre **tout le `fastlane_dir`**, pas seulement le Fastfile : un `Appfile`, un
-  `Pluginfile` ou un fichier importé modifie les lanes tout autant.
-  C'est un cache, pas une source : une empreinte différente le rend caduc immédiatement, et le
-  vider n'a aucune conséquence hormis une lecture plus lente. L'interface ne peut donc pas
-  afficher une lane qui n'existe plus.
-- **Aucune table `user`.** Un mot de passe haché en configuration. Le multi-utilisateur n'a pas de
-  sens pour un outil auto-hébergé personnel.
-- **Aucun log en base.** Un fichier par run, diffusé en direct puis relu à la demande.
+- **No `project` table.** Configuration lives in files, never in the database. See
+  "File-based configuration".
+- **No `lane` table.** Lanes live in the Fastfile. Laneyard reads them through the sidecar and
+  caches the result in an `introspection_cache` table (`project_slug`, `config_hash`,
+  `payload` JSON, `fetched_at`), one row per project, overwritten on every hash change.
+  The hash covers **the whole `fastlane_dir`**, not just the Fastfile: an `Appfile`, a
+  `Pluginfile`, or an imported file changes the lanes just as much.
+  It's a cache, not a source: a different hash makes it stale immediately, and
+  clearing it has no consequence beyond a slower read. The interface therefore can't
+  show a lane that no longer exists.
+- **No `user` table.** A hashed password in configuration. Multi-user doesn't make
+  sense for a personal self-hosted tool.
+- **No logs in the database.** One file per run, streamed live then re-read on demand.
 
-## Cycle de vie d'un run
+## Lifecycle of a run
 
-1. **Déclenchement** → `queued`. Le formulaire de paramètres est généré depuis la signature réelle
-   de la lane. Le run est créé en base immédiatement : même en attente, il est visible.
-2. **File d'attente.** Un run par projet, limite globale configurable.
-3. **Préparation** → `preparing`. Au premier run d'un projet, le workspace n'existe pas encore :
-   il est créé par un clone complet, opération visible dans les logs du run avec sa propre étape,
-   car sur un gros dépôt elle dure. Le clone initial peut aussi être déclenché à l'enregistrement
-   du projet, ce qui permet de lire les lanes avant tout run. Ensuite, `git fetch` puis
-   `checkout` dans le workspace du projet,
-   conservé entre les runs donc rapide, nettoyable sur demande. Le SHA est enregistré. Si le
-   `Gemfile.lock` a changé, `bundle install` tourne d'abord. Les secrets sont déchiffrés en
-   mémoire et préparés en variables d'environnement.
-4. **Exécution** → `running`. fastlane est lancé dans un pseudo-terminal : il conserve ses
-   couleurs et son affichage habituel. Chaque fragment de sortie part vers trois destinations —
-   le fichier de log, les navigateurs connectés, un tampon pour les connexions tardives.
-5. **Fin.** Le code de sortie décide. En cas d'échec, le résumé d'erreur est extrait du bloc
-   d'erreur de fastlane par le module d'heuristiques. Les artefacts sont collectés, puis déplacés
-   hors du workspace pour survivre au prochain build.
-6. **Annulation.** `SIGINT` au groupe de processus — fastlane fait son ménage — puis `SIGKILL`
-   s'il s'obstine. Délai maximum par run, 60 min par défaut.
+1. **Trigger** → `queued`. The parameter form is generated from the lane's actual
+   signature. The run is created in the database immediately: even while queued, it is visible.
+2. **Queue.** One run per project, configurable global limit.
+3. **Preparation** → `preparing`. On a project's first run, the workspace doesn't exist yet:
+   it's created by a full clone, an operation visible in the run's logs with its own step,
+   because on a large repository it takes a while. The initial clone can also be triggered when
+   registering the project, which lets you read the lanes before any run. After that, `git fetch`
+   then `checkout` in the project's workspace, kept between runs so it's fast, cleanable on
+   demand. The SHA is recorded. If the `Gemfile.lock` has changed, `bundle install` runs first.
+   Secrets are decrypted in memory and prepared as environment variables.
+4. **Execution** → `running`. fastlane is launched inside a pseudo-terminal: it keeps its
+   usual colors and display. Every chunk of output goes to three destinations —
+   the log file, connected browsers, a buffer for late connections.
+5. **End.** The exit code decides. On failure, the error summary is extracted from fastlane's
+   error block by the heuristics module. Artifacts are collected, then moved
+   out of the workspace to survive the next build.
+6. **Cancellation.** `SIGINT` to the process group — fastlane does its cleanup — then `SIGKILL`
+   if it persists. Maximum delay per run, 60 min by default.
 
-### D'où vient la chronologie des étapes
+### Where the step timeline comes from
 
-fastlane écrit à chaque exécution un rapport JUnit dans `<fastlane_dir>/report.xml`, avec une
-entrée par action : index, nom, durée, et le détail en cas d'échec. Comportement vérifié sur une
-exécution réelle :
+On every run fastlane writes a JUnit report to `<fastlane_dir>/report.xml`, with one
+entry per action: index, name, duration, and detail on failure. Behavior verified on a
+real run:
 
 ```xml
 <testcase classname="fastlane.lanes" name="0: echo inner" time="0.007099"/>
 ```
 
-Ce fichier fait autorité pour les noms, l'ordre, les durées et les échecs. Il est lu en fin de run,
-alimente `run_step`, puis est supprimé du workspace pour ne pas polluer le dépôt.
+This file is authoritative for names, order, durations, and failures. It's read at the end of the
+run, feeds `run_step`, then is deleted from the workspace so it doesn't pollute the repository.
 
-Pendant l'exécution, ce rapport n'existe pas encore. L'affichage en direct s'appuie donc sur un
-repérage des séparateurs d'étape dans la sortie. De ce repérage, une seule chose est conservée :
-la **position en octets** où chaque étape a commencé dans le log, qui alimente `log_offset` et
-permet de cliquer une étape pour sauter au bon endroit — `report.xml` ne contient aucune position.
-Les noms et durées issus du repérage en direct sont, eux, jetés à la fin.
+During execution, this report doesn't exist yet. Live display therefore relies on
+detecting step separators in the output. Of this detection, only one thing is kept:
+the **byte offset** where each step began in the log, which feeds `log_offset` and
+lets you click a step to jump to the right place — `report.xml` contains no offset at all.
+The names and durations from live detection, on the other hand, are thrown away at the end.
 
-La réconciliation est un appariement par index. Si le repérage a manqué une étape, le décalage
-correspondant est nul et le saut au log est simplement indisponible pour celle-là : une
-dégradation visible et sans conséquence.
+Reconciliation is matching by index. If the detection missed a step, the corresponding
+offset is null and the jump to the log is simply unavailable for that one: a
+visible and harmless degradation.
 
-**Quand `report.xml` n'existe pas** — run annulé, expiré, interrompu par un redémarrage, ou échec
-avant même le lancement de fastlane (clone, `bundle install`) — les lignes issues du repérage en
-direct sont conservées telles quelles, avec `source = live`. L'interface indique alors que la
-chronologie est partielle. Un run qui n'a jamais atteint fastlane n'a tout simplement aucune étape.
+**When `report.xml` doesn't exist** — a cancelled or expired run, interrupted by a restart, or a
+failure before fastlane even launches (clone, `bundle install`) — the lines from live
+detection are kept as-is, with `source = live`. The interface then shows that the
+timeline is partial. A run that never reached fastlane simply has no steps.
 
-Cette séparation est délibérée : le confort d'affichage repose sur une heuristique fragile, la
-donnée qui fait foi repose sur un format structuré produit par fastlane lui-même.
+This separation is deliberate: display convenience relies on a fragile heuristic, the
+authoritative data relies on a structured format produced by fastlane itself.
 
-### Collecte des artefacts
+### Artifact collection
 
-Le `lane_context` de fastlane, qui contient les chemins de sortie, n'est pas accessible depuis un
-sous-processus. Les artefacts sont donc collectés par **motifs de fichiers configurés par projet**
-(`artifact_globs`), évalués sur le workspace après le run. C'est le contrat, explicite et
-prévisible.
+fastlane's `lane_context`, which holds the output paths, isn't accessible from a
+subprocess. Artifacts are therefore collected using **per-project configured file patterns**
+(`artifact_globs`), evaluated against the workspace after the run. That's the contract, explicit
+and predictable.
 
-À l'enregistrement d'un projet, des motifs par défaut sont proposés selon ce qui est détecté dans
-le dépôt — `**/*.ipa`, `**/*.app.dSYM.zip` pour un projet iOS, `**/*.apk`, `**/*.aab` pour Android
-— modifiables ensuite. Aucun chemin n'est deviné en analysant la sortie du run.
+When registering a project, default patterns are suggested based on what's detected in
+the repository — `**/*.ipa`, `**/*.app.dSYM.zip` for an iOS project, `**/*.apk`, `**/*.aab` for
+Android — editable afterwards. No path is ever guessed by analyzing the run's output.
 
-### Mode non-interactif par défaut
+### Non-interactive mode by default
 
-Les runs tournent avec `CI=true`. Un run qui aurait besoin d'une saisie échoue immédiatement avec
-un message actionnable, au lieu de rester figé sur un prompt invisible. Une case « mode
-interactif » au lancement, et un réglage par projet, rouvrent les prompts pour les phases de mise
-en place (première utilisation de `match`, découverte d'un device).
+Runs run with `CI=true`. A run that would need input fails immediately with
+an actionable message, instead of hanging on an invisible prompt. An "interactive
+mode" checkbox at launch, and a per-project setting, reopen the prompts for setup
+phases (first use of `match`, device discovery).
 
-Le PTY est utilisé dans les deux cas : il donne la sortie colorée, l'affichage fastlane normal, et
-une porte de sortie quand un run se bloque malgré tout.
+The PTY is used in both cases: it gives colored output, fastlane's normal display, and
+an escape hatch when a run gets stuck anyway.
 
-L'écran **Préparation CI** est ce qui rend un projet autonome. Check-list recalculée à la demande,
-jamais automatiquement — chaque vérification a un coût. Aucun item ne bloque un run : ce sont des
-avertissements, conformément à la frontière des heuristiques.
+The **CI Readiness** screen is what makes a project autonomous. Checklist recalculated on
+demand, never automatically — each check has a cost. No item blocks a run: they are
+warnings, in line with the heuristics boundary.
 
-| Item | Détection | Remédiation proposée |
+| Item | Detection | Proposed remediation |
 |---|---|---|
-| Dépôt accessible sans mot de passe | `git ls-remote` avec un délai court et `GIT_TERMINAL_PROMPT=0`. Échec ou demande de saisie = rouge. | Formulaire : chemin d'une clé SSH, ou saisie d'un token stocké comme secret. |
-| Dépendances installables | Présence d'un `Gemfile`, puis `bundle check`. Sans `Gemfile`, on vérifie que `fastlane` est dans le `PATH` et le signale comme configuration `system`. | Bouton lançant `bundle install` et affichant sa sortie. |
-| Authentification App Store Connect | Recherche d'un secret de clé API (`APP_STORE_CONNECT_API_KEY_*`) ou d'un `FASTLANE_SESSION` dans le coffre du projet. Session seule = orange, avec l'explication qu'elle expire. | Formulaire de clé API : identifiant de clé, identifiant d'émetteur, contenu du `.p8`. Le tout stocké comme secrets masqués. |
-| `match` utilisable sans intervention | Le Fastfile utilise-t-il `match` ou `sync_code_signing` — information venant du sidecar, pas d'une lecture textuelle ? Si oui : `MATCH_PASSWORD` est-il présent dans le coffre, et le paramètre `readonly` est-il à vrai dans l'appel ? | Formulaire d'ajout du secret ; pour `readonly`, un renvoi vers l'action dans l'éditeur. |
-| Aucune action réputée bloquante | Croisement des actions listées par le sidecar avec la table de règles du module d'heuristiques (actions connues pour attendre une saisie, par exemple `prompt`). | Aucune action automatique : simple avertissement indiquant que le mode interactif sera nécessaire. |
+| Repository accessible without a password | `git ls-remote` with a short timeout and `GIT_TERMINAL_PROMPT=0`. Failure or a prompt for input = red. | Form: path to an SSH key, or entering a token stored as a secret. |
+| Installable dependencies | Presence of a `Gemfile`, then `bundle check`. Without a `Gemfile`, checks that `fastlane` is on the `PATH` and flags it as a `system` configuration. | Button that runs `bundle install` and shows its output. |
+| App Store Connect authentication | Looks for an API key secret (`APP_STORE_CONNECT_API_KEY_*`) or a `FASTLANE_SESSION` in the project's vault. Session only = orange, with an explanation that it expires. | API key form: key ID, issuer ID, `.p8` content. All stored as masked secrets. |
+| `match` usable without intervention | Does the Fastfile use `match` or `sync_code_signing` — information coming from the sidecar, not from a textual read? If so: is `MATCH_PASSWORD` present in the vault, and is the `readonly` parameter set to true in the call? | Form to add the secret; for `readonly`, a link to the action in the editor. |
+| No action known to block | Cross-referencing the actions listed by the sidecar with the heuristics module's rule table (actions known to wait for input, e.g. `prompt`). | No automatic action: a simple warning indicating that interactive mode will be needed. |
 
-Chaque item est un couple détection/remédiation indépendant, ajouté un par un. La table de règles
-n'est consultée que pour le dernier item.
+Each item is an independent detection/remediation pair, added one at a time. The rule
+table is only consulted for the last item.
 
-### Caviardage des secrets
+### Secret redaction
 
-Les valeurs des secrets marqués `masked` sont remplacées dans le flux **avant** écriture disque et
-avant diffusion WebSocket. Ce n'est pas un filtrage d'affichage : la valeur n'existe jamais dans un
-fichier de log.
+The values of secrets marked `masked` are replaced in the stream **before** writing to disk and
+before WebSocket broadcast. This isn't a display filter: the value never exists in a
+log file.
 
-Un remplacement naïf fragment par fragment ne suffit pas : un PTY découpe la sortie où il veut, et
-un secret peut se trouver coupé entre deux fragments. Le filtre conserve donc un tampon glissant
-d'au moins la longueur du plus long secret moins un octet, et ne relâche que ce qui ne peut plus
-faire partie d'une correspondance. Le test de propriété correspondant doit découper la sortie de
-test à des positions arbitraires, sans quoi il ne détecte rien.
+A naive chunk-by-chunk replacement isn't enough: a PTY splits output wherever it wants, and
+a secret can end up cut between two chunks. The filter therefore keeps a sliding buffer
+at least as long as the longest secret minus one byte, and only releases what can no
+longer be part of a match. The corresponding property test must split the test
+output at arbitrary positions, or it won't detect anything.
 
-## L'éditeur hybride
+## The hybrid editor
 
-### Ce que « structuré » veut dire
+### What "structured" means
 
-Le sidecar renvoie l'arbre syntaxique avec les positions exactes. Une instruction devient une carte
-éditable **uniquement** si elle est un appel d'action fastlane connue dont tous les arguments sont
-littéraux — symboles, chaînes, nombres, booléens, tableaux et tables de littéraux.
+The sidecar returns the syntax tree with exact positions. A statement becomes an editable
+card **only** if it is a call to a known fastlane action whose arguments are all
+literals — symbols, strings, numbers, booleans, arrays, and literal hashes.
 
-Tout le reste — conditions, boucles, variables, interpolations, blocs, méthodes maison — devient
-une carte **non structurée** : affichée telle quelle, lisible, modifiable uniquement en mode texte.
-Aucune tentative de deviner.
+Everything else — conditionals, loops, variables, interpolations, blocks, custom methods —
+becomes an **unstructured** card: displayed as-is, readable, editable only in text mode.
+No attempt at guessing.
 
-Les formulaires de paramètres sont générés depuis les métadonnées réelles de l'action. Les plugins
-du projet sont donc pris en charge sans effort particulier.
+Parameter forms are generated from the action's real metadata. The project's plugins
+are therefore supported with no extra effort.
 
-### Garantie d'intégrité
+### Integrity guarantee
 
-- **Réécriture chirurgicale.** Modifier un paramètre ne réécrit que la plage d'octets de cette
-  instruction. Le fichier n'est jamais régénéré depuis l'arbre — commentaires, indentation et Ruby
-  biscornu survivent intacts.
-- **Vérification après chaque écriture.** Reparse plus `fastlane lanes`. Si la syntaxe casse ou si
-  une lane a disparu, l'écriture est annulée et l'ancienne version restaurée.
-- **Sauvegarde avant écriture**, restaurée automatiquement si la vérification échoue. Un historique
-  navigable des versions n'est pas nécessaire en v1 : git remplit déjà ce rôle dès que la
-  modification est commitée.
+- **Surgical rewriting.** Changing a parameter only rewrites the byte range of that
+  statement. The file is never regenerated from the tree — comments, indentation, and gnarly
+  Ruby survive intact.
+- **Verification after every write.** Reparse plus `fastlane lanes`. If the syntax breaks or
+  a lane disappears, the write is rolled back and the old version restored.
+- **Backup before writing**, restored automatically if verification fails. A browsable
+  version history isn't necessary in v1: git already fills that role once the
+  change is committed.
 
-Le mode texte est un vrai éditeur de code avec coloration Ruby, pas un pis-aller. Toute
-modification hors du cadre structuré passe par lui, et c'est le fonctionnement attendu.
+Text mode is a real code editor with Ruby syntax highlighting, not a fallback. Any
+change outside the structured frame goes through it, and that's the expected behavior.
 
-### Édition et git
+### Editing and git
 
-Le Fastfile édité vit dans le workspace, qui est un clone géré par Laneyard. La boucle est donc :
-éditer, lancer la lane pour vérifier, puis committer et pousser depuis l'interface. Un panneau
-« Modifications » affiche le diff.
+The edited Fastfile lives in the workspace, which is a clone managed by Laneyard. The loop is
+therefore: edit, run the lane to check, then commit and push from the interface. A "Changes"
+panel shows the diff.
 
-Laneyard refuse tout `checkout` par-dessus des modifications non commitées et signale l'état sale
-du workspace dans l'interface.
+Laneyard refuses any `checkout` over uncommitted changes and flags the workspace's
+dirty state in the interface.
 
 ## Interface
 
 ```
-/                 Projets — statut du dernier run, Run rapide
-/p/<slug>         Projet
-                    ├─ Lanes            lues dans le Fastfile
-                    ├─ Runs             historique filtrable
-                    ├─ Fastfile         éditeur hybride + Modifications
-                    ├─ Secrets          variables d'environnement
-                    ├─ Préparation CI   check-list d'autonomie
-                    └─ Réglages         édition des fichiers de configuration
-/r/<id>           Run — étapes, terminal, artefacts
+/                 Projects — last run status, Quick run
+/p/<slug>         Project
+                    ├─ Lanes            read from the Fastfile
+                    ├─ Runs             filterable history
+                    ├─ Fastfile         hybrid editor + Changes
+                    ├─ Secrets          environment variables
+                    ├─ CI Readiness     autonomy checklist
+                    └─ Settings         configuration file editing
+/r/<id>           Run — steps, terminal, artifacts
 ```
 
-L'onglet Réglages présente les valeurs effectives et, pour chacune, le fichier d'où elle vient.
-Modifier une valeur définie dans le dépôt produit une modification git à committer ; modifier une
-valeur du serveur écrit dans `config.yml`. Une bascule permet d'éditer directement le YAML brut,
-comme l'éditeur de Fastfile propose son mode texte.
+The Settings tab shows the effective values and, for each one, the file it comes from.
+Changing a value defined in the repository produces a git change to commit; changing a
+server value writes to `config.yml`. A toggle lets you edit the raw YAML directly,
+just as the Fastfile editor offers its text mode.
 
-L'écran de run place la chronologie des étapes à gauche et le terminal à droite, les artefacts
-apparaissant en bas dès qu'ils existent. La ligne de saisie est toujours présente : désactivée avec
-sa raison affichée plutôt que masquée.
+The run screen places the step timeline on the left and the terminal on the right, with
+artifacts appearing at the bottom as soon as they exist. The input line is always present:
+disabled with its reason shown rather than hidden.
 
 ### Notifications
 
-Deux canaux, tous deux configurés dans les Réglages du projet.
+Two channels, both configured in the project's Settings.
 
-**Notification du navigateur.** L'API `Notification` du navigateur, déclenchée à la réception de
-l'événement de fin de run sur le WebSocket. Aucun serveur de push, aucun service tiers, aucune
-dépendance système. Contrepartie assumée : elle ne fonctionne que si un onglet Laneyard est
-ouvert. C'est le cas d'usage réel — tu lances un build puis tu passes à autre chose sur la même
+**Browser notification.** The browser's `Notification` API, triggered on receiving the
+end-of-run event over the WebSocket. No push server, no third-party service, no
+system dependency. Accepted trade-off: it only works if a Laneyard tab is
+open. That's the real use case — you trigger a build then move on to something else on the same
 machine.
 
-**Webhook.** Une URL par projet, appelée en POST avec un corps JSON décrivant le run terminé :
-identifiant, projet, lane, statut, durée, commit, liste des artefacts. C'est le point
-d'accroche pour Slack, ntfy, Discord ou n'importe quel script personnel. Les valeurs de secrets
-n'y figurent jamais.
+**Webhook.** A URL per project, called via POST with a JSON body describing the finished run:
+ID, project, lane, status, duration, commit, list of artifacts. This is the hook
+point for Slack, ntfy, Discord, or any personal script. Secret values
+never appear in it.
 
-Une notification système native est explicitement écartée : elle s'afficherait sur la machine de
-build, que personne ne regarde.
+A native system notification is explicitly ruled out: it would show up on the build
+machine, which nobody is looking at.
 
-### Direction visuelle
+### Visual direction
 
-Structure d'application classique — barre latérale, onglets, panneaux — avec une grammaire de
-terminal à l'intérieur. Le rétro passe par la typographie et la couleur, pas par le déguisement en
-fausse console.
+Classic application structure — sidebar, tabs, panels — with a terminal grammar
+inside. The retro feel comes through typography and color, not through disguising it as a
+fake console.
 
-- Chasse fixe sur toute l'interface, navigation et libellés compris.
-- Marqueurs d'état en caractères (`✓ ▸ ✗ ○`) plutôt qu'icônes ; libellés en minuscules ; petites
-  capitales espacées pour les titres de zone.
-- Angles droits, filets d'un pixel, aucune ombre, aucun dégradé. Les surfaces se distinguent par la
-  valeur, pas par la profondeur.
-- Couleurs strictement sémantiques : vert succès, ambre en cours, rouge échec, bleu repère. Rien de
-  décoratif. L'accent principal est le vert phosphore, variable de thème.
+- Monospace throughout the interface, navigation and labels included.
+- Status markers as characters (`✓ ▸ ✗ ○`) rather than icons; lowercase labels; small
+  letter-spaced caps for section titles.
+- Right angles, one-pixel rules, no shadows, no gradients. Surfaces are distinguished by
+  value, not by depth.
+- Strictly semantic colors: green for success, amber for in-progress, red for failure, blue as a
+  marker. Nothing decorative. The main accent is phosphor green, a theme variable.
 
-Deux thèmes pilotés par variables CSS : sombre par défaut, clair « papier ». **La zone terminal
-reste sombre dans les deux.** Fastlane émet des couleurs ANSI pensées pour fond noir ; les
-retraduire pour un fond clair est un chantier à part et trahirait la sortie réelle.
+Two themes driven by CSS variables: dark by default, light "paper". **The terminal area
+stays dark in both.** fastlane emits ANSI colors designed for a black background; re-mapping
+them for a light background is a separate undertaking and would misrepresent the real output.
 
-## Traitement des erreurs
+## Error handling
 
-| Situation | Comportement |
+| Situation | Behavior |
 |---|---|
-| Projet mal configuré | Détecté à l'enregistrement et avant chaque run. Le run est refusé avec un message actionnable, pas noyé dans un log. |
-| Échec de lane | Code de sortie et résumé extrait du bloc d'erreur fastlane, lisible sans ouvrir le log. |
-| Sidecar en échec | Les lanes deviennent illisibles ; Préparation CI le signale explicitement au lieu d'afficher une liste vide. |
-| Coupure WebSocket | Le client se reconnecte et rejoue le log depuis son décalage d'octets. Aucune sortie perdue. |
-| Redémarrage serveur pendant un run | Les runs orphelins passent en `interrupted` au démarrage. |
-| Disque saturé | Purge des logs et artefacts selon le `retention` du serveur, surchargeable par projet. |
+| Misconfigured project | Detected at registration and before every run. The run is refused with an actionable message, not buried in a log. |
+| Lane failure | Exit code and summary extracted from fastlane's error block, readable without opening the log. |
+| Sidecar failure | Lanes become unreadable; CI Readiness flags it explicitly instead of showing an empty list. |
+| WebSocket disconnection | The client reconnects and replays the log from its byte offset. No output lost. |
+| Server restart during a run | Orphaned runs move to `interrupted` on startup. |
+| Disk full | Log and artifact purge according to the server's `retention`, overridable per project. |
 
 ## Tests
 
-Contrainte de fond : **aucun vrai build dans la suite de tests.**
+Underlying constraint: **no real build anywhere in the test suite.**
 
-- **Sidecar Ruby** — Fastfile-fixtures (simple, monorepo, avec plugins, Ruby biscornu) et
-  instantanés du JSON produit. Plus un test de propriété sur l'aller-retour : après une édition
-  structurée, seule la plage d'octets visée a changé et le fichier parse toujours.
-- **Runner** — un faux exécutable `fastlane` rejoue une sortie enregistrée avec un code de sortie
-  choisi. Couvre le découpage en étapes, le caviardage, la collecte d'artefacts, l'annulation et le
-  timeout, en millisecondes.
-- **Caviardage** — test de propriété : une valeur de secret présente dans la sortie n'apparaît
-  jamais dans le log persisté.
-- **API** — tests d'intégration sur un SQLite temporaire et un dépôt git créé à la volée
-  (`git init` puis commit d'un Fastfile). Opérations git réelles, exécution rapide.
-- **Front** — tests de composants sur la génération de formulaires depuis des métadonnées
-  d'actions ; parcours Playwright de bout en bout contre le faux fastlane.
+- **Ruby sidecar** — Fastfile fixtures (simple, monorepo, with plugins, gnarly Ruby) and
+  snapshots of the produced JSON. Plus a property test on the round trip: after a structured
+  edit, only the targeted byte range has changed and the file still parses.
+- **Runner** — a fake `fastlane` executable replays recorded output with a chosen
+  exit code. Covers step splitting, redaction, artifact collection, cancellation, and
+  timeout, in milliseconds.
+- **Redaction** — property test: a secret value present in the output never appears
+  in the persisted log.
+- **API** — integration tests against a temporary SQLite database and a git repository created
+  on the fly (`git init` then committing a Fastfile). Real git operations, fast execution.
+- **Frontend** — component tests on generating forms from action metadata; end-to-end
+  Playwright flows against the fake fastlane.
 
-## Sécurité
+## Security
 
-- Écoute sur le réseau local, protégée par un mot de passe unique haché et une session par cookie.
-- Secrets chiffrés au repos, clé dans un fichier `0600` hors base, trousseau de l'OS en option.
-- Caviardage des secrets en amont de toute persistance.
-- Aucune exposition Internet prévue ; un tunnel reste possible mais relève de l'utilisateur.
+- Listens on the local network, protected by a single hashed password and a cookie session.
+- Secrets encrypted at rest, key in a `0600` file outside the database, OS keychain as an option.
+- Secret redaction upstream of any persistence.
+- No Internet exposure planned; a tunnel remains possible but is up to the user.
 
-## Publication
+## Publishing
 
-Le dépôt est public dès le départ. La documentation d'accueil est un livrable de la v1, pas une
-tâche de fin de projet : un outil auto-hébergé que personne ne sait installer n'existe pas.
+The repository is public from the start. Onboarding documentation is a v1 deliverable, not a
+project-end task: a self-hosted tool nobody knows how to install doesn't exist.
 
-**Licence MIT**, comme fastlane lui-même. Aucune friction pour quiconque veut essayer.
+**MIT license**, like fastlane itself. No friction for anyone who wants to try it.
 
 ### `README.md`
 
-1. **Une phrase et une capture.** Ce que c'est, montré avant d'être expliqué : le run en cours,
-   avec ses étapes et son terminal. Une seconde capture pour l'éditeur de Fastfile.
-2. **Pourquoi.** Le problème — dépendre d'un service facturé qui détient ta chaîne de signature.
-3. **Situer l'outil.** Tableau court face à Bitrise, Codemagic et GitHub Actions auto-hébergé :
-   ce que Laneyard fait, ce qu'il ne fait délibérément pas, et pour qui. Un lecteur doit pouvoir
-   conclure « ce n'est pas pour moi » en trente secondes — c'est un service qu'on lui rend.
-4. **Installation.** Prérequis (Node, Ruby, fastlane dans le projet), installation, premier
-   démarrage, déclaration d'un premier projet dans `config.yml`, installation en service.
-5. **Configuration.** Les deux fichiers, commentés, en exemples complets.
-6. **Sécurité.** Section explicite et non enfouie : conçu pour un réseau local, à ne pas exposer
-   sur Internet ; ce que contient le coffre, comment il est chiffré, où vit la clé ; le fait que
-   les secrets sont caviardés des logs. Un utilisateur doit savoir ce qu'il confie à l'outil.
-7. **État du projet et limites connues.** L'honnêteté sur ce qui n'existe pas encore vaut mieux
-   qu'un ticket déçu.
+1. **One sentence and a screenshot.** What it is, shown before it's explained: the run in
+   progress, with its steps and its terminal. A second screenshot for the Fastfile editor.
+2. **Why.** The problem — depending on a billed service that holds your signing chain.
+3. **Position the tool.** A short table against Bitrise, Codemagic, and self-hosted GitHub
+   Actions: what Laneyard does, what it deliberately doesn't do, and for whom. A reader must be
+   able to conclude "this isn't for me" in thirty seconds — that's a service being done for them.
+4. **Installation.** Prerequisites (Node, Ruby, fastlane in the project), installation, first
+   startup, declaring a first project in `config.yml`, installing as a service.
+5. **Configuration.** The two files, commented, as complete examples.
+6. **Security.** An explicit, non-buried section: designed for a local network, not to be
+   exposed on the Internet; what the vault contains, how it's encrypted, where the key lives;
+   the fact that secrets are redacted from logs. A user must know what they're entrusting to the
+   tool.
+7. **Project status and known limitations.** Honesty about what doesn't exist yet is worth more
+   than a disappointed issue.
 
 ### `CONTRIBUTING.md`
 
-L'architecture en une page — le rôle du sidecar surtout, qui est le point non évident du projet —
-comment lancer les tests sans machine de build, et deux recettes guidées : ajouter un item à la
-check-list Préparation CI, ajouter une règle d'heuristique. Ce sont les deux extensions qu'un
-contributeur voudra faire en premier, et les deux endroits où le module isolé doit être respecté.
+The architecture in one page — the sidecar's role above all, which is the non-obvious point of
+the project — how to run the tests without a build machine, and two guided recipes: adding an
+item to the CI Readiness checklist, adding a heuristics rule. These are the two extensions a
+contributor will want to make first, and the two places where the isolated module must be
+respected.
 
-## Jalons
+## Milestones
 
-Le périmètre v1 couvre cinq sous-systèmes largement indépendants — sidecar Ruby, runner PTY,
-coffre de secrets, éditeur hybride, interface. Le plan d'implémentation doit viser une **tranche
-verticale le plus tôt possible** plutôt qu'un empilement de couches :
+The v1 scope covers five largely independent subsystems — Ruby sidecar, PTY runner,
+secrets vault, hybrid editor, interface. The implementation plan must aim for a **vertical
+slice as early as possible** rather than a stack of layers:
 
-1. **Le fil complet.** Déclarer un projet dans `config.yml`, cloner, lister les lanes via le
-   sidecar, lancer une lane, voir les logs en direct, récupérer un artefact. La configuration par
-   fichiers vient d'abord : elle est le socle de tout le reste, et l'écrire après signifierait
-   démonter une couche de persistance déjà écrite.
-2. **Fiabilité du run.** Caviardage, file d'attente, annulation, timeout, runs interrompus,
-   chronologie depuis `report.xml`.
-3. **Secrets et Préparation CI.** Le coffre, puis les items de check-list un par un.
-4. **Éditeur.** D'abord le mode texte avec vérification et sauvegarde, ensuite seulement la vue
-   structurée — le mode texte seul est déjà utile, l'inverse n'est pas vrai.
-5. **Finitions et publication.** Notifications, purge, thèmes, installation en service, puis
-   README, CONTRIBUTING et licence — écrits en dernier, quand les captures montrent le produit
-   réel, mais avant toute annonce.
+1. **The full thread.** Declare a project in `config.yml`, clone it, list the lanes via the
+   sidecar, trigger a lane, watch the logs live, retrieve an artifact. File-based configuration
+   comes first: it's the foundation for everything else, and writing it later would mean
+   tearing down an already-written persistence layer.
+2. **Run reliability.** Redaction, queue, cancellation, timeout, interrupted runs,
+   timeline from `report.xml`.
+3. **Secrets and CI Readiness.** The vault, then the checklist items one by one.
+4. **Editor.** Text mode first, with verification and backup, then only after that the
+   structured view — text mode alone is already useful, the reverse isn't true.
+5. **Polish and publishing.** Notifications, purge, themes, service installation, then
+   README, CONTRIBUTING, and license — written last, once the screenshots show the real
+   product, but before any announcement.
 
-## Décisions ouvertes
+## Open decisions
 
-- Format exact des unités `launchd` et `systemd`, et forme de la commande `laneyard install`.
-- Politique de purge par défaut, à confirmer à l'usage : proposition initiale de 50 runs conservés
-  par projet et 30 jours de rétention pour les artefacts, les logs suivant leur run.
+- Exact format of the `launchd` and `systemd` units, and the shape of the `laneyard install`
+  command.
+- Default purge policy, to be confirmed in practice: initial proposal of 50 runs kept
+  per project and 30 days of retention for artifacts, with logs following their run.
