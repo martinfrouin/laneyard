@@ -5,6 +5,7 @@ import { ThemeToggle } from "./components/ThemeToggle";
 import { Project } from "./pages/Project";
 import { Projects } from "./pages/Projects";
 import { Run } from "./pages/Run";
+import { Secrets } from "./pages/Secrets";
 import { api } from "./api";
 import type { ProjectSummary } from "./api";
 import { mark } from "./status";
@@ -55,7 +56,11 @@ export function App() {
       <main>
         <Routes>
           <Route path="/" element={<Projects />} />
-          <Route path="/p/:slug" element={<Project />} />
+          {/* The tabs live in Project, which renders either its own content or
+              the nested route's — so the strip is the same on both. */}
+          <Route path="/p/:slug" element={<Project />}>
+            <Route path="secrets" element={<Secrets />} />
+          </Route>
           <Route path="/r/:id" element={<Run />} />
           <Route path="*" element={<p className="dim">unknown page.</p>} />
         </Routes>

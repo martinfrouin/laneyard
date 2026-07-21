@@ -193,6 +193,45 @@ code { color: var(--text-bright); }
 
 .mark { width: 1ch; display: inline-block; }
 
+/* --- Tabs ---------------------------------------------------------------- */
+
+/* Same grammar as the sidebar in a narrow window: an underline marks the
+   current one, nothing else moves. */
+.tabs {
+  display: flex;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+
+.tabs a {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
+}
+
+.tabs a:hover { color: var(--text); }
+.tabs a.current { color: var(--text-bright); border-bottom-color: var(--accent); }
+
+/* --- Secrets -------------------------------------------------------------- */
+
+.secret-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.secret-form input[type="text"],
+.secret-form input[type="password"] { width: 24ch; }
+
+.secret-form label { display: flex; align-items: baseline; gap: 6px; color: var(--text-dim); }
+.secret-form input[type="checkbox"] { accent-color: var(--accent); width: auto; padding: 0; }
+
 table { border-collapse: collapse; width: 100%; }
 td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
 
