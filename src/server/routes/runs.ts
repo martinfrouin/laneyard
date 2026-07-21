@@ -59,6 +59,8 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
         return r!.settings;
       },
       env: process.env,
+      secrets: ctx.vault.resolve(slug),
+      maskedValues: ctx.vault.maskedValues(slug),
       onChunk: (chunk, offset) => app.broadcastRunChunk?.(id, chunk, offset),
     })
       .then((r) => ctx.sockets?.finish(id, r.status))
@@ -70,7 +72,7 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
         ctx.runs.finish(id, {
           status: "failed",
           exitCode: null,
-          errorSummary: `Unexpected failure: ${(cause as Error).message}`,
+          errorSummary: ctx.vault.scrub(slug, `Unexpected failure: ${(cause as Error).message}`),
         });
         ctx.sockets?.finish(id, "failed");
       });

@@ -5,6 +5,8 @@ import { hashPassword } from "../../src/server/auth.js";
 import { buildApp } from "../../src/server/app.js";
 import { ConfigStore } from "../../src/config/store.js";
 import { openDatabase } from "../../src/db/open.js";
+import { SecretStore } from "../../src/db/secrets.js";
+import { Vault } from "../../src/secrets/vault.js";
 import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
 async function harness() {
@@ -26,12 +28,14 @@ projects:
 
   const config = new ConfigStore(configPath);
   await config.load();
+  const db = openDatabase(":memory:");
 
   const app = await buildApp({
     config,
-    db: openDatabase(":memory:"),
+    db,
     root,
     lanes: async () => [{ name: "beta", platform: "ios", description: "Beta", private: false }],
+    vault: await Vault.open(root, new SecretStore(db)),
   });
 
   return { app, root };
