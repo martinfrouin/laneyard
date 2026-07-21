@@ -139,34 +139,30 @@ tool this project chose for reading Fastfiles:
 ```ruby
 require "prism"
 
-# Literal values only. A Fastfile is arbitrary Ruby: `ENV["X"]` or a method call
-# has no value until the lane runs, and a checklist that guesses is worse than
-# one that stays quiet — it would be believed.
-def literal_value(node)
-  case node
-  when Prism::StringNode then node.unescaped
-  when Prism::SymbolNode then node.unescaped
-  when Prism::IntegerNode then node.value
-  when Prism::TrueNode then true
-  when Prism::FalseNode then false
-  when Prism::NilNode then nil
-  end
-end
+# Literal values only, resolved by node type through a table.
+#
+# A Fastfile is arbitrary Ruby: `ENV["X"]` or a method call has no value until
+# the lane runs, and a checklist that guesses is worse than one that stays quiet
+# — it would be believed. Deciding from the node type rather than the converted
+# value is also what keeps `false` and `nil` from being mistaken for absence.
+LITERALS = {
+  Prism::StringNode  => ->(n) { n.unescaped },
+  Prism::SymbolNode  => ->(n) { n.unescaped },
+  Prism::IntegerNode => ->(n) { n.value },
+  Prism::FloatNode   => ->(n) { n.value },
+  Prism::TrueNode    => ->(_) { true },
+  Prism::FalseNode   => ->(_) { false },
+  Prism::NilNode     => ->(_) { nil }
+}.freeze
 
 def literal_args(call)
-  args = call.arguments&.arguments || []
-  hash = args.find { |a| a.is_a?(Prism::KeywordHashNode) }
+  hash = (call.arguments&.arguments || []).find { |a| a.is_a?(Prism::KeywordHashNode) }
   return {} unless hash
 
-  hash.elements.each_with_object({}) do |element, out|
-    next unless element.is_a?(Prism::AssocNode)
-    key = element.key
-    next unless key.is_a?(Prism::SymbolNode)
-
-    value = literal_value(element.value)
-    # `nil` is a legitimate literal, so presence is checked, not truthiness.
-    out[key.unescaped] = value if !element.value.nil? && (value || value.nil?) &&
-                                  !literal_value(element.value).nil? || value == false || value.nil?
+  hash.elements.each_with_object({}) do |el, out|
+    next unless el.is_a?(Prism::AssocNode) && el.key.is_a?(Prism::SymbolNode)
+    reader = LITERALS[el.value.class]
+    out[el.key.unescaped] = reader.call(el.value) if reader
   end
 end
 
@@ -174,8 +170,6 @@ end
 # is still a call the lane may make, and the checklist cares about what could
 # happen, not only about what always happens.
 def calls_within(node, out = [])
-  return out unless node.is_a?(Prism::Node)
-
   node.compact_child_nodes.each do |child|
     if child.is_a?(Prism::CallNode) && child.receiver.nil?
       out << { name: child.name.to_s, args: literal_args(child) }
@@ -186,13 +180,11 @@ def calls_within(node, out = [])
 end
 
 def collect_uses(fastfile_path)
-  source = File.read(fastfile_path)
-  result = Prism.parse(source)
+  result = Prism.parse(File.read(fastfile_path))
   raise "Fastfile could not be parsed" unless result.success?
 
   lanes = []
   walk = lambda do |node|
-    return unless node.is_a?(Prism::Node)
     node.compact_child_nodes.each do |child|
       if child.is_a?(Prism::CallNode) && %w[lane private_lane].include?(child.name.to_s)
         name = child.arguments&.arguments&.first
@@ -201,6 +193,7 @@ def collect_uses(fastfile_path)
           actions: child.block ? calls_within(child.block) : []
         }
       else
+        # Not a lane: keep descending, so a `platform :ios do` block is seen through.
         walk.call(child)
       end
     end
@@ -213,9 +206,9 @@ end
 and a `when "uses"` branch mirroring the `lanes` one — the same `begin/rescue Exception` shape,
 and `respond` outside the rescue for the reason already documented there.
 
-> Simplify `literal_args` while writing it: the condition above is tangled. What it must express
-> is *"include the key when the value node is one of the literal kinds"* — decide that from the
-> node type, not from the converted value, and `nil` and `false` stop being special cases.
+> This walk is verified against real Ruby: `readonly: true` and `clean: false` are kept,
+> `scheme: ENV["SCHEME"]` is omitted, a call inside an `if` is captured, and a `platform` block
+> is seen through.
 
 - [ ] **Step 4: Run the tests**
 
