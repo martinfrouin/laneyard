@@ -200,6 +200,10 @@ export async function runSetupCommand(
       fastlane_dir: fastlaneDir,
       runtime,
       artifact_globs: globs,
+      // Written down rather than re-inferred on every readiness check: a value
+      // in a file can be corrected when the guess was wrong, and setup and the
+      // checklist cannot end up disagreeing about the same repository.
+      ...(d.platforms.length > 0 ? { platforms: d.platforms } : {}),
     });
 
     const port = await configuredPort(configPath);
@@ -210,6 +214,10 @@ export async function runSetupCommand(
         field("fastlane", fastlaneDir) + "\n" +
         field("runtime", runtime) + "\n" +
         field("artifacts", globs.join(", ") || dim("none detected")) + "\n" +
+        // Shown because it decides which half of the readiness checklist a
+        // project is held to, and because a wrong guess is corrected by editing
+        // one line of the file just written.
+        field("platforms", d.platforms.join(", ") || dim("none detected")) + "\n" +
         "\n" +
         (wroteRepoConfig
           ? ok(`Wrote ${bold(LANEYARD_YML)} — ${bold("commit it")} so your team builds the same way.\n`)
@@ -277,7 +285,12 @@ async function existingProject(configPath: string, slug: string): Promise<string
  */
 async function writeRepoConfigIfAbsent(
   path: string,
-  settings: { fastlane_dir: string; runtime: string; artifact_globs: string[] },
+  settings: {
+    fastlane_dir: string;
+    runtime: string;
+    artifact_globs: string[];
+    platforms?: string[];
+  },
 ): Promise<boolean> {
   if (await fileExists(path)) return false;
 

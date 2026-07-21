@@ -54,6 +54,24 @@ describe("detectProject", () => {
     expect(d.artifactGlobs).toContain("**/*.aab");
   });
 
+  it("reports the platforms it found, so setup can write them down", async () => {
+    const ios = await projectDir({ "fastlane/Fastfile": "", "Sample.xcodeproj/project.pbxproj": "" });
+    expect((await detectProject(ios)).platforms).toEqual(["ios"]);
+
+    const android = await projectDir({ "fastlane/Fastfile": "", "app/build.gradle": "" });
+    expect((await detectProject(android)).platforms).toEqual(["android"]);
+
+    const dual = await projectDir({
+      "fastlane/Fastfile": "",
+      "Sample.xcodeproj/project.pbxproj": "",
+      "android/build.gradle": "",
+    });
+    expect((await detectProject(dual)).platforms).toEqual(["ios", "android"]);
+
+    const neither = await projectDir({ "fastlane/Fastfile": "" });
+    expect((await detectProject(neither)).platforms).toEqual([]);
+  });
+
   it("reads the remote's URL and the current branch", async () => {
     const origin = await makeOriginRepo({ "fastlane/Fastfile": "" });
     const clone = await tmpDir("laneyard-clone-");

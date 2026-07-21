@@ -8,6 +8,11 @@ export const projectSettingsSchema = z.object({
   interactive_default: z.boolean().default(false),
   artifact_globs: z.array(z.string()).default([]),
   required_secrets: z.array(z.string()).default([]),
+  // What this project builds for. No default: absent means "nobody said", and
+  // the readiness checklist falls back to looking at the repository. Setting it
+  // is how a repository that happens to carry an Xcode project it never builds
+  // stops being asked for App Store Connect credentials.
+  platforms: z.array(z.enum(["ios", "android"])).optional(),
   retention: z
     .object({
       runs: z.number().int().positive(),

@@ -117,6 +117,19 @@ describe("runSetupCommand", () => {
     expect(repoConfig.artifact_globs).toContain("app/**/*.ipa");
   });
 
+  it("writes down the platforms it detected, so nothing re-infers them later", async () => {
+    // Inferred once and written down, the value can be corrected by hand.
+    // Re-inferred on every check, it cannot — and the checklist and setup
+    // would be free to disagree about the same repository.
+    const { app, root, configPath } = await monorepo();
+    await runSetupCommand(app, configPath, { yes: true });
+
+    const repoConfig = parse(await readFile(join(root, "laneyard.yml"), "utf8")) as {
+      platforms: string[];
+    };
+    expect(repoConfig.platforms).toEqual(["ios"]);
+  });
+
   it("keeps the machine's file to how the project is reached", async () => {
     const { app, configPath } = await monorepo();
     await runSetupCommand(app, configPath, { yes: true });

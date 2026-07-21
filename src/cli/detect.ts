@@ -3,6 +3,8 @@ import { access, realpath } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import { glob } from "tinyglobby";
+import { detectPlatforms } from "../heuristics/platforms.js";
+import type { FindPaths, Platform } from "../heuristics/platforms.js";
 
 const exec = promisify(execFile);
 
@@ -17,7 +19,12 @@ export interface Detection {
   fastlaneDir: string | null;
   runtime: "bundle" | "system";
   artifactGlobs: string[];
-  platform: "ios" | "android" | "unknown";
+  /**
+   * What this project builds for, empty when nothing said so. Decided by
+   * `heuristics/platforms.ts`, and written into the repository's `laneyard.yml`
+   * so the checklist reads a value rather than inferring its own.
+   */
+  platforms: Platform[];
   /** Where the command was run, relative to the repository root. "" at the root. */
   subPath: string;
 }
@@ -57,6 +64,12 @@ function repositoryName(url: string | null): string | null {
   const name = last.replace(/\.git$/, "");
   return name === "" ? null : name;
 }
+
+/** The globbing `heuristics/platforms.ts` asks for, bound to one directory. */
+const findIn =
+  (dir: string): FindPaths =>
+  (globs, { onlyDirectories }) =>
+    glob(globs, onlyDirectories ? { cwd: dir, onlyDirectories: true } : { cwd: dir, onlyFiles: true });
 
 /** Turns an absolute path into a repository-relative one, with forward slashes. */
 const toRepoPath = (root: string, absolute: string): string =>
@@ -99,14 +112,9 @@ export async function detectProject(dir: string): Promise<Detection> {
     ? toRepoPath(root, await realpath(join(fastfile, "..")).catch(() => join(fastfile, "..")))
     : null;
 
-  const isIos =
-    (await glob(["*.xcodeproj", "*.xcworkspace", "*/*.xcodeproj"], { cwd: dir, onlyDirectories: true }))
-      .length > 0;
-  const isAndroid =
-    (await glob(["build.gradle", "build.gradle.kts", "*/build.gradle", "*/build.gradle.kts"], {
-      cwd: dir,
-      onlyFiles: true,
-    })).length > 0;
+  const platforms = await detectPlatforms(findIn(dir));
+  const isIos = platforms.includes("ios");
+  const isAndroid = platforms.includes("android");
 
   // Artifact patterns are anchored to the sub-project too. In a monorepo an
   // unanchored `**/*.ipa` would collect a sibling app's build as if it were
@@ -136,7 +144,7 @@ export async function detectProject(dir: string): Promise<Detection> {
     // repository root — `bundle exec` runs from the sub-project.
     runtime: (await exists(join(dir, "Gemfile"))) ? "bundle" : "system",
     artifactGlobs,
-    platform: isIos ? "ios" : isAndroid ? "android" : "unknown",
+    platforms,
     subPath,
   };
 }

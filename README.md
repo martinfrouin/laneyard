@@ -125,7 +125,12 @@ timeout_minutes: 60
 artifact_globs:
   - "build/**/*.ipa"
   - "build/**/*.app.dSYM.zip"
+platforms: [ios]                 # or `[android]`, or both
 ```
+
+`platforms` decides which half of the readiness checklist applies: an Android project is never
+asked for an App Store Connect key. Left out, Laneyard looks at the repository — an Xcode project
+means iOS, a Gradle build means Android — and reports what it found rather than assuming.
 
 Field by field, the repository file wins over the server block, which wins over the defaults. Any
 field of `laneyard.yml` may also be written in the server block, so a repository you would rather
