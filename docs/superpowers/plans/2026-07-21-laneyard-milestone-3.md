@@ -138,6 +138,7 @@ const IN_FLIGHT: RunStatus[] = ["preparing", "running"];
     return row.ahead === 0 ? null : row.ahead;
   }
 
+  /** How many runs have begun. The worker consults it before taking the next. */
   activeCount(): number {
     const placeholders = IN_FLIGHT.map(() => "?").join(", ");
     const row = this.db
@@ -163,8 +164,9 @@ const IN_FLIGHT: RunStatus[] = ["preparing", "running"];
   }
 ```
 
-Update the one caller in `src/main.ts` and the test in `tests/main.test.ts` that names
-`interruptActive`.
+Update the caller in `src/main.ts` and the two references in `tests/db/runs.test.ts`. Delete the
+now-unused `ACTIVE` constant while you are there — a list of statuses nothing reads is the kind of
+thing that gets updated wrongly six months later.
 
 - [ ] **Step 4: Run the tests**
 
@@ -237,21 +239,55 @@ git commit -m "feat(db): queue-order reads, and keep queued runs across a restar
   signal?: AbortSignal;
 ```
 
-`startPty` already kills on timeout; give the same treatment to the signal. In `executeRun`,
-after the PTY starts:
+**`src/runner/pty.ts` first.** `executeRun` currently writes `const { done } = startPty({…})` and
+throws the handle away, and `PtyHandle.kill` sends a single signal. The SIGINT-then-SIGKILL
+escalation exists only inside the timeout branch — so a fastlane that ignores SIGINT would block
+the one global worker until `timeout_minutes` elapsed, with every queued run stuck behind it.
+
+Give `startPty` the signal and let cancellation and timeout share one kill path:
 
 ```ts
-  // The same escalation as the timeout: SIGINT so fastlane can clean up after
-  // itself, SIGKILL five seconds later if it will not.
-  const onAbort = () => handle.kill("SIGINT");
-  opts.signal?.addEventListener("abort", onAbort, { once: true });
+export interface PtyRunOptions {
+  // …existing fields…
+  /** Aborting stops the process, with the same escalation as the timeout. */
+  signal?: AbortSignal;
+}
 ```
 
-and remove the listener once the run is over, so a long-lived signal does not accumulate them.
+Extract what the timeout already does into a named function, and point both at it:
+
+```ts
+  /**
+   * SIGINT first so fastlane can clean up after itself; SIGKILL five seconds
+   * later if it will not. One path, so cancelling and timing out cannot drift
+   * apart — and so neither can leave the single worker blocked.
+   */
+  const stop = () => {
+    try {
+      proc.kill("SIGINT");
+    } catch {
+      /* already gone */
+    }
+    setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }, 5000);
+  };
+
+  opts.signal?.addEventListener("abort", stop, { once: true });
+```
+
+Remove that listener when the process exits, so a signal that outlives the run does not accumulate
+listeners. Then in `executeRun`, simply pass `signal: opts.signal` through to `startPty` — no
+handle needs to escape.
 
 Check the signal at the two points before fastlane starts — before preparing the workspace and
 after resolving settings — and finish the run as `cancelled` there rather than starting work that
-is already unwanted.
+is already unwanted. Those exits must flush and close the log writer exactly as `fail()` does;
+extract a small `finishAs(status, summary)` helper so the three exits cannot drift apart.
 
 The final verdict gains a case, ahead of the failure one:
 
@@ -323,7 +359,10 @@ The worker is testable without fastlane by injecting the function it calls for e
 `src/runner/queue.ts`:
 
 ```ts
-import type { RunStore } from "../db/runs.js";
+import type { RunStatus, RunStore } from "../db/runs.js";
+
+/** Statuses from which a run never moves again. */
+const TERMINAL: RunStatus[] = ["success", "failed", "cancelled", "interrupted"];
 
 export type RunJob = (runId: number, signal: AbortSignal) => Promise<void>;
 
@@ -340,6 +379,7 @@ export type RunJob = (runId: number, signal: AbortSignal) => Promise<void>;
  */
 export class RunQueue {
   private draining = false;
+  private pending = false;
   private closed = false;
   private idlePromise: Promise<void> = Promise.resolve();
   private readonly running = new Map<number, AbortController>();
@@ -351,11 +391,24 @@ export class RunQueue {
 
   /** Tells the queue there may be work. Safe to call at any time, from anywhere. */
   wake(): void {
-    if (this.draining || this.closed) return;
+    if (this.closed) return;
+    if (this.draining) {
+      // A call arriving mid-drain is remembered rather than dropped: the drain
+      // may already have read an empty queue and be on its way out.
+      this.pending = true;
+      return;
+    }
     this.draining = true;
-    this.idlePromise = this.drain().finally(() => {
+    this.idlePromise = this.drainUntilQuiet().finally(() => {
       this.draining = false;
     });
+  }
+
+  private async drainUntilQuiet(): Promise<void> {
+    do {
+      this.pending = false;
+      await this.drain();
+    } while (this.pending && !this.closed);
   }
 
   /** Resolves when the queue has nothing left to do. For tests and shutdown. */
@@ -366,6 +419,10 @@ export class RunQueue {
   private async drain(): Promise<void> {
     for (;;) {
       if (this.closed) return;
+      // One at a time: if something is already in flight — including a run this
+      // process did not start — the queue waits rather than doubling up.
+      if (this.runs.activeCount() > 0) return;
+
       const next = this.runs.queued()[0];
       if (!next) return;
 
@@ -376,15 +433,25 @@ export class RunQueue {
       } catch {
         // A job that throws must not stall every run behind it. `executeRun`
         // promises not to, but the queue cannot afford to depend on that.
-        if (this.runs.get(next.id)?.status === "queued") {
+      } finally {
+        this.running.delete(next.id);
+
+        // Whatever happened, the run must not still be waiting or in flight.
+        //
+        // Two failures hide here, and both are worse than a wrong status. If the
+        // job returns without moving the run out of `queued` — a project deleted
+        // from config.yml while its run waited, say — the next iteration reads
+        // the same row and calls the job again, forever. And a job that throws
+        // after `executeRun` reached `preparing` leaves a run with no end, which
+        // the interface polls until someone gives up.
+        const after = this.runs.get(next.id);
+        if (after && !TERMINAL.includes(after.status)) {
           this.runs.finish(next.id, {
             status: "failed",
             exitCode: null,
             errorSummary: "The run ended unexpectedly",
           });
         }
-      } finally {
-        this.running.delete(next.id);
       }
     }
   }
@@ -437,6 +504,13 @@ git commit -m "feat(runner): a queue that drains one run at a time"
 
 Replace the 409 test — the behaviour it pins is exactly what this milestone removes:
 
+Note what the cancel test may and may not assert. Cancelling a **queued** run is synchronous:
+there is nothing to signal, so the status is `cancelled` by the time the response returns.
+Cancelling a **running** one only aborts a signal; SIGINT, the process exiting and `runs.finish`
+are several async hops away, so a test that reads the status straight after the 204 will still see
+`running`. Assert the synchronous case here, and leave the running case to Task 2's runner test,
+which already waits for the run to end.
+
 ```ts
   it("queues a second run instead of refusing it", async () => {
     // …two POSTs…
@@ -445,7 +519,7 @@ Replace the 409 test — the behaviour it pins is exactly what this milestone re
   });
 
   it("reports a run's place in line", …);   // GET /api/runs/:id includes queuePosition
-  it("cancels a run", …);                   // POST /api/runs/:id/cancel → 204, status cancelled
+  it("cancels a queued run on the spot", …);   // 204, and status is `cancelled` immediately
   it("404s cancelling a run that does not exist", …);
   it("409s cancelling a run that already finished", …);
 ```
@@ -457,20 +531,66 @@ Replace the 409 test — the behaviour it pins is exactly what this milestone re
 Remove the active-run check in `POST /api/projects/:slug/runs`. After creating the run, call
 `ctx.queue.wake()` and answer `201 { id, queuePosition }`.
 
-`executeRun` is no longer called from the route: the queue calls it. The job is built once, in
-`createServerFromConfig`, where the configuration and the vault are already to hand — the route
-only creates a row and rings the bell.
+**Build the queue inside `buildApp`, immediately after `ctx`** — not in `createServerFromConfig`.
+The job needs `runs`, `logs`, `workspacePath`, `artifactsDir`, `sockets` and `broadcastRunChunk`,
+none of which exist before `ctx` does; and `tests/server/api.test.ts` calls `buildApp` directly,
+so a queue arriving through `AppDeps` would have to be hand-built in every server test. The
+configuration and the vault are already in `AppDeps` and reachable there.
+
+Move the whole `executeRun` call — including the `.then(sockets.finish)` and the last-resort
+`.catch` — out of the route and into the job. The route creates a row and rings the bell; nothing
+else.
+
+```ts
+  ctx.queue = new RunQueue(ctx.runs, async (runId, signal) => {
+    const run = ctx.runs.get(runId);
+    if (!run) return;
+    const slug = run.projectSlug;
+    const entry = deps.config.project(slug);
+    if (!entry) {
+      // The project was removed from config.yml while this run waited. Ending it
+      // here is what keeps the queue from re-reading the same row for ever.
+      ctx.runs.finish(runId, {
+        status: "failed",
+        exitCode: null,
+        errorSummary: `Project "${slug}" is no longer in the configuration`,
+      });
+      return;
+    }
+    // …executeRun with entry, signal, secrets, maskedValues…
+  });
+```
 
 Add `POST /api/runs/:id/cancel`, and include `queuePosition` in `GET /api/runs/:id`.
 
 `AppContext` gains `queue: RunQueue`.
+
+**Wake the queue at boot, in `src/main.ts`.** Without this, the restart-resume that the whole
+architecture rests on never happens: `wake()` would only ever be called from the trigger route, so
+three runs queued before a restart would sit there until someone happened to trigger a fourth.
+
+```ts
+  // Anything left queued from the previous life starts moving again now.
+  app.queue.wake();
+```
+
+Add a test for it at the `createServerFromConfig` level, not only the unit level — the unit test
+in Task 3 calls `wake()` itself, so it cannot catch a missing call at startup:
+
+```ts
+  it("resumes a run left queued by a previous life", async () => {
+    // …write config.yml, create a run directly in the database with status
+    // `queued`, then call createServerFromConfig and assert the run leaves
+    // `queued` on its own.
+  });
+```
 
 - [ ] **Step 4: Run the whole suite**
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/server src/main.ts tests/server/api.test.ts
+git add src/server src/main.ts tests/server/api.test.ts tests/main.test.ts
 git commit -m "feat(server): queue a run instead of refusing it, and allow cancelling"
 ```
 
@@ -500,7 +620,10 @@ projects: []
 - [ ] **Step 2 to 4: implement, run, verify**
 
 `z.literal(1).default(1)` with a `.describe()` is not enough — the message matters more than the
-constraint. Use a refinement that explains why, in the same voice as the `git_auth` refusal.
+constraint. Use a refinement that explains why, in the same voice as the `git_auth` refusal, and
+give it `path: ["max_concurrent_runs"]`: `src/config/load.ts` formats an error as
+`path.join(".") + " : " + message`, so a refinement without a path reports `(root)` and the test's
+assertion on the field name would pass or fail for the wrong reason.
 
 - [ ] **Step 5: Commit**
 
@@ -575,5 +698,9 @@ honest caveat kept nearby that the queue is serial, not parallel.
   its own, and worth doing only once someone actually wants it.
 - **Priorities or reordering.** The queue is first in, first out. A "run this next" button is easy
   to add and impossible to remove.
+- **Isolating lane listing from a running build.** Removing the 409 also removes the only thing
+  that kept `GET /lanes` from touching a project's workspace while a build was using it. In
+  practice `ensureCloned` is a no-op once the clone exists and the lane list is cached, so nothing
+  is written — but it is a new interleaving, and worth knowing rather than discovering.
 - **Surviving a crash mid-run.** A run that had started is marked `interrupted` on restart, as
   before. Resuming it would mean re-attaching to a process that no longer exists.
