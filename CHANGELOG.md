@@ -84,6 +84,18 @@ loaded, with an explanation:
   0.1.0 and 0.2.0 are affected: the feature the whole tool is built on was broken for everyone who
   installed it, and worked perfectly for the one person running it from a checkout.
 
+### Changed in 0.2.1
+
+- **`laneyard setup` writes two files, and says which is which.** Build behaviour — the fastlane
+  directory, whether to use bundler, what to keep — now goes into `laneyard.yml` in the
+  repository, where it can be committed and where a colleague cloning the project inherits it. The
+  machine's `config.yml` keeps only what is about this machine: where to clone from, and the
+  password. Setup used to put everything in the machine's file, so nothing was ever versioned.
+- It warns when the project is already registered, or when the repository already has a
+  `laneyard.yml` — which it never overwrites.
+- Setup and startup say more, and in colour. Starting with no project configured now says how to
+  add one instead of looking successful and doing nothing.
+
 ### Changed
 
 - **`laneyard add` is now `laneyard setup`, and it asks.** It used to detect everything silently

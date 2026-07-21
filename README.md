@@ -112,9 +112,11 @@ a time across every project — parallel runs would need a working directory per
 not exist yet. A larger number is refused when the file loads rather than silently ignored, so a
 server is never configured for builds that never happen.
 
-### `laneyard.yml` — optional, committed in your repository
+### `laneyard.yml` — in your repository, and committed
 
-Build behaviour belongs next to the code, so it can be versioned with it:
+Build behaviour belongs next to the code, so it can be versioned with it — `laneyard setup`
+writes this file for you, and you should commit it. A colleague who clones the repository then
+builds it the same way, without configuring anything.
 
 ```yaml
 fastlane_dir: fastlane

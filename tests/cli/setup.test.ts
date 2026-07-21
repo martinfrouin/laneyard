@@ -81,10 +81,14 @@ describe("addProjectToConfig", () => {
 
 describe("runSetupCommand", () => {
   /** A repository whose app lives in a sub-directory, like most monorepos. */
-  async function monorepo(): Promise<{ app: string; configPath: string }> {
+  async function monorepo(): Promise<{ root: string; app: string; configPath: string }> {
     const root = await tmpDir("laneyard-add-mono-");
     await mkdir(join(root, "app", "fastlane"), { recursive: true });
     await writeFile(join(root, "app", "fastlane", "Fastfile"), "lane :beta do\nend\n", "utf8");
+    // An Xcode project, so artifact patterns are detected — without one there is
+    // nothing to detect and the test would assert against an empty list.
+    await mkdir(join(root, "app", "App.xcodeproj"), { recursive: true });
+    await writeFile(join(root, "app", "App.xcodeproj", "project.pbxproj"), "", "utf8");
 
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
@@ -92,20 +96,48 @@ describe("runSetupCommand", () => {
     await run("git", ["init", "-q", "-b", "main"], { cwd: root });
     await run("git", ["remote", "add", "origin", "git@example.com:you/popotheque.git"], { cwd: root });
 
-    return { app: join(root, "app"), configPath: join(await tmpDir(), "config.yml") };
+    return { root, app: join(root, "app"), configPath: join(await tmpDir(), "config.yml") };
   }
 
-  it("writes a fastlane directory the workspace will actually contain", async () => {
-    // The bug this replaces: run from `app/`, the path was written as `fastlane`,
-    // while the clone holds it at `app/fastlane`. The lane list then failed with
-    // ENOENT, far from the command that caused it.
-    const { app, configPath } = await monorepo();
+  it("writes build behaviour into the repository, where it can be committed", async () => {
+    // Two bugs in one place. The path used to be measured from the current
+    // directory — run from `app/`, it was written as `fastlane` while the clone
+    // holds it at `app/fastlane`, and the lane list failed with ENOENT far from
+    // its cause. And it went into the machine's config.yml, so it was never
+    // versioned and a colleague cloning the repository got nothing.
+    const { app, root, configPath } = await monorepo();
     expect(await runSetupCommand(app, configPath, { yes: true })).toBe(0);
 
-    const written = parse(await readFile(configPath, "utf8")) as {
-      projects: { fastlane_dir: string; slug: string; artifact_globs: string[] }[];
+    const repoConfig = parse(await readFile(join(root, "laneyard.yml"), "utf8")) as {
+      fastlane_dir: string;
+      runtime: string;
+      artifact_globs: string[];
     };
-    expect(written.projects[0]!.fastlane_dir).toBe("app/fastlane");
+    expect(repoConfig.fastlane_dir).toBe("app/fastlane");
+    expect(repoConfig.artifact_globs).toContain("app/**/*.ipa");
+  });
+
+  it("keeps the machine's file to how the project is reached", async () => {
+    const { app, configPath } = await monorepo();
+    await runSetupCommand(app, configPath, { yes: true });
+
+    const written = parse(await readFile(configPath, "utf8")) as {
+      projects: Record<string, unknown>[];
+    };
+    expect(written.projects[0]).toHaveProperty("git_url");
+    // Build behaviour belongs in the repository, not here.
+    expect(written.projects[0]).not.toHaveProperty("fastlane_dir");
+  });
+
+  it("leaves an existing laneyard.yml alone", async () => {
+    // Someone put it there, possibly with comments and choices this command
+    // knows nothing about — and its values win anyway.
+    const { app, root, configPath } = await monorepo();
+    await writeFile(join(root, "laneyard.yml"), "# mine\nruntime: bundle\n", "utf8");
+
+    await runSetupCommand(app, configPath, { yes: true });
+
+    expect(await readFile(join(root, "laneyard.yml"), "utf8")).toBe("# mine\nruntime: bundle\n");
   });
 
   it("names the project after the repository and the sub-directory", async () => {
@@ -130,12 +162,10 @@ describe("runSetupCommand", () => {
     });
 
     const written = parse(await readFile(configPath, "utf8")) as {
-      projects: { slug: string; default_branch: string; fastlane_dir: string }[];
+      projects: { slug: string; default_branch: string }[];
     };
     expect(written.projects[0]!.slug).toBe("chosen-name");
     expect(written.projects[0]!.default_branch).toBe("develop");
-    // Untouched answers keep the detected value.
-    expect(written.projects[0]!.fastlane_dir).toBe("app/fastlane");
   });
 
   it("writes nothing when the user declines", async () => {

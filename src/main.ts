@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { bold, dim, field, heading } from "./cli/style.js";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { runSetupCommand } from "./cli/setup.js";
@@ -77,7 +78,30 @@ async function main(): Promise<void> {
 
   const server = config.server()!;
   await app.listen({ port: server.port, host: server.bind });
-  console.log(`Laneyard is listening on http://localhost:${server.port}`);
+
+  const projects = config.projects();
+  process.stdout.write(
+    heading(`laneyard ${version}`) +
+      field("listening", `http://localhost:${server.port}`) +
+      "\n" +
+      field("config", join(root, "config.yml")) +
+      "\n" +
+      field(
+        "projects",
+        projects.length === 0
+          ? dim("none yet")
+          : projects.map((p) => p.slug).join(", "),
+      ) +
+      "\n" +
+      (projects.length === 0
+        ? // A server with nothing to build should say what to do next rather
+          // than sit there looking successful.
+          "\n" +
+          dim("  No project yet. From a folder that already uses fastlane:\n") +
+          `  ${bold("laneyard setup")}\n`
+        : "") +
+      "\n",
+  );
 }
 
 /**
