@@ -167,8 +167,9 @@ artefacts : un log de build pèse plusieurs mégaoctets et n'a rien à faire en 
 ## Configuration par fichiers
 
 **Toute la configuration, secrets exclus, vit dans des fichiers texte.** L'interface est un
-éditeur de ces fichiers, jamais une source de vérité parallèle. Sauvegarder Laneyard, c'est copier
-deux fichiers ; le restaurer sur une autre machine, c'est les recopier et ressaisir les secrets.
+éditeur de ces fichiers, jamais une source de vérité parallèle. Sauvegarder un serveur Laneyard,
+c'est copier un seul fichier, `config.yml` ; le restaurer ailleurs, c'est le recopier et ressaisir
+les secrets. Le reste de la configuration voyage déjà avec le code, dans les dépôts.
 
 ### `~/.laneyard/config.yml` — le serveur et ses projets
 
@@ -189,8 +190,16 @@ projects:
     default_branch: main
     git_auth: { kind: ssh_key, ref: ~/.ssh/id_ed25519 }
     color: green
+    notify_browser: true
     webhook_url: $SLACK_WEBHOOK      # référence de secret, jamais la valeur
+    # tout champ de laneyard.yml peut aussi figurer ici
+    artifact_globs: ["build/**/*.ipa"]
 ```
+
+`git_auth.ref` se lit selon `kind` : un chemin de fichier pour `ssh_key`, un nom de secret pour
+`token`. Le `slug` est la clé d'identité de tout l'historique : le renommer dans le fichier
+détacherait runs et secrets, il est donc traité comme immuable. Renommer un projet passe par une
+opération explicite de l'interface qui met les références à jour.
 
 ### `laneyard.yml` dans le dépôt — le comportement de build
 
@@ -213,13 +222,19 @@ required_secrets:                    # noms seulement, jamais de valeurs
 ### Précédence et écriture
 
 Champ par champ : `laneyard.yml` du dépôt, puis le bloc du projet dans `config.yml`, puis les
-valeurs par défaut. L'interface affiche la provenance de chaque réglage — un réglage venu du dépôt
+valeurs par défaut. Les deux fichiers partagent le même vocabulaire — n'importe quel champ de
+`laneyard.yml` peut aussi être écrit dans le bloc du projet, ce qui permet de configurer un dépôt
+sans y ajouter de fichier. Un `retention` propre à un projet y trouve également sa place et
+l'emporte alors sur celui du serveur.
+
+L'interface affiche la provenance de chaque réglage — un réglage venu du dépôt
 est signalé comme tel, et le modifier produit une modification git à committer, exactement comme
 une édition du Fastfile. Les réglages de `config.yml` sont écrits directement.
 
 Les fichiers sont surveillés : une modification à la main est prise en compte sans redémarrage.
 Un fichier invalide est signalé dans l'interface et l'ancienne configuration valide reste active —
-jamais de démarrage à moitié configuré.
+jamais de démarrage à moitié configuré. **Un run en cours conserve la configuration résolue à son
+démarrage**, y compris si son projet est modifié ou retiré du fichier entre-temps.
 
 **Un secret ne figure jamais dans un fichier de configuration.** Ces fichiers ne peuvent que
 déclarer des noms de secrets ou y faire référence par `$NOM`.
@@ -228,7 +243,9 @@ déclarer des noms de secrets ou y faire référence par `$NOM`.
 
 SQLite ne contient que l'état d'exécution et les secrets. Aucune table `project` : la liste des
 projets vient de `config.yml`, et les runs référencent un projet par son `slug`. Retirer un projet
-du fichier ne détruit pas son historique, qui reste consultable.
+du fichier ne détruit pas son historique : les runs restent en base et accessibles par leur URL
+`/r/<id>`, mais le projet disparaît de la navigation. Le remettre dans le fichier le fait
+réapparaître intact, historique compris.
 
 ### `secret`
 
@@ -492,7 +509,7 @@ retraduire pour un fond clair est un chantier à part et trahirait la sortie ré
 | Sidecar en échec | Les lanes deviennent illisibles ; Préparation CI le signale explicitement au lieu d'afficher une liste vide. |
 | Coupure WebSocket | Le client se reconnecte et rejoue le log depuis son décalage d'octets. Aucune sortie perdue. |
 | Redémarrage serveur pendant un run | Les runs orphelins passent en `interrupted` au démarrage. |
-| Disque saturé | Purge configurable des logs et artefacts, plafond par projet. |
+| Disque saturé | Purge des logs et artefacts selon le `retention` du serveur, surchargeable par projet. |
 
 ## Tests
 
