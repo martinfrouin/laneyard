@@ -17,6 +17,21 @@ with.
   standard input so it never lands in your shell history.
 - A value shorter than four characters is refused rather than accepted and quietly not protected.
 
+### A readiness checklist per project
+
+A new tab tells you what stands between a project and a build that runs while nobody watches,
+instead of leaving you to find out at 2am.
+
+- Five checks: the repository answers without asking for credentials, the dependencies are
+  installable, App Store Connect has an API key rather than a session that expires, `match` has
+  its passphrase and is called `readonly`, and no lane calls an action known to stop and ask.
+- Every check explains what to do. Nothing is fixed automatically — Laneyard does not edit a
+  Fastfile to make its own checklist go green — and no check ever blocks a run.
+- Arguments are read as literals, so `match(readonly: ENV["RO"])` is reported as undetermined
+  rather than guessed. A checklist that guesses gets believed.
+- The checks run when you open the tab or press refresh, never on their own, and the tab shows
+  when they last ran.
+
 ### Builds queue instead of being refused
 
 - Triggering a run while another is in flight no longer returns an error. Runs queue and execute

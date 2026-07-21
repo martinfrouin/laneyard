@@ -151,6 +151,36 @@ A secret becomes an environment variable for every run of the project it belongs
 one. Secrets are kept out of the logs unless you pass `--no-mask`, and a masked value must be at
 least four characters long — see below.
 
+### Readiness
+
+Every project has a Readiness tab: five checks on what stands between it and a build that runs
+while nobody watches.
+
+- **the repository** answers `git ls-remote` without asking for credentials — a run that meets a
+  password prompt does not fail, it waits;
+- **dependencies** are installable: `bundle check` against your Gemfile, or the `fastlane` a run
+  would otherwise find on the PATH;
+- **App Store Connect** has an API key in the vault rather than a `FASTLANE_SESSION`, which
+  expires and takes the next night's build with it;
+- **match** has its `MATCH_PASSWORD` stored and is called `readonly`, so it fetches certificates
+  instead of trying to create them;
+- **no lane calls an action known to stop and ask** — `prompt`, `sigh`, a writable `match`.
+
+They run when you open the tab or press refresh, never on their own: they shell out to git and to
+bundler. The time of the last run is on screen, because a stale green tick is worse than a red
+cross.
+
+Nothing here blocks anything. A red check is never the reason a run cannot be started, and
+Laneyard never edits a Fastfile to make its own checklist go green — each line explains, you
+decide. Where the fix genuinely is one action, the line links to the Secrets tab instead of
+growing a second copy of its form.
+
+**What it cannot see.** The checklist reads *literal* arguments only. `match(readonly: true)` is
+green and `match(readonly: false)` is a warning, but `match(readonly: ENV["RO"])` has no value
+until the lane runs, so it is reported as undetermined — `○`, with the reason — rather than
+guessed either way. The same applies to anything a lane computes: a checklist that guesses gets
+believed, and then it is worse than no checklist. Android signing is not covered at all yet.
+
 ## Security
 
 Read this before putting Laneyard on a network.
@@ -194,7 +224,7 @@ What this does *not* cover, stated plainly:
 - `✓` adopt an existing fastlane project with one command
 - `✓` encrypted secret vault and log redaction
 - `✓` build queue, cancellation, timeouts surfaced in the UI
-- `○` a checklist that gets a project running unattended
+- `✓` a checklist that gets a project running unattended
 - `○` Fastfile editor in the browser
 - `○` git-triggered and scheduled builds
 
