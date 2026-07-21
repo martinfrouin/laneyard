@@ -2742,6 +2742,34 @@ describe("executeRun", () => {
     expect(runs.steps(runId).find((s) => s.name === "build_app")?.status).toBe("failed");
   }, 60_000);
 
+  it("échoue proprement si la résolution des réglages lève", async () => {
+    const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n" });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: join(root, "ws"),
+      artifactsDir: join(root, "art"),
+      gitUrl: origin,
+      branch: "main",
+      // Cas réel : le projet a disparu de config.yml pendant la préparation.
+      resolveSettings: async () => {
+        throw new Error("projet inconnu");
+      },
+      env: {},
+      onChunk: () => {},
+    });
+
+    const run = runs.get(runId)!;
+    expect(run.status).toBe("failed");
+    expect(run.errorSummary).toMatch(/projet inconnu/);
+  }, 60_000);
+
   it("échoue avant le lancement si le dépôt est inaccessible", async () => {
     const root = await tmpDir("laneyard-root-");
     const runs = new RunStore(openDatabase(":memory:"));
@@ -2867,7 +2895,14 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
 
   // Le workspace existe enfin : c'est seulement maintenant que le laneyard.yml
   // du dépôt est lisible, donc seulement maintenant que les réglages sont connus.
-  const settings = await opts.resolveSettings();
+  // La résolution est protégée : le projet peut avoir disparu de config.yml
+  // pendant la préparation, et un run ne doit jamais s'évaporer sur une exception.
+  let settings: ProjectSettings;
+  try {
+    settings = await opts.resolveSettings();
+  } catch (cause) {
+    return fail(`Réglages du projet illisibles : ${(cause as Error).message}`);
+  }
 
   // --- Exécution ---------------------------------------------------------
   const useBundle = settings.runtime === "bundle";
