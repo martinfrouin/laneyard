@@ -9,7 +9,7 @@ your signing keys, and nobody meters your minutes.
 It replaces neither fastlane nor your Fastfile — it drives them. Your lanes stay exactly where
 they are.
 
-![A build running in Laneyard: step timeline on the left, live output on the right, artifacts below](docs/screenshots/run.png)
+![A build running in Laneyard: step timeline on the left, live output on the right, artifacts below](https://raw.githubusercontent.com/martinfrouin/laneyard/main/docs/screenshots/run.png)
 
 ## Why
 
@@ -81,7 +81,7 @@ npm link         # puts `laneyard` on your PATH
 Open it from any machine on your network, sign in, and your lanes are listed — because Laneyard
 asked your project's own fastlane for them.
 
-![The project screen: lanes read from the Fastfile, with their descriptions, and the run history](docs/screenshots/project.png)
+![The project screen: lanes read from the Fastfile, with their descriptions, and the run history](https://raw.githubusercontent.com/martinfrouin/laneyard/main/docs/screenshots/project.png)
 
 ## Configuration
 

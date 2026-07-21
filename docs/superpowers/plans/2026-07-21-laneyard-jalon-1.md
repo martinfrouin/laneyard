@@ -3026,6 +3026,13 @@ function laneArgs(opts: ExecuteRunOptions): string[] {
 }
 ```
 
+> **Divergence from what was built.** `src/heuristics/error-summary.ts` has no step of its own in
+> this plan: the extraction happened during execution, once a real run showed the summary was
+> keeping fastlane's generic closing line instead of the actual cause. The design document
+> requires named knowledge of fastlane to live in an isolated module, so it was moved there rather
+> than left inline. The repository is the reference; this plan records the intent.
+
+
 - [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/runner/orchestrate.test.ts`
