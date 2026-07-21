@@ -53,6 +53,23 @@ export interface SecretSummary {
   scope: "project" | "global";
 }
 
+/** One line of the readiness checklist. `fix` is a sentence, never a button. */
+export interface ReadinessCheck {
+  id: string;
+  title: string;
+  state: "ok" | "warn" | "unknown";
+  detail: string;
+  fix?: string;
+  /** Set only when the fix really is one action, and the tab can lead to it. */
+  fixIn?: "secrets";
+}
+
+export interface Readiness {
+  /** When these answers were produced. A checklist with no date is a rumour. */
+  checkedAt: string;
+  checks: ReadinessCheck[];
+}
+
 export const api = {
   login: (password: string) =>
     fetch("/api/login", {
@@ -68,6 +85,10 @@ export const api = {
   log: (id: number, from = 0) => fetch(`/api/runs/${id}/log?from=${from}`).then((r) => r.text()),
 
   secrets: (slug: string) => fetch(`/api/projects/${slug}/secrets`).then(json<SecretSummary[]>),
+
+  // Asked for, never polled: on the server side this shells out to git and to
+  // bundler. The tab calls it when it opens and when the user presses refresh.
+  readiness: (slug: string) => fetch(`/api/projects/${slug}/readiness`).then(json<Readiness>),
 
   setSecret: (slug: string, key: string, value: string, masked: boolean) =>
     fetch(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`, {

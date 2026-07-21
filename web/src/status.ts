@@ -33,6 +33,24 @@ export function statusLabel(status: string, queuePosition: number | null): strin
   return queuePosition === 1 ? "waiting · next in queue" : `waiting · ${ordinal(queuePosition)} in queue`;
 }
 
+/**
+ * The readiness checklist reads in the same three characters as a run.
+ *
+ * `✓` settled, `▸` something to look at, `○` nothing to say — deliberately the
+ * same vocabulary, so a green tick means the same thing on every screen.
+ */
+export const CHECK_MARK: Record<string, string> = { ok: "✓", warn: "▸", unknown: "○" };
+
+export const checkMark = (state: string): string => CHECK_MARK[state] ?? "○";
+
+/**
+ * A warning borrows the running colour, and an undetermined check the queued
+ * one. No check is ever red: none of them is a failure, and none of them stops
+ * anything — colouring one like a failed run would say otherwise.
+ */
+export const checkClass = (state: string): string =>
+  state === "ok" ? "status-success" : state === "warn" ? "status-running" : "status-queued";
+
 /** A run that hasn't finished keeps moving: the interface must follow it. */
 export const isActive = (status: string): boolean =>
   status === "queued" || status === "preparing" || status === "running";

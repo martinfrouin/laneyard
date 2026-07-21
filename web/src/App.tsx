@@ -4,6 +4,7 @@ import { Login } from "./components/Login";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Project } from "./pages/Project";
 import { Projects } from "./pages/Projects";
+import { Readiness } from "./pages/Readiness";
 import { Run } from "./pages/Run";
 import { Secrets } from "./pages/Secrets";
 import { api } from "./api";
@@ -60,6 +61,7 @@ export function App() {
               the nested route's — so the strip is the same on both. */}
           <Route path="/p/:slug" element={<Project />}>
             <Route path="secrets" element={<Secrets />} />
+            <Route path="readiness" element={<Readiness />} />
           </Route>
           <Route path="/r/:id" element={<Run />} />
           <Route path="*" element={<p className="dim">unknown page.</p>} />

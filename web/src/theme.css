@@ -235,6 +235,13 @@ code { color: var(--text-bright); }
 table { border-collapse: collapse; width: 100%; }
 td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
 
+/* --- Readiness ------------------------------------------------------------ */
+
+/* The one list whose lines are sentences rather than names. They wrap instead
+   of being cut at an ellipsis: an explanation you cannot read explains nothing.
+   The grammar is unchanged — marker, title, dim detail. */
+.checks .grow { white-space: normal; overflow: visible; }
+
 /* --- Run screen ----------------------------------------------------------- */
 
 .run-head {

@@ -14,11 +14,14 @@ export function Project() {
   const [triggering, setTriggering] = useState<string | null>(null);
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const onSecrets = useMatch("/p/:slug/secrets") !== null;
+  const onReadiness = useMatch("/p/:slug/readiness") !== null;
+  // Every tab but the first renders the nested route and nothing of its own.
+  const onSubTab = onSecrets || onReadiness;
 
   useEffect(() => {
     // Reading lanes means going out to the repository. On another tab nobody is
     // waiting for that answer, so it isn't asked for.
-    if (onSecrets) return;
+    if (onSubTab) return;
     setLanes([]);
     setLanesError(null);
     setLoadingLanes(true);
@@ -28,7 +31,7 @@ export function Project() {
       .catch((e: Error) => setLanesError(e.message))
       .finally(() => setLoadingLanes(false));
     api.runsOf(slug).then(setRuns).catch(() => {});
-  }, [slug, onSecrets]);
+  }, [slug, onSubTab]);
 
   const trigger = async (lane: Lane) => {
     setTriggering(lane.name);
@@ -51,10 +54,13 @@ export function Project() {
       <NavLink to={`/p/${slug}/secrets`} className={({ isActive }) => (isActive ? "current" : "")}>
         secrets
       </NavLink>
+      <NavLink to={`/p/${slug}/readiness`} className={({ isActive }) => (isActive ? "current" : "")}>
+        readiness
+      </NavLink>
     </nav>
   );
 
-  if (onSecrets) {
+  if (onSubTab) {
     return (
       <>
         {tabs}

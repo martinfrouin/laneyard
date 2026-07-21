@@ -274,7 +274,7 @@ export function checkBlockingActions(uses: Known<LaneUses[]>): Check {
   return {
     ...META.blockingActions,
     ...warn(
-      findings.map((f) => `${f.lane} calls ${f.finding.action}, which ${f.finding.because}`).join("; ") + ".",
+      findings.map((f) => `${f.lane} calls ${f.finding.action}: it ${f.finding.because}`).join("; ") + ".",
       // The same fix stated twice reads as two different fixes.
       [...new Set(findings.map((f) => f.finding.fix))].join(" "),
     ),
