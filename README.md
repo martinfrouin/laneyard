@@ -58,11 +58,11 @@ Then, from a project you already build with fastlane:
 
 ```bash
 cd ~/code/your-app
-laneyard add     # adopt this project
+laneyard setup   # answer a few questions about this project
 laneyard         # start the server
 ```
 
-`laneyard add` inspects what is there — the `fastlane` directory even when nested in a monorepo, a
+`laneyard setup` inspects what is there — the `fastlane` directory even when nested in a monorepo, a
 `Gemfile`, an Xcode project or a Gradle build — writes the matching block into
 `~/.laneyard/config.yml`, and prints a generated server password once. Write it down; it is not
 shown again.
@@ -95,7 +95,7 @@ Laneyard means copying one file, and restoring it means copying it back.
 server:
   port: 7890
   bind: 0.0.0.0
-  password_hash: "scrypt$…"      # written by `laneyard add`
+  password_hash: "scrypt$…"      # written by `laneyard setup`
   max_concurrent_runs: 1         # only 1 is accepted, see below
   retention: { runs: 50, artifact_days: 30 }
 

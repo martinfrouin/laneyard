@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
-import { runAddCommand } from "./cli/add.js";
+import { runSetupCommand } from "./cli/setup.js";
 import { runSecretCommand } from "./cli/secret.js";
 import { ConfigStore } from "./config/store.js";
 import { CacheStore } from "./db/cache.js";
@@ -100,7 +100,8 @@ function invokedDirectly(): boolean {
 
 const USAGE = `laneyard — a self-hosted web UI for fastlane
 
-  laneyard add        adopt the project in the current directory
+  laneyard setup      set up the project in the current directory
+                      --yes accepts every detected value without asking
   laneyard secret set NAME [--project <slug>]
                       store a secret, its value read from standard input
   laneyard            start the server
@@ -120,7 +121,7 @@ function explainStartupFailure(cause: unknown): string {
     return (
       "No configuration yet.\n\n" +
       "  cd into a project that already uses fastlane, then run:\n" +
-      "    laneyard add\n\n" +
+      "    laneyard setup\n\n" +
       "That writes " + join(homeDir(), "config.yml") + " for you."
     );
   }
@@ -140,13 +141,16 @@ if (invokedDirectly()) {
     process.exit(0);
   }
 
-  if (command === "add") {
+  if (command === "setup") {
     const home = homeDir();
     await mkdir(home, { recursive: true });
     const slugIndex = rest.indexOf("--slug");
     const slug = slugIndex === -1 ? undefined : rest[slugIndex + 1];
+    // `--yes` accepts every proposal, for scripts and for anyone who has done
+    // this before. Interactive is the default because the values are guesses.
+    const yes = rest.includes("--yes") || rest.includes("-y");
     try {
-      process.exit(await runAddCommand(process.cwd(), join(home, "config.yml"), slug));
+      process.exit(await runSetupCommand(process.cwd(), join(home, "config.yml"), { slug, yes }));
     } catch (cause) {
       // A taken slug or an unreadable file are ordinary situations. A stack
       // trace is not an error message; it just suggests the tool is broken.
@@ -167,6 +171,13 @@ if (invokedDirectly()) {
         err: (text) => process.stderr.write(text),
       }),
     );
+  }
+
+  // 0.1.0 shipped this as `add`. Anyone who learned that name deserves a
+  // sentence rather than "Unknown command".
+  if (command === "add") {
+    process.stderr.write("`laneyard setup` is now `laneyard setup`.\n");
+    process.exit(1);
   }
 
   if (command !== undefined) {

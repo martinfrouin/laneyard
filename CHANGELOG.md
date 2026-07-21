@@ -70,6 +70,19 @@ loaded, with an explanation:
 - `max_concurrent_runs` above 1 — the queue is serial; parallel builds need a working directory
   per run, which does not exist yet.
 
+### Changed
+
+- **`laneyard add` is now `laneyard setup`, and it asks.** It used to detect everything silently
+  and write the result. When a guess was wrong the configuration looked plausible and pointed
+  nowhere, and the failure surfaced later as an unreadable lane list, far from its cause. It now
+  shows each value and lets you correct it; `--yes` keeps the old behaviour for scripts.
+- **Paths are measured from the repository root, not the current directory.** Running setup inside
+  `app/` of a monorepo wrote `fastlane_dir: fastlane` while the clone holds it at `app/fastlane`,
+  so the lane list failed with ENOENT. Artifact patterns are anchored to the sub-project too — an
+  unanchored `**/*.ipa` would collect a sibling app's build as if it were this one's.
+- **A project is named after its repository**, plus the sub-directory when there is one:
+  `popotheque-app` rather than `app`. The folder something was cloned into is an accident.
+
 ### Fixed
 - A Fastfile whose top level called an action — `default_platform(:ios)`, the first line of most
   real ones — could not be read at all: the lane list came back as an error about an unknown
@@ -92,5 +105,5 @@ loaded, with an explanation:
 ## 0.1.0 — 2026-07-21
 
 First release. Declare a project, clone it, list its lanes, run one, watch it stream, download the
-artifact. Configuration entirely in files. `laneyard add` adopts a project that already uses
+artifact. Configuration entirely in files. `laneyard setup` adopts a project that already uses
 fastlane.
