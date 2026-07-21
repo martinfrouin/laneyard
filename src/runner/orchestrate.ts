@@ -5,6 +5,7 @@ import type { RunStore, Step } from "../db/runs.js";
 import { Workspace } from "../git/workspace.js";
 import type { GitAuth } from "../git/workspace.js";
 import type { LogStore } from "../logs/store.js";
+import { summarizeFailure } from "../heuristics/error-summary.js";
 import { collectArtifacts } from "./artifacts.js";
 import { LiveStepTracker } from "./live-steps.js";
 import { startPty } from "./pty.js";
@@ -34,16 +35,6 @@ export interface ExecuteRunResult {
   status: "success" | "failed";
 }
 
-/** Extrait de quoi afficher une cause d'échec sans ouvrir le log intégral. */
-function summarizeFailure(log: string, exitCode: number): string {
-  const lines = log
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-
-  const flagged = [...lines].reverse().find((l) => /error|failed|failure/i.test(l));
-  return flagged ? flagged.slice(0, 500) : `fastlane s'est arrêté avec le code ${exitCode}`;
-}
 
 /**
  * Enchaîne un run complet et pose ses transitions d'état.
