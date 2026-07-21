@@ -76,8 +76,35 @@ loaded, with an explanation:
 - `max_concurrent_runs` above 1 — the queue is serial; parallel builds need a working directory
   per run, which does not exist yet.
 
+### Added in 0.2.1
+
+- **`platforms` is configuration, not a guess.** `laneyard.yml` takes `platforms: [ios]`,
+  `[android]` or both, and `laneyard setup` writes what it detected so the value can be corrected
+  by editing one line. Left out, Laneyard still looks at the repository and reports what it found
+  rather than assuming.
+- **The readiness checklist knows what it is looking at.** It is now a shared section plus one per
+  platform, and a project is only shown the sections that apply to it. An Android project is no
+  longer told off for having no App Store Connect key — one irrelevant warning teaches you to
+  ignore the whole screen.
+- **A credential can be a file.** An App Store Connect key arrives as a `.p8` and a Play Store
+  service account as JSON; pasting either into a text field is the moment you are most likely to
+  paste it somewhere else by accident. The Secrets tab takes the file directly, under the names
+  the checklist looks for — `APP_STORE_CONNECT_API_KEY_P8` and `SUPPLY_JSON_KEY_DATA`. Your
+  browser reads it and sends its text to the route a typed value already used: nothing is
+  uploaded, nothing is written to disk on the way, and the page only ever shows the file's name.
+- **A project can be removed from the interface**, from a new Settings tab, instead of editing
+  `config.yml` by hand. It is the one destructive action in Laneyard, so it is confirmed by typing
+  the project's name rather than by a dialogue you can click through, and most of the screen is
+  what it does *not* do: the runs stay, each still at its own address with its log and artifacts;
+  the clone and the artifacts stay on disk, with their paths printed so you can remove them
+  yourself; the secrets stay in the vault and come back if you add the project again. It is
+  refused while a run of that project is in flight, since that run holds the workspace.
+
 ### Fixed in 0.2.1
 
+- **Editing `config.yml` no longer rewraps lines nobody touched.** Adding or removing a project
+  serialized the document at YAML's default width, folding the password hash across two lines. The
+  file still parsed, which is exactly why it went unnoticed until someone opened it.
 - **Listing lanes never worked from an installed copy.** The sidecar script was located two levels
   above its module, which is right when running from the sources and wrong once built — an
   installed Laneyard looked for it in `dist/ruby/` and reported "No such file or directory". Both

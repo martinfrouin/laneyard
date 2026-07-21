@@ -235,6 +235,26 @@ Below the editor is what git makes of the workspace: the diff, a message field, 
 `push`. A commit stages exactly the files that changed and never `git add -A` — a build leaves
 artifacts and reports scattered around, and none of them belong in your history.
 
+### Removing a project
+
+Every project has a Settings tab, and the one thing on it is removal. It takes the project's block
+out of `config.yml` — through the YAML document, so your comments and your key order survive —
+and stops showing it. It is confirmed by typing the project's name: it is the one destructive
+action in Laneyard, and a dialogue you can click through is not a confirmation.
+
+What it does *not* do is most of the point, because "delete" elsewhere usually means the opposite:
+
+- **the runs stay.** Every build that project ever ran keeps its page, its log and its artifacts,
+  each still at its own address. Removing a project means stop showing it, not destroy its past;
+- **the clone and the artifacts stay on disk.** Their paths are printed when it is done, so you
+  can remove them yourself. Nothing is deleted from a web page on one click;
+- **the secrets stay in the vault**, encrypted and unreachable, and come back if you add the
+  project again under the same name;
+- **the repository is untouched.** Its `laneyard.yml`, its Fastfile and its history are the
+  repository's, not Laneyard's.
+
+Removal is refused while a run of that project is in flight — that run is using the workspace.
+
 ## Security
 
 Read this before putting Laneyard on a network.
@@ -280,6 +300,8 @@ What this does *not* cover, stated plainly:
 - `✓` build queue, cancellation, timeouts surfaced in the UI
 - `✓` a checklist that gets a project running unattended
 - `✓` edit the Fastfile in the browser, verified on every save
+- `✓` store a signing credential straight from its `.p8` or JSON file
+- `✓` remove a project from the interface, without touching its history
 - `○` git-triggered and scheduled builds
 
 Two things worth knowing today: listing lanes does not fetch the repository, so a lane you have
