@@ -20,7 +20,7 @@ projects:
 `;
 
 describe("loadServerConfig", () => {
-  it("applique les valeurs par défaut du serveur", async () => {
+  it("applies the server's default values", async () => {
     const res = await loadServerConfig(await withConfig(minimal));
     expect(res.ok).toBe(true);
     if (!res.ok) return;
@@ -30,14 +30,14 @@ describe("loadServerConfig", () => {
     expect(res.config.server.retention).toEqual({ runs: 50, artifact_days: 30 });
   });
 
-  it("déduit le nom d'un projet depuis son slug", async () => {
+  it("derives a project's name from its slug", async () => {
     const res = await loadServerConfig(await withConfig(minimal));
-    if (!res.ok) throw new Error("attendu valide");
+    if (!res.ok) throw new Error("expected valid");
     expect(res.config.projects[0]!.name).toBe("popotes-ios");
     expect(res.config.projects[0]!.default_branch).toBe("main");
   });
 
-  it("refuse deux projets partageant le même slug", async () => {
+  it("refuses two projects sharing the same slug", async () => {
     const res = await loadServerConfig(
       await withConfig(`
 server: { password_hash: "x" }
@@ -51,7 +51,7 @@ projects:
     expect(res.error).toMatch(/slug/i);
   });
 
-  it("refuse un slug qui n'est pas utilisable dans un chemin", async () => {
+  it("refuses a slug that isn't usable in a path", async () => {
     const res = await loadServerConfig(
       await withConfig(`
 server: { password_hash: "x" }
@@ -62,15 +62,15 @@ projects:
     expect(res.ok).toBe(false);
   });
 
-  it("rapporte une erreur lisible sur un YAML invalide", async () => {
+  it("reports a readable error on invalid YAML", async () => {
     const res = await loadServerConfig(await withConfig("server: {"));
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error.length).toBeGreaterThan(0);
   });
 
-  it("rapporte un fichier absent sans lever d'exception", async () => {
-    const res = await loadServerConfig("/nexiste/pas/config.yml");
+  it("reports a missing file without throwing", async () => {
+    const res = await loadServerConfig("/does/not/exist/config.yml");
     expect(res.ok).toBe(false);
   });
 });

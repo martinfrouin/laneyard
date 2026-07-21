@@ -25,12 +25,12 @@ export function guessKind(filename: string): string {
 }
 
 /**
- * Déplace hors du workspace tout fichier correspondant aux motifs configurés.
+ * Moves out of the workspace any file matching the configured patterns.
  *
- * Les motifs sont le seul contrat : Laneyard n'analyse pas la sortie du run pour
- * deviner des chemins. Le déplacement — et non la copie — évite de doubler
- * l'espace disque et garantit que le prochain build ne réutilisera pas un
- * artefact périmé par accident.
+ * The patterns are the only contract: Laneyard doesn't parse the run's
+ * output to guess paths. Moving — rather than copying — avoids doubling
+ * disk usage and guarantees the next build won't accidentally reuse a
+ * stale artifact.
  */
 export async function collectArtifacts(
   workspacePath: string,
@@ -55,7 +55,7 @@ export async function collectArtifacts(
   for (const source of matches.sort()) {
     let filename = basename(source);
     if (used.has(filename)) {
-      // Deux chemins peuvent produire le même nom ; on préfixe plutôt que d'écraser.
+      // Two paths can produce the same name; we prefix rather than overwrite.
       const ext = extname(filename);
       const stem = filename.slice(0, filename.length - ext.length);
       let n = 2;

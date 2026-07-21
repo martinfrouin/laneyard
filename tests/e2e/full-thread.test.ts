@@ -8,8 +8,8 @@ import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
 const FAKE_DIR = join(process.cwd(), "tests", "fixtures", "fake-fastlane");
 
-describe("fil complet", () => {
-  it("déclare, clone, liste, lance, suit et récupère l'artefact", async () => {
+describe("full thread", () => {
+  it("declares, clones, lists, launches, follows, and retrieves the artifact", async () => {
     const origin = await makeOriginRepo({
       "fastlane/Fastfile": "lane :beta do\nend\n",
       "laneyard.yml": 'runtime: system\nartifact_globs: ["build/**/*.ipa"]\n',
@@ -51,7 +51,7 @@ projects:
     expect(created.statusCode).toBe(201);
     const { id } = created.json() as { id: number };
 
-    // Le run est asynchrone : on attend qu'il atteigne un état terminal.
+    // The run is asynchronous: we wait for it to reach a terminal state.
     const runs = new RunStore(db);
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
@@ -76,7 +76,7 @@ projects:
       cookies,
     });
     expect(download.statusCode).toBe(200);
-    expect(download.body.trim()).toBe("faux binaire");
+    expect(download.body.trim()).toBe("fake binary");
 
     await app.close();
   }, 120_000);

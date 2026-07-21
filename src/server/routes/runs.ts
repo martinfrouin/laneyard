@@ -9,31 +9,31 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
     const body = req.body as { lane?: string; platform?: string | null; params?: Record<string, string> };
 
     const entry = ctx.config.project(slug);
-    if (!entry) return reply.code(404).send({ error: "Projet inconnu" });
-    if (!body.lane) return reply.code(400).send({ error: "Lane manquante" });
+    if (!entry) return reply.code(404).send({ error: "Unknown project" });
+    if (!body.lane) return reply.code(400).send({ error: "Missing lane" });
 
-    // Un seul run à la fois par projet : ils partagent le même workspace git.
-    // Deux runs concurrents se marcheraient dessus en silence — l'un changerait
-    // de commit sous les pieds de l'autre, emporterait ses artefacts et
-    // supprimerait son rapport. La vraie file d'attente vient au jalon suivant ;
-    // ce refus, lui, empêche dès maintenant des résultats faux.
+    // Only one run at a time per project: they share the same git workspace.
+    // Two concurrent runs would silently trip over each other — one would
+    // change the commit out from under the other, carry off its artifacts
+    // and delete its report. The real queue comes at the next milestone;
+    // this refusal, for its part, already prevents false results.
     const last = ctx.runs.listByProject(slug, 1)[0];
     if (last && ["queued", "preparing", "running"].includes(last.status)) {
       return reply.code(409).send({
-        error: `Le run #${last.id} est encore en cours sur ce projet. Attendez sa fin.`,
+        error: `Run #${last.id} is still in progress on this project. Wait for it to finish.`,
       });
     }
 
-    // On vérifie que la lane existe vraiment avant de créer un run voué à l'échec.
+    // We check that the lane genuinely exists before creating a run doomed to fail.
     try {
       await ctx.ensureWorkspace(slug);
       const resolved = await ctx.config.resolve(slug, ctx.workspacePath(slug));
       const lanes = await ctx.lanes(slug, ctx.workspacePath(slug), resolved!.settings.fastlane_dir);
       if (!lanes.some((l) => l.name === body.lane)) {
-        return reply.code(400).send({ error: `Lane inconnue : ${body.lane}` });
+        return reply.code(400).send({ error: `Unknown lane: ${body.lane}` });
       }
     } catch {
-      // Lanes illisibles : on laisse passer, le run échouera avec un message clair.
+      // Unreadable lanes: we let it through, the run will fail with a clear message.
     }
 
     const id = ctx.runs.create({
@@ -43,7 +43,7 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
       params: body.params ?? {},
     });
 
-    // Lancé sans attendre : la réponse HTTP ne doit pas durer le temps d'un build.
+    // Launched without waiting: the HTTP response mustn't take as long as a build.
     void executeRun({
       runId: id,
       runs: ctx.runs,
@@ -53,7 +53,7 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
       gitUrl: entry.git_url,
       gitAuth: entry.git_auth,
       branch: entry.default_branch,
-      // Résolus après le clone, quand le laneyard.yml du dépôt est enfin lisible.
+      // Resolved after the clone, once the repository's laneyard.yml is finally readable.
       resolveSettings: async () => {
         const r = await ctx.config.resolve(slug, ctx.workspacePath(slug));
         return r!.settings;
@@ -63,13 +63,14 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
     })
       .then((r) => ctx.sockets?.finish(id, r.status))
       .catch((cause: unknown) => {
-        // Dernier filet. `executeRun` s'engage à ne pas lever, mais une promesse
-        // rejetée sans gestionnaire abat tout le processus Node — et avec lui
-        // les autres runs en cours. Le prix d'un oubli serait démesuré.
+        // Last safety net. `executeRun` commits to never throwing, but a
+        // rejected promise with no handler brings down the whole Node
+        // process — and with it, the other runs in progress. The cost of
+        // forgetting this would be disproportionate.
         ctx.runs.finish(id, {
           status: "failed",
           exitCode: null,
-          errorSummary: `Échec inattendu : ${(cause as Error).message}`,
+          errorSummary: `Unexpected failure: ${(cause as Error).message}`,
         });
         ctx.sockets?.finish(id, "failed");
       });
@@ -80,25 +81,25 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
   app.get("/api/runs/:id", async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     const run = ctx.runs.get(id);
-    if (!run) return reply.code(404).send({ error: "Run inconnu" });
+    if (!run) return reply.code(404).send({ error: "Unknown run" });
     return { ...run, steps: ctx.runs.steps(id), artifacts: ctx.runs.artifacts(id) };
   });
 
   app.get("/api/runs/:id/log", async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     const from = Number((req.query as { from?: string }).from ?? 0);
-    if (!ctx.runs.get(id)) return reply.code(404).send({ error: "Run inconnu" });
+    if (!ctx.runs.get(id)) return reply.code(404).send({ error: "Unknown run" });
     return reply.type("text/plain; charset=utf-8").send(await ctx.logs.read(id, from));
   });
 
   app.get("/api/runs/:id/artifacts/:artifactId", async (req, reply) => {
     const { id, artifactId } = req.params as { id: string; artifactId: string };
     const artifact = ctx.runs.artifacts(Number(id)).find((a) => a.id === Number(artifactId));
-    if (!artifact) return reply.code(404).send({ error: "Artefact inconnu" });
+    if (!artifact) return reply.code(404).send({ error: "Unknown artifact" });
 
     return reply
-      // Un fichier du dépôt peut porter un guillemet dans son nom : sans
-      // échappement il casserait l'en-tête.
+      // A file from the repository can carry a quote in its name: without
+      // escaping it would break the header.
       .header(
         "Content-Disposition",
         `attachment; filename="${artifact.filename.replace(/["\\]/g, "_")}"`,

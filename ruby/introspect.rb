@@ -1,23 +1,23 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Sidecar d'introspection de Laneyard.
+# Laneyard's introspection sidecar.
 #
-# Lancé dans le dossier d'un projet — idéalement via `bundle exec` — il est le seul
-# composant qui connaît fastlane. Il n'écrit jamais rien : il lit et renvoie du JSON
-# sur la sortie standard.
+# Launched in a project's folder — ideally via `bundle exec` — it's the only
+# component that knows fastlane. It never writes anything: it reads and returns
+# JSON on standard output.
 #
 #   ruby introspect.rb lanes   --fastlane-dir fastlane
 #   ruby introspect.rb actions --fastlane-dir fastlane
 #   ruby introspect.rb parse   --fastlane-dir fastlane
 #
-# Le contrat de sortie est constant : { "ok": true, ... } ou { "ok": false, "error": "..." }.
-# Une erreur est une réponse valide, jamais une trace sur stderr.
+# The output contract is constant: { "ok": true, ... } or { "ok": false, "error": "..." }.
+# An error is a valid response, never a trace on stderr.
 
 require "json"
 
-# Voir plus bas : la vraie sortie standard est mise de côté dès le départ pour que
-# rien d'autre que notre JSON ne puisse s'y glisser.
+# See below: the real standard output is set aside right from the start so
+# that nothing but our JSON can slip into it.
 REAL_STDOUT = $stdout.dup
 
 def respond(payload)
@@ -35,18 +35,18 @@ dir_index = ARGV.index("--fastlane-dir")
 fastlane_dir = dir_index ? ARGV[dir_index + 1] : "fastlane"
 fastfile_path = File.join(Dir.pwd, fastlane_dir, "Fastfile")
 
-fail_with("Fastfile introuvable : #{fastfile_path}") unless File.exist?(fastfile_path)
+fail_with("Fastfile not found: #{fastfile_path}") unless File.exist?(fastfile_path)
 
-# fastlane écrit volontiers sur la sortie standard — avertissements de plugin,
-# messages de dépréciation, bandeau de mise à jour. Un seul de ces messages
-# corromprait le JSON attendu par l'appelant. Tout part donc vers l'erreur standard,
-# et seule `respond` écrit sur la vraie sortie.
+# fastlane readily writes to standard output — plugin warnings, deprecation
+# messages, update banner. Just one of these messages would corrupt the JSON
+# the caller expects. Everything therefore goes to standard error, and only
+# `respond` writes to the real output.
 $stdout = $stderr
 
 begin
   require "fastlane"
 rescue LoadError => e
-  fail_with("fastlane n'est pas disponible dans cet environnement Ruby (#{e.message})")
+  fail_with("fastlane is not available in this Ruby environment (#{e.message})")
 end
 
 def collect_lanes(fastfile_path)
@@ -70,17 +70,18 @@ when "lanes"
   begin
     lanes = collect_lanes(fastfile_path)
   rescue Exception => e # rubocop:disable Lint/RescueException
-    # Un Fastfile est du Ruby arbitraire : son chargement peut lever n'importe quoi,
-    # y compris des erreurs de syntaxe qui ne descendent pas de StandardError.
+    # A Fastfile is arbitrary Ruby: loading it can raise anything at all,
+    # including syntax errors that don't descend from StandardError.
     #
-    # Attention : `respond` du cas de succès doit rester HORS de ce begin/rescue.
-    # `respond` termine par `exit 0`, qui lève SystemExit — une sous-classe
-    # d'Exception, donc interceptée par ce `rescue Exception` si l'appel est fait
-    # à l'intérieur. Le symptôme est un second JSON (l'erreur « exit ») écrit à la
-    # suite du premier, ce qui corrompt la sortie côté appelant.
-    fail_with("Chargement du Fastfile impossible : #{e.message}")
+    # Careful: the success case's `respond` must stay OUTSIDE this
+    # begin/rescue. `respond` ends with `exit 0`, which raises SystemExit —
+    # a subclass of Exception, so caught by this `rescue Exception` if the
+    # call is made inside. The symptom is a second JSON blob (the "exit"
+    # error) written right after the first, which corrupts the output on
+    # the caller's side.
+    fail_with("Could not load the Fastfile: #{e.message}")
   end
   respond({ ok: true, lanes: lanes })
 else
-  fail_with("Commande inconnue : #{command.inspect}")
+  fail_with("Unknown command: #{command.inspect}")
 end

@@ -4,9 +4,9 @@ import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
- * Écrivain append-only pour un run.
- * `offset` compte des octets, jamais des caractères : c'est ce que la reprise
- * de lecture côté navigateur manipule, et un accent occupe deux octets.
+ * Append-only writer for a run.
+ * `offset` counts bytes, never characters: that's what the browser-side
+ * read resumption works with, and a multi-byte character can span several bytes.
  */
 export class LogWriter {
   private _offset = 0;
@@ -19,11 +19,11 @@ export class LogWriter {
   }
 
   /**
-   * Réserve le décalage immédiatement puis sérialise les écritures.
+   * Reserves the offset immediately then serializes the writes.
    *
-   * Les fragments arrivent d'un PTY, sans attendre : si le décalage était calculé
-   * après l'écriture, deux fragments concurrents pourraient s'attribuer la même
-   * position et le rattrapage côté navigateur dupliquerait ou perdrait du texte.
+   * Fragments arrive from a PTY, without waiting: if the offset were computed
+   * after the write, two concurrent fragments could claim the same position
+   * and the browser-side catch-up would duplicate or lose text.
    */
   async append(chunk: string): Promise<number> {
     const buf = Buffer.from(chunk, "utf8");
@@ -31,7 +31,7 @@ export class LogWriter {
     this._offset += buf.byteLength;
 
     this.queue = this.queue.then(() => this.handle.write(buf)).catch(() => {
-      // Le fichier a pu être fermé pendant que le processus finissait de parler.
+      // The file may have been closed while the process was still finishing up.
     });
     await this.queue;
     return start;
@@ -64,7 +64,7 @@ export class LogStore {
     }
   }
 
-  /** Pour servir un gros log sans le charger entièrement en mémoire. */
+  /** For serving a large log without loading it entirely into memory. */
   stream(runId: number, fromOffset = 0): NodeJS.ReadableStream {
     return createReadStream(this.pathFor(runId), { start: fromOffset });
   }

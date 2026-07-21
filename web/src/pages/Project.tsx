@@ -33,7 +33,7 @@ export function Project() {
       const { id } = await api.trigger(slug, lane.name, lane.platform, {});
       navigate(`/r/${id}`);
     } catch (e) {
-      // Une lane refusée doit se voir : la promesse ne meurt pas en silence.
+      // A rejected lane must be visible: the promise doesn't die in silence.
       setTriggerError((e as Error).message);
       setTriggering(null);
     }
@@ -42,11 +42,11 @@ export function Project() {
   return (
     <>
       <h2 className="section">lanes</h2>
-      {/* Une erreur de lecture des lanes est dite, jamais masquée par une liste vide. */}
-      {lanesError && <p className="status-failed">lanes illisibles — {lanesError}</p>}
-      {loadingLanes && <p className="dim">lecture du dépôt…</p>}
+      {/* A lane-reading error is stated, never hidden behind an empty list. */}
+      {lanesError && <p className="status-failed">unreadable lanes — {lanesError}</p>}
+      {loadingLanes && <p className="dim">reading repository…</p>}
       {!loadingLanes && !lanesError && lanes.filter((l) => !l.private).length === 0 && (
-        <p className="dim">aucune lane publique dans ce Fastfile.</p>
+        <p className="dim">no public lane in this Fastfile.</p>
       )}
 
       <ul className="rows">
@@ -54,7 +54,7 @@ export function Project() {
           .filter((l) => !l.private)
           .map((l) => (
             <li key={`${l.platform ?? ""}:${l.name}`}>
-              <button onClick={() => void trigger(l)} disabled={triggering !== null} title="lancer">
+              <button onClick={() => void trigger(l)} disabled={triggering !== null} title="run">
                 ▶
               </button>
               <span className="grow">
@@ -65,12 +65,12 @@ export function Project() {
             </li>
           ))}
       </ul>
-      {triggerError && <p className="status-failed">lancement refusé — {triggerError}</p>}
+      {triggerError && <p className="status-failed">launch refused — {triggerError}</p>}
 
       <h2 className="section" style={{ marginTop: 20 }}>
         runs
       </h2>
-      {runs.length === 0 && <p className="dim">aucun run pour l'instant.</p>}
+      {runs.length === 0 && <p className="dim">no runs yet.</p>}
       <ul className="rows">
         {runs.map((r) => (
           <li key={r.id}>

@@ -5,7 +5,7 @@ const exec = promisify(execFile);
 
 export interface RubyEnv {
   env: NodeJS.ProcessEnv;
-  /** `process` : Ruby savait déjà. `launcher` : environnement repris du lanceur fastlane. */
+  /** `process`: Ruby already knew. `launcher`: environment recovered from the fastlane launcher. */
   source: "process" | "launcher";
 }
 
@@ -19,11 +19,12 @@ async function canRequireFastlane(env: NodeJS.ProcessEnv): Promise<boolean> {
 }
 
 /**
- * Reconstitue l'environnement du lanceur `fastlane` quand c'en est un script shell.
+ * Reconstructs the `fastlane` launcher's environment when it's a shell script.
  *
- * On n'exécute pas le lanceur : on relit ses affectations `GEM_HOME` et `GEM_PATH`
- * et on les fait évaluer par bash, qui sait développer `${HOME}` et les valeurs par
- * défaut. Approche volontairement étroite — deux variables, rien d'autre.
+ * We don't run the launcher: we read back its `GEM_HOME` and `GEM_PATH`
+ * assignments and have bash evaluate them, since it knows how to expand
+ * `${HOME}` and default values. Deliberately narrow approach — two
+ * variables, nothing else.
  */
 async function envFromLauncher(): Promise<NodeJS.ProcessEnv | null> {
   const script = `
@@ -46,10 +47,10 @@ async function envFromLauncher(): Promise<NodeJS.ProcessEnv | null> {
 let cached: Promise<RubyEnv | null> | null = null;
 
 /**
- * Trouve un environnement dans lequel `ruby` peut charger fastlane, ou null.
+ * Finds an environment in which `ruby` can load fastlane, or null.
  *
- * Le résultat est mémorisé : sonder coûte plusieurs secondes, fastlane étant lent
- * à charger, et l'installation ne change pas en cours d'exécution.
+ * The result is memoized: probing costs several seconds, since fastlane is
+ * slow to load, and the install doesn't change while the process runs.
  */
 export function resolveRubyEnv(): Promise<RubyEnv | null> {
   cached ??= (async () => {
@@ -65,8 +66,8 @@ export function resolveRubyEnv(): Promise<RubyEnv | null> {
   return cached;
 }
 
-/** Message unique, pour ne pas décrire le problème différemment à chaque endroit. */
+/** Single message, so the problem isn't described differently in each place. */
 export const FASTLANE_UNAVAILABLE =
-  "Ruby ne parvient pas à charger fastlane. Installez-le pour le Ruby courant " +
-  "(`gem install fastlane`), ou déclarez un Gemfile dans le projet et passez le " +
-  "réglage `runtime` à `bundle`.";
+  "Ruby cannot load fastlane. Install it for the current Ruby " +
+  "(`gem install fastlane`), or declare a Gemfile in the project and set " +
+  "the `runtime` setting to `bundle`.";

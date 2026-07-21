@@ -47,19 +47,19 @@ async function login(app: Awaited<ReturnType<typeof harness>>["app"]): Promise<s
 }
 
 describe("API", () => {
-  it("refuse l'accès sans session", async () => {
+  it("refuses access without a session", async () => {
     const { app } = await harness();
     const res = await app.inject({ method: "GET", url: "/api/projects" });
     expect(res.statusCode).toBe(401);
   });
 
-  it("refuse un mauvais mot de passe", async () => {
+  it("refuses a wrong password", async () => {
     const { app } = await harness();
-    const res = await app.inject({ method: "POST", url: "/api/login", payload: { password: "faux" } });
+    const res = await app.inject({ method: "POST", url: "/api/login", payload: { password: "wrong" } });
     expect(res.statusCode).toBe(401);
   });
 
-  it("liste les projets une fois connecté", async () => {
+  it("lists the projects once logged in", async () => {
     const { app } = await harness();
     const session = await login(app);
     const res = await app.inject({
@@ -72,7 +72,7 @@ describe("API", () => {
     expect(res.json()).toMatchObject([{ slug: "popotes", name: "Popotes" }]);
   });
 
-  it("renvoie les lanes d'un projet", async () => {
+  it("returns a project's lanes", async () => {
     const { app } = await harness();
     const session = await login(app);
     const res = await app.inject({
@@ -85,18 +85,18 @@ describe("API", () => {
     expect(res.json()).toMatchObject([{ name: "beta", platform: "ios" }]);
   });
 
-  it("répond 404 pour un projet absent de la configuration", async () => {
+  it("responds 404 for a project absent from the configuration", async () => {
     const { app } = await harness();
     const session = await login(app);
     const res = await app.inject({
       method: "GET",
-      url: "/api/projects/inconnu/lanes",
+      url: "/api/projects/unknown/lanes",
       cookies: { laneyard_session: session },
     });
     expect(res.statusCode).toBe(404);
   });
 
-  it("crée un run en attente et le rend consultable", async () => {
+  it("creates a queued run and makes it viewable", async () => {
     const { app } = await harness();
     const session = await login(app);
 
@@ -118,19 +118,19 @@ describe("API", () => {
     expect(fetched.json()).toMatchObject({ id, lane: "beta", projectSlug: "popotes" });
   });
 
-  it("refuse de lancer une lane inconnue", async () => {
+  it("refuses to launch an unknown lane", async () => {
     const { app } = await harness();
     const session = await login(app);
     const res = await app.inject({
       method: "POST",
       url: "/api/projects/popotes/runs",
       cookies: { laneyard_session: session },
-      payload: { lane: "nexiste-pas", params: {} },
+      payload: { lane: "does-not-exist", params: {} },
     });
     expect(res.statusCode).toBe(400);
   });
 
-  it("refuse un second run tant que le précédent occupe le workspace", async () => {
+  it("refuses a second run while the previous one occupies the workspace", async () => {
     const { app } = await harness();
     const session = await login(app);
     const cookies = { laneyard_session: session };
@@ -143,7 +143,7 @@ describe("API", () => {
     });
     expect(first.statusCode).toBe(201);
 
-    // Le premier run est encore actif : deux runs partageraient le même clone git.
+    // The first run is still active: two runs would share the same git clone.
     const second = await app.inject({
       method: "POST",
       url: "/api/projects/popotes/runs",
@@ -152,6 +152,6 @@ describe("API", () => {
     });
 
     expect(second.statusCode).toBe(409);
-    expect((second.json() as { error: string }).error).toMatch(/en cours/);
+    expect((second.json() as { error: string }).error).toMatch(/in progress/);
   });
 });

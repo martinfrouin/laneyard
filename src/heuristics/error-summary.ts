@@ -1,28 +1,28 @@
 /**
- * Extraction d'une cause d'échec lisible depuis la sortie d'un run.
+ * Extraction of a readable failure cause from a run's output.
  *
- * C'est une heuristique : elle connaît fastlane par ses habitudes d'affichage,
- * pas par un contrat. Elle vit donc dans ce module isolé, et respecte la règle
- * qui s'y applique — elle ne bloque rien, ne modifie rien, et ne fait que
- * produire une information d'appoint. Le log intégral reste la référence.
+ * This is a heuristic: it knows fastlane by its display habits, not by a
+ * contract. It therefore lives in this isolated module, and follows the
+ * rule that applies to it — it blocks nothing, changes nothing, and only
+ * produces supplementary information. The full log remains the reference.
  */
 
 const ANSI = /\x1b\[[0-9;]*m/g;
-/** Préfixe d'horodatage que fastlane place en tête de chaque ligne. */
+/** Timestamp prefix that fastlane puts at the head of every line. */
 const TIMESTAMP = /^\[\d{2}:\d{2}:\d{2}\]:\s*/;
-/** Marqueur que fastlane réserve à la cause finale d'un échec. */
+/** Marker that fastlane reserves for a failure's final cause. */
 const FASTLANE_ERROR = /^\[!\]\s*(.+)$/;
 
 const NOISE = /^(fastlane finished with errors|fastlane\.tools finished)/i;
 const LOOKS_LIKE_FAILURE = /error|failed|failure|échou/i;
 
 /**
- * Rend une phrase affichable à côté d'un run échoué, ou une phrase de repli.
+ * Renders a displayable sentence next to a failed run, or a fallback sentence.
  *
- * L'ordre de préférence suit la fiabilité décroissante : le marqueur explicite
- * de fastlane d'abord, une ligne qui parle d'erreur ensuite, le code de sortie
- * en dernier recours. Le générique « fastlane finished with errors » est écarté :
- * il est toujours présent et n'apprend rien.
+ * The order of preference follows decreasing reliability: fastlane's explicit
+ * marker first, a line mentioning an error next, the exit code as a last
+ * resort. The generic "fastlane finished with errors" is discarded: it is
+ * always present and teaches nothing.
  */
 export function summarizeFailure(log: string, exitCode: number | null): string {
   const lines = log
@@ -42,6 +42,6 @@ export function summarizeFailure(log: string, exitCode: number | null): string {
   if (mentioning) return mentioning.slice(0, 500);
 
   return exitCode === null
-    ? "Le run a échoué sans message exploitable"
-    : `fastlane s'est arrêté avec le code ${exitCode}`;
+    ? "The run failed with no usable message"
+    : `fastlane stopped with exit code ${exitCode}`;
 }

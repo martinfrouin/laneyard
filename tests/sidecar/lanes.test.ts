@@ -18,7 +18,7 @@ async function fastlaneDir(files: Record<string, string>): Promise<string> {
 const LANES = [{ name: "beta", platform: "ios", description: "", private: false }];
 
 describe("LaneReader", () => {
-  it("interroge le sidecar puis sert le cache au second appel", async () => {
+  it("queries the sidecar then serves the cache on the second call", async () => {
     const dir = await fastlaneDir({ Fastfile: "lane :beta do\nend\n" });
     const invoke = vi.fn().mockResolvedValue({ ok: true, lanes: LANES });
     const reader = new LaneReader(new CacheStore(openDatabase(":memory:")), invoke);
@@ -28,7 +28,7 @@ describe("LaneReader", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("réinterroge le sidecar quand un fichier du dossier change", async () => {
+  it("re-queries the sidecar when a file in the folder changes", async () => {
     const dir = await fastlaneDir({ Fastfile: "lane :beta do\nend\n" });
     const invoke = vi.fn().mockResolvedValue({ ok: true, lanes: LANES });
     const reader = new LaneReader(new CacheStore(openDatabase(":memory:")), invoke);
@@ -40,7 +40,7 @@ describe("LaneReader", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
-  it("réinterroge aussi quand un fichier voisin change, pas seulement le Fastfile", async () => {
+  it("also re-queries when a neighbouring file changes, not just the Fastfile", async () => {
     const dir = await fastlaneDir({ Fastfile: "lane :beta do\nend\n", Appfile: "app_identifier 'a'\n" });
     const invoke = vi.fn().mockResolvedValue({ ok: true, lanes: LANES });
     const reader = new LaneReader(new CacheStore(openDatabase(":memory:")), invoke);
@@ -52,13 +52,13 @@ describe("LaneReader", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
-  it("propage l'erreur du sidecar sans rien mettre en cache", async () => {
-    const dir = await fastlaneDir({ Fastfile: "cassé" });
-    const invoke = vi.fn().mockResolvedValue({ ok: false, error: "Fastfile illisible" });
+  it("propagates the sidecar's error without caching anything", async () => {
+    const dir = await fastlaneDir({ Fastfile: "broken" });
+    const invoke = vi.fn().mockResolvedValue({ ok: false, error: "unreadable Fastfile" });
     const reader = new LaneReader(new CacheStore(openDatabase(":memory:")), invoke);
 
-    await expect(reader.read("p", dir, "fastlane")).rejects.toThrow(/illisible/);
-    await expect(reader.read("p", dir, "fastlane")).rejects.toThrow(/illisible/);
+    await expect(reader.read("p", dir, "fastlane")).rejects.toThrow(/unreadable/);
+    await expect(reader.read("p", dir, "fastlane")).rejects.toThrow(/unreadable/);
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 });

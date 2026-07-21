@@ -14,47 +14,47 @@ async function projectDir(files: Record<string, string>): Promise<string> {
 }
 
 describe("detectProject", () => {
-  it("trouve le dossier fastlane à la racine", async () => {
+  it("finds the fastlane folder at the root", async () => {
     const dir = await projectDir({ "fastlane/Fastfile": "lane :beta do\nend\n" });
     const d = await detectProject(dir);
     expect(d.fastlaneDir).toBe("fastlane");
   });
 
-  it("trouve un dossier fastlane imbriqué dans un monorepo", async () => {
+  it("finds a fastlane folder nested in a monorepo", async () => {
     const dir = await projectDir({ "apps/ios/fastlane/Fastfile": "lane :beta do\nend\n" });
     const d = await detectProject(dir);
     expect(d.fastlaneDir).toBe("apps/ios/fastlane");
   });
 
-  it("signale l'absence de fastlane plutôt que de deviner", async () => {
-    const dir = await projectDir({ "README.md": "rien" });
+  it("reports the absence of fastlane rather than guessing", async () => {
+    const dir = await projectDir({ "README.md": "nothing" });
     const d = await detectProject(dir);
     expect(d.fastlaneDir).toBeNull();
   });
 
-  it("choisit bundle quand un Gemfile est présent, system sinon", async () => {
-    const avec = await projectDir({ "fastlane/Fastfile": "", Gemfile: 'gem "fastlane"' });
-    expect((await detectProject(avec)).runtime).toBe("bundle");
+  it("chooses bundle when a Gemfile is present, system otherwise", async () => {
+    const withGemfile = await projectDir({ "fastlane/Fastfile": "", Gemfile: 'gem "fastlane"' });
+    expect((await detectProject(withGemfile)).runtime).toBe("bundle");
 
-    const sans = await projectDir({ "fastlane/Fastfile": "" });
-    expect((await detectProject(sans)).runtime).toBe("system");
+    const without = await projectDir({ "fastlane/Fastfile": "" });
+    expect((await detectProject(without)).runtime).toBe("system");
   });
 
-  it("propose des motifs d'artefacts iOS sur un projet Xcode", async () => {
+  it("proposes iOS artifact patterns on an Xcode project", async () => {
     const dir = await projectDir({ "fastlane/Fastfile": "", "Popotes.xcodeproj/project.pbxproj": "" });
     const d = await detectProject(dir);
     expect(d.artifactGlobs).toContain("**/*.ipa");
     expect(d.artifactGlobs.some((g) => g.includes("dSYM"))).toBe(true);
   });
 
-  it("propose des motifs Android sur un projet Gradle", async () => {
+  it("proposes Android patterns on a Gradle project", async () => {
     const dir = await projectDir({ "fastlane/Fastfile": "", "app/build.gradle": "" });
     const d = await detectProject(dir);
     expect(d.artifactGlobs).toContain("**/*.apk");
     expect(d.artifactGlobs).toContain("**/*.aab");
   });
 
-  it("lit l'URL du distant et la branche courante", async () => {
+  it("reads the remote's URL and the current branch", async () => {
     const origin = await makeOriginRepo({ "fastlane/Fastfile": "" });
     const clone = await tmpDir("laneyard-clone-");
     const { execFile } = await import("node:child_process");
@@ -66,7 +66,7 @@ describe("detectProject", () => {
     expect(d.defaultBranch).toBe("main");
   });
 
-  it("déduit un slug du nom de dossier", async () => {
+  it("derives a slug from the folder name", async () => {
     const dir = await projectDir({ "fastlane/Fastfile": "" });
     const d = await detectProject(dir);
     expect(d.slug).toMatch(/^[a-z0-9][a-z0-9-]*$/);

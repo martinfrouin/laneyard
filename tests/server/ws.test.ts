@@ -9,49 +9,49 @@ interface FakeSocket {
 const socket = (): FakeSocket => ({ sent: [], send(d) { this.sent.push(d); } });
 
 describe("RunSockets", () => {
-  it("diffuse un fragment aux abonnés du run", () => {
+  it("broadcasts a fragment to the run's subscribers", () => {
     const hub = new RunSockets();
     const a = socket();
     hub.subscribe(1, a);
 
-    hub.broadcast(1, "sortie", 10);
+    hub.broadcast(1, "output", 10);
 
-    expect(JSON.parse(a.sent[0]!)).toEqual({ type: "chunk", offset: 10, data: "sortie" });
+    expect(JSON.parse(a.sent[0]!)).toEqual({ type: "chunk", offset: 10, data: "output" });
   });
 
-  it("n'envoie rien aux abonnés d'un autre run", () => {
+  it("sends nothing to another run's subscribers", () => {
     const hub = new RunSockets();
-    const autre = socket();
-    hub.subscribe(2, autre);
+    const other = socket();
+    hub.subscribe(2, other);
 
-    hub.broadcast(1, "sortie", 0);
+    hub.broadcast(1, "output", 0);
 
-    expect(autre.sent).toEqual([]);
+    expect(other.sent).toEqual([]);
   });
 
-  it("cesse d'écrire à un abonné désinscrit", () => {
+  it("stops writing to an unsubscribed subscriber", () => {
     const hub = new RunSockets();
     const s = socket();
     hub.subscribe(1, s);
     hub.unsubscribe(1, s);
 
-    hub.broadcast(1, "sortie", 0);
+    hub.broadcast(1, "output", 0);
 
     expect(s.sent).toEqual([]);
   });
 
-  it("survit à un abonné dont l'envoi échoue", () => {
+  it("survives a subscriber whose send fails", () => {
     const hub = new RunSockets();
-    const cassé = { send() { throw new Error("socket fermée"); } };
-    const sain = socket();
-    hub.subscribe(1, cassé);
-    hub.subscribe(1, sain);
+    const broken = { send() { throw new Error("closed socket"); } };
+    const healthy = socket();
+    hub.subscribe(1, broken);
+    hub.subscribe(1, healthy);
 
-    expect(() => hub.broadcast(1, "sortie", 0)).not.toThrow();
-    expect(sain.sent).toHaveLength(1);
+    expect(() => hub.broadcast(1, "output", 0)).not.toThrow();
+    expect(healthy.sent).toHaveLength(1);
   });
 
-  it("annonce la fin d'un run", () => {
+  it("announces the end of a run", () => {
     const hub = new RunSockets();
     const s = socket();
     hub.subscribe(1, s);

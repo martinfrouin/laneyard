@@ -7,19 +7,19 @@ export interface ReportStep {
   status: "success" | "failed";
 }
 
-// La branche auto-fermante vient en premier : fastlane écrit les actions réussies
-// sous la forme `<testcase … />` et seules les échouées ont un corps. Dans l'autre
-// ordre, `[^>]*` avalerait le `/` final et le corps paresseux courrait jusqu'au
-// `</testcase>` suivant, fusionnant deux actions et attribuant l'échec à la mauvaise.
+// The self-closing branch comes first: fastlane writes successful actions
+// as `<testcase … />` and only failed ones have a body. In the other order,
+// `[^>]*` would swallow the final `/` and the lazy body would run up to the
+// next `</testcase>`, merging two actions and blaming the failure on the wrong one.
 const TESTCASE = /<testcase\b([^>]*?)\/>|<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g;
-// `\b` obligatoire : sans lui, chercher `name=` trouve d'abord la fin de
-// `classname=`, que fastlane écrit systématiquement en premier attribut.
+// `\b` is mandatory: without it, searching for `name=` first finds the end
+// of `classname=`, which fastlane systematically writes as the first attribute.
 /**
- * Décode les entités XML d'une valeur d'attribut.
+ * Decodes the XML entities of an attribute value.
  *
- * Indispensable : un nom d'action `sh` contient la commande entière, donc
- * volontiers un `&&` ou une redirection, que le rapport écrit `&amp;&amp;`
- * et `&gt;`. Sans décodage, l'interface affiche l'échappement.
+ * Essential: a `sh` action's name contains the entire command, so it
+ * readily includes a `&&` or a redirection, which the report writes as
+ * `&amp;&amp;` and `&gt;`. Without decoding, the interface would display the escaping.
  */
 const ENTITIES: Record<string, string> = {
   amp: "&",
@@ -31,8 +31,8 @@ const ENTITIES: Record<string, string> = {
 
 const decodeXml = (value: string): string =>
   value.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (whole, code: string) => {
-    // Un point de code hors plage ferait lever String.fromCodePoint : on rend
-    // l'entité telle quelle plutôt que d'écrouler la lecture du rapport.
+    // An out-of-range code point would make String.fromCodePoint throw: we
+    // return the entity as-is rather than crash the report reading.
     const point =
       code.startsWith("#x") || code.startsWith("#X")
         ? parseInt(code.slice(2), 16)
@@ -54,11 +54,12 @@ const ATTR = (source: string, name: string): string | null => {
 };
 
 /**
- * Lit le rapport JUnit que fastlane écrit à chaque exécution.
- * C'est la source qui fait autorité pour les noms, l'ordre, les durées et les échecs.
+ * Reads the JUnit report that fastlane writes on every run.
+ * It's the authoritative source for names, order, durations, and failures.
  *
- * Renvoie null si le rapport est absent ou illisible — cas normal pour un run annulé,
- * expiré, interrompu, ou qui a échoué avant même d'atteindre fastlane.
+ * Returns null if the report is missing or unreadable — the normal case for
+ * a cancelled, timed-out, or interrupted run, or one that failed before even
+ * reaching fastlane.
  */
 export async function readReport(path: string): Promise<ReportStep[] | null> {
   let xml: string;
@@ -76,7 +77,7 @@ export async function readReport(path: string): Promise<ReportStep[] | null> {
     const rawName = ATTR(attrs, "name");
     if (rawName === null) continue;
 
-    // fastlane nomme ses cas « <index>: <action> ».
+    // fastlane names its cases "<index>: <action>".
     const named = /^(\d+):\s*(.+)$/.exec(rawName);
     const time = ATTR(attrs, "time");
 
@@ -90,10 +91,10 @@ export async function readReport(path: string): Promise<ReportStep[] | null> {
 
   if (steps.length === 0) return null;
 
-  // L'index vient du nom, pas de la position : rien ne garantit son unicité.
-  // Un rapport à plusieurs testsuites, ou mêlant cas numérotés et non numérotés,
-  // produit des doublons — et `run_step` a une clé primaire (run_id, idx).
-  // On renumérote donc après tri, en gardant l'ordre annoncé.
+  // The index comes from the name, not the position: nothing guarantees its
+  // uniqueness. A report with several testsuites, or mixing numbered and
+  // unnumbered cases, produces duplicates — and `run_step` has a primary key
+  // (run_id, idx). So we renumber after sorting, keeping the announced order.
   return steps
     .sort((a, b) => a.idx - b.idx)
     .map((step, position) => ({ ...step, idx: position }));

@@ -2,21 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 
 /**
- * Suit la sortie d'un run.
+ * Follows a run's output.
  *
- * Le décalage en octets est la clé de la reprise : à la connexion comme après une
- * coupure, on redemande le log depuis le dernier décalage connu, puis on repart
- * du flux. Rien n'est perdu, rien n'est dupliqué.
+ * The byte offset is the key to resuming: on connection as after a drop,
+ * we request the log again from the last known offset, then pick back up
+ * from the stream. Nothing is lost, nothing is duplicated.
  */
 export function useRunStream(runId: number): { log: string; finished: string | null } {
   const [log, setLog] = useState("");
   const [finished, setFinished] = useState<string | null>(null);
   const offset = useRef(0);
   /**
-   * `finished` est aussi tenu dans une référence : `onclose` est installé une
-   * seule fois et capturerait sinon la valeur initiale, toujours nulle. La
-   * fermeture normale de fin de run relancerait alors une reconnexion, puis une
-   * autre, indéfiniment.
+   * `finished` is also kept in a ref: `onclose` is installed only once and
+   * would otherwise capture the initial value, always null. The normal
+   * close at the end of a run would then trigger a reconnection, then
+   * another, forever.
    */
   const finishedRef = useRef<string | null>(null);
 
@@ -25,22 +25,22 @@ export function useRunStream(runId: number): { log: string; finished: string | n
     let socket: WebSocket | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined;
 
-    // Changer de run repart de zéro : le décalage du précédent ne veut plus rien dire.
+    // Switching runs starts fresh: the previous run's offset no longer means anything.
     offset.current = 0;
     finishedRef.current = null;
     setLog("");
     setFinished(null);
 
     /**
-     * Recharge le log depuis le dernier décalage connu, jusqu'à couvrir au
-     * moins `upTo`. Le serveur écrit avant de diffuser : ce que le socket
-     * annonce est donc déjà lisible par l'API.
+     * Reloads the log from the last known offset, until it covers at least
+     * `upTo`. The server writes before broadcasting: what the socket
+     * announces is therefore already readable through the API.
      */
     const fillGap = async (upTo: number) => {
       const missing = await api.log(runId, offset.current);
       if (closed || !missing) return;
       const gained = new TextEncoder().encode(missing).byteLength;
-      if (offset.current + gained < upTo) return; // rattrapage incomplet, le prochain fragment relancera
+      if (offset.current + gained < upTo) return; // incomplete catch-up, the next fragment will retry
       offset.current += gained;
       setLog((prev) => prev + missing);
     };
@@ -63,14 +63,14 @@ export function useRunStream(runId: number): { log: string; finished: string | n
           | { type: "finished"; status: string };
 
         if (msg.type === "chunk") {
-          // Un fragment déjà couvert par le rattrapage est ignoré.
+          // A fragment already covered by the catch-up is ignored.
           if (msg.offset < offset.current) return;
 
-          // Un fragment qui commence plus loin que là où nous en sommes signale
-          // un trou : la sortie émise entre la réponse HTTP de rattrapage et
-          // l'ouverture du socket n'a atteint personne. L'ajouter tel quel
-          // laisserait un log discontinu, et décalerait tous les sauts vers une
-          // étape. On rattrape la partie manquante avant de continuer.
+          // A fragment that starts further ahead than where we are signals a
+          // gap: output emitted between the catch-up HTTP response and the
+          // socket opening reached no one. Appending it as-is would leave a
+          // discontinuous log, and would throw off every jump to a step. We
+          // catch up on the missing part before continuing.
           if (msg.offset > offset.current) {
             void fillGap(msg.offset);
             return;

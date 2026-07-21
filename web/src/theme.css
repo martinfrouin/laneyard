@@ -15,8 +15,8 @@
   --error: #f8746a;
   --info: #79c0ff;
 
-  /* La zone terminal ne suit pas le thème : les couleurs ANSI de fastlane
-     sont pensées pour un fond noir, les retraduire trahirait la sortie. */
+  /* The terminal area doesn't follow the theme: fastlane's ANSI colors
+     are designed for a black background, re-translating them would betray the output. */
   --term-bg: #0e1013;
   --term-text: #c9d1d9;
 }
@@ -43,15 +43,15 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  /* Chasse fixe sur toute l'interface : c'est le choix le plus structurant
-     de la direction visuelle, il ne souffre pas d'exception. */
+  /* Fixed-width type across the whole interface: it's the most structural
+     choice in the visual direction, it tolerates no exception. */
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
 }
 
-/* Angles droits, filets d'un pixel, aucune ombre ni dégradé :
-   les surfaces se distinguent par la valeur, pas par la profondeur. */
+/* Right angles, one-pixel rules, no shadow or gradient:
+   surfaces are told apart by value, not by depth. */
 .panel { background: var(--bg-raised); border: 1px solid var(--border); }
 
 .status-success { color: var(--ok); }
@@ -62,8 +62,8 @@ body {
 .status-preparing { color: var(--text-dim); }
 
 /* ---------------------------------------------------------------------- */
-/* Vocabulaire commun : tout le reste de l'interface est bâti avec ces
-   quelques classes, il n'existe aucune couleur hors des jetons ci-dessus. */
+/* Shared vocabulary: the rest of the interface is built with these few
+   classes, there is no color outside the tokens above. */
 
 .dim { color: var(--text-dim); }
 .bright { color: var(--text-bright); }
@@ -75,7 +75,7 @@ a:hover { color: var(--text-bright); }
 
 h1, h2, h3 { font-size: 13px; font-weight: normal; margin: 0; }
 
-/* Titres de section : petites capitales espacées, jamais de gras. */
+/* Section titles: small spaced-out capitals, never bold. */
 .section {
   color: var(--text-dim);
   text-transform: uppercase;
@@ -106,7 +106,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 
 code { color: var(--text-bright); }
 
-/* --- Coquille --------------------------------------------------------- */
+/* --- Shell -------------------------------------------------------------- */
 
 .shell {
   display: grid;
@@ -154,7 +154,7 @@ code { color: var(--text-bright); }
 .nav-item:hover { background: var(--bg-inset); }
 .nav-item.current { border-left-color: var(--accent); background: var(--bg-inset); color: var(--text-bright); }
 
-/* --- Écran de connexion ----------------------------------------------- */
+/* --- Login screen -------------------------------------------------------- */
 
 .login {
   height: 100vh;
@@ -173,7 +173,7 @@ code { color: var(--text-bright); }
 
 .login input { width: 100%; padding: 4px 8px; }
 
-/* --- Listes ------------------------------------------------------------ */
+/* --- Lists --------------------------------------------------------------- */
 
 .rows > li {
   display: flex;
@@ -192,7 +192,7 @@ code { color: var(--text-bright); }
 table { border-collapse: collapse; width: 100%; }
 td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
 
-/* --- Écran de run ------------------------------------------------------ */
+/* --- Run screen ----------------------------------------------------------- */
 
 .run-head {
   display: flex;
@@ -213,8 +213,8 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
 .steps > li { display: flex; gap: 8px; padding: 2px 8px; }
 .steps > li.clickable { cursor: pointer; }
 .steps > li.clickable:hover { background: var(--bg-inset); color: var(--text-bright); }
-/* Une étape sans décalage ne peut pas mener au bon endroit du log : elle se
-   montre inerte plutôt que de faire semblant. */
+/* A step with no offset can't lead to the right place in the log: it shows
+   itself as inert rather than pretending otherwise. */
 .steps > li.inert { color: var(--text-dim); }
 
 .pane-title {
@@ -225,9 +225,9 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
   gap: 12px;
 }
 
-/* --- Terminal ---------------------------------------------------------- */
+/* --- Terminal -------------------------------------------------------------- */
 
-/* Sombre dans les deux thèmes, par respect des couleurs ANSI de fastlane. */
+/* Dark in both themes, out of respect for fastlane's ANSI colors. */
 .terminal {
   background: var(--term-bg);
   color: var(--term-text);
@@ -237,8 +237,8 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
   min-height: 260px;
 }
 
-/* Pas de repli de ligne : une ligne du log vaut exactement une ligne à l'écran,
-   ce dont dépend le saut à un décalage donné. */
+/* No line wrapping: one line of the log is exactly one line on screen,
+   which is what jumping to a given offset depends on. */
 .terminal pre {
   margin: 0;
   flex: 1;
@@ -248,9 +248,8 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
   font: inherit;
 }
 
-/* Palette ANSI. Ce ne sont pas des couleurs de l'interface mais celles que
-   fastlane a choisies : elles ne vivent que dans le terminal, et c'est la raison
-   pour laquelle ce panneau reste sombre dans les deux thèmes. */
+/* ANSI palette. These aren't interface colors but the ones fastlane chose:
+   they only live in the terminal, which is why this panel stays dark in both themes. */
 .terminal .a-black { color: #6e7681; }
 .terminal .a-red { color: #ff7b72; }
 .terminal .a-green { color: #7ee787; }
@@ -290,10 +289,10 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
 .terminal-input .prompt { color: var(--accent); }
 .terminal-input .reason { color: #676e7b; }
 
-/* --- Fenêtre étroite ---------------------------------------------------- */
+/* --- Narrow window --------------------------------------------------------- */
 
-/* La grammaire des lignes ne change pas, seules les colonnes s'empilent :
-   la barre latérale devient un bandeau, les panneaux passent l'un sous l'autre. */
+/* The line grammar doesn't change, only the columns stack: the sidebar
+   becomes a strip, the panels move one below the other. */
 @media (max-width: 820px) {
   .shell {
     grid-template-columns: 1fr;

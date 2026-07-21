@@ -8,13 +8,13 @@ async function workspaceWith(files: string[]): Promise<string> {
   const dir = await tmpDir("laneyard-art-");
   for (const f of files) {
     await mkdir(join(dir, f, ".."), { recursive: true });
-    await writeFile(join(dir, f), "contenu", "utf8");
+    await writeFile(join(dir, f), "content", "utf8");
   }
   return dir;
 }
 
 describe("guessKind", () => {
-  it("reconnaît les types courants", () => {
+  it("recognizes the common types", () => {
     expect(guessKind("Popotes.ipa")).toBe("ipa");
     expect(guessKind("app-release.aab")).toBe("aab");
     expect(guessKind("app.apk")).toBe("apk");
@@ -24,7 +24,7 @@ describe("guessKind", () => {
 });
 
 describe("collectArtifacts", () => {
-  it("déplace hors du workspace les fichiers correspondant aux motifs", async () => {
+  it("moves files matching the patterns out of the workspace", async () => {
     const ws = await workspaceWith(["build/Popotes.ipa", "build/notes.txt"]);
     const dest = await tmpDir("laneyard-dest-");
 
@@ -37,12 +37,12 @@ describe("collectArtifacts", () => {
     expect(await readdir(dest)).toEqual(["Popotes.ipa"]);
   });
 
-  it("ne renvoie rien quand aucun motif n'est configuré", async () => {
+  it("returns nothing when no pattern is configured", async () => {
     const ws = await workspaceWith(["build/Popotes.ipa"]);
     expect(await collectArtifacts(ws, [], await tmpDir())).toEqual([]);
   });
 
-  it("désambiguïse deux fichiers de même nom", async () => {
+  it("disambiguates two files with the same name", async () => {
     const ws = await workspaceWith(["a/app.apk", "b/app.apk"]);
     const dest = await tmpDir("laneyard-dest-");
 
@@ -52,8 +52,8 @@ describe("collectArtifacts", () => {
     expect(new Set(found.map((f) => f.filename)).size).toBe(2);
   });
 
-  it("ignore un motif qui ne correspond à rien sans échouer", async () => {
+  it("ignores a pattern that matches nothing without failing", async () => {
     const ws = await workspaceWith(["build/Popotes.ipa"]);
-    expect(await collectArtifacts(ws, ["nexiste/**/*.zip"], await tmpDir())).toEqual([]);
+    expect(await collectArtifacts(ws, ["does-not-exist/**/*.zip"], await tmpDir())).toEqual([]);
   });
 });

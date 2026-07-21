@@ -17,9 +17,9 @@ async function projectWithFastfile(content: string): Promise<string> {
 }
 
 async function introspect(dir: string, cmd: string): Promise<unknown> {
-  // Le sidecar tourne ici sans bundle : il lui faut l'environnement résolu.
+  // The sidecar runs here without bundle: it needs the resolved environment.
   const ruby = await resolveRubyEnv();
-  if (!ruby) throw new Error("fastlane introuvable pour le Ruby courant");
+  if (!ruby) throw new Error("fastlane not found for the current Ruby");
 
   const { stdout } = await exec("ruby", [SCRIPT, cmd, "--fastlane-dir", "fastlane"], {
     cwd: dir,
@@ -30,7 +30,7 @@ async function introspect(dir: string, cmd: string): Promise<unknown> {
 }
 
 describe("introspect.rb lanes", () => {
-  it("liste les lanes avec plateforme et description", async () => {
+  it("lists lanes with platform and description", async () => {
     const dir = await projectWithFastfile(`
       platform :ios do
         desc "Push a new beta build to TestFlight"
@@ -60,8 +60,8 @@ describe("introspect.rb lanes", () => {
     expect(res.lanes.find((l) => l.name === "helper")?.private).toBe(true);
   }, 180_000);
 
-  it("renvoie une erreur structurée sur un Fastfile invalide", async () => {
-    const dir = await projectWithFastfile("lane :beta do\n  # jamais fermé\n");
+  it("returns a structured error on an invalid Fastfile", async () => {
+    const dir = await projectWithFastfile("lane :beta do\n  # never closed\n");
     const res = (await introspect(dir, "lanes")) as { ok: boolean; error: string };
     expect(res.ok).toBe(false);
     expect(res.error.length).toBeGreaterThan(0);

@@ -21,9 +21,9 @@ const SETTINGS = {
 async function harness(scenario: "success" | "failure") {
   const origin = await makeOriginRepo({
     "fastlane/Fastfile": "lane :beta do\nend\n",
-    // build/ est ignoré : l'artefact est produit par le faux fastlane pendant le
-    // run, comme en vrai. Rien de suivi par git n'est déplacé, le workspace
-    // reste donc propre pour le run suivant.
+    // build/ is ignored: the artifact is produced by the fake fastlane during
+    // the run, just like the real one. Nothing tracked by git is moved, so
+    // the workspace stays clean for the next run.
     ".gitignore": "build/\n",
   });
   const root = await tmpDir("laneyard-root-");
@@ -50,7 +50,7 @@ async function harness(scenario: "success" | "failure") {
 }
 
 describe("executeRun", () => {
-  it("mène un run au succès de bout en bout", async () => {
+  it("carries a run through to success end to end", async () => {
     const { runId, runs, logs } = await harness("success");
     const run = runs.get(runId)!;
 
@@ -61,7 +61,7 @@ describe("executeRun", () => {
     expect(await logs.read(runId)).toContain("Step: build_app");
   }, 60_000);
 
-  it("enregistre les étapes du rapport avec le décalage du repérage en direct", async () => {
+  it("records the report's steps with the live-spotting offset", async () => {
     const { runId, runs } = await harness("success");
     const steps = runs.steps(runId);
 
@@ -71,7 +71,7 @@ describe("executeRun", () => {
     expect(steps[1]!.logOffset).toBeGreaterThan(0);
   }, 60_000);
 
-  it("collecte les artefacts correspondant aux motifs", async () => {
+  it("collects the artifacts matching the patterns", async () => {
     const { runId, runs } = await harness("success");
     const arts = runs.artifacts(runId);
 
@@ -80,7 +80,7 @@ describe("executeRun", () => {
     expect(arts[0]!.kind).toBe("ipa");
   }, 60_000);
 
-  it("marque l'échec et retient un résumé d'erreur", async () => {
+  it("marks the failure and keeps an error summary", async () => {
     const { runId, runs } = await harness("failure");
     const run = runs.get(runId)!;
 
@@ -89,7 +89,7 @@ describe("executeRun", () => {
     expect(runs.steps(runId).find((s) => s.name === "build_app")?.status).toBe("failed");
   }, 60_000);
 
-  it("échoue proprement si la résolution des réglages lève", async () => {
+  it("fails cleanly if resolving settings throws", async () => {
     const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n" });
     const root = await tmpDir("laneyard-root-");
     const runs = new RunStore(openDatabase(":memory:"));
@@ -104,9 +104,9 @@ describe("executeRun", () => {
       artifactsDir: join(root, "art"),
       gitUrl: origin,
       branch: "main",
-      // Cas réel : le projet a disparu de config.yml pendant la préparation.
+      // Real case: the project disappeared from config.yml during preparation.
       resolveSettings: async () => {
-        throw new Error("projet inconnu");
+        throw new Error("unknown project");
       },
       env: {},
       onChunk: () => {},
@@ -114,10 +114,10 @@ describe("executeRun", () => {
 
     const run = runs.get(runId)!;
     expect(run.status).toBe("failed");
-    expect(run.errorSummary).toMatch(/projet inconnu/);
+    expect(run.errorSummary).toMatch(/unknown project/);
   }, 60_000);
 
-  it("échoue avant le lancement si le dépôt est inaccessible", async () => {
+  it("fails before launch if the repository is unreachable", async () => {
     const root = await tmpDir("laneyard-root-");
     const runs = new RunStore(openDatabase(":memory:"));
     const logs = new LogStore(join(root, "logs"));
@@ -138,8 +138,8 @@ describe("executeRun", () => {
 
     const run = runs.get(runId)!;
     expect(run.status).toBe("failed");
-    expect(run.errorSummary).toMatch(/git|dépôt|clone/i);
-    // Un run qui n'a jamais atteint fastlane n'a aucune étape.
+    expect(run.errorSummary).toMatch(/git|repository|clone/i);
+    // A run that never reached fastlane has no steps.
     expect(runs.steps(runId)).toEqual([]);
   }, 60_000);
 });

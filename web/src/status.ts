@@ -1,6 +1,6 @@
 /**
- * L'état se lit comme un caractère, jamais comme une icône : c'est la même
- * grammaire que le terminal d'où sort le run.
+ * The status reads like a character, never like an icon: it's the same
+ * grammar as the terminal the run's output comes from.
  */
 export const MARK: Record<string, string> = {
   success: "✓",
@@ -14,6 +14,6 @@ export const MARK: Record<string, string> = {
 
 export const mark = (status: string | null | undefined): string => MARK[status ?? "queued"] ?? "○";
 
-/** Un run non terminé continue de bouger : l'interface doit le suivre. */
+/** A run that hasn't finished keeps moving: the interface must follow it. */
 export const isActive = (status: string): boolean =>
   status === "queued" || status === "preparing" || status === "running";

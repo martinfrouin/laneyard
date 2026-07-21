@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Faux fastlane pour les tests : rejoue une sortie enregistrée sans rien construire.
+# Fake fastlane for the tests: replays a recorded output without building anything.
 #
 #   FAKE_FASTLANE_SCENARIO=success|failure|slow
-#   FAKE_FASTLANE_REPORT_DIR=<dossier où écrire report.xml, défaut $PWD/fastlane>
+#   FAKE_FASTLANE_REPORT_DIR=<folder to write report.xml to, default $PWD/fastlane>
 #
-# Il imite le comportement réel : séparateurs d'étape, rapport JUnit écrit
-# relativement au dossier courant, et production d'un artefact. Aucune dépendance
-# à Xcode, la suite de tests est donc exécutable partout.
+# It mimics the real behaviour: step separators, a JUnit report written
+# relative to the current folder, and the production of an artifact. No
+# dependency on Xcode, so the test suite can run anywhere.
 set -euo pipefail
 
 scenario="${FAKE_FASTLANE_SCENARIO:-success}"
-# Comme le vrai fastlane, le rapport est écrit dans le dossier fastlane du projet.
+# Like real fastlane, the report is written into the project's fastlane folder.
 report_dir="${FAKE_FASTLANE_REPORT_DIR:-$PWD/fastlane}"
 
 echo "[09:41:01]: Driving the lane '$*'"
@@ -23,10 +23,10 @@ if [ "$scenario" = "slow" ]; then
   sleep 30
 fi
 
-# Un build produit son artefact. Le dossier build/ est ignoré par git dans les
-# fixtures, ce qui évite qu'un artefact déplacé salisse le workspace.
+# A build produces its artifact. The build/ folder is gitignored in the
+# fixtures, which keeps a moved artifact from dirtying the workspace.
 mkdir -p "$PWD/build"
-echo "faux binaire" > "$PWD/build/Popotes.ipa"
+echo "fake binary" > "$PWD/build/Popotes.ipa"
 
 write_report() {
   mkdir -p "$report_dir"

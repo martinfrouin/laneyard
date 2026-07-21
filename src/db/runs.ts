@@ -9,7 +9,7 @@ export type RunStatus =
   | "cancelled"
   | "interrupted";
 
-/** Un run est actif tant qu'il n'a pas atteint un état terminal. */
+/** A run is active until it reaches a terminal state. */
 const ACTIVE: RunStatus[] = ["queued", "preparing", "running"];
 
 export interface Run {
@@ -139,7 +139,7 @@ export class RunStore {
       .run(r.status, now(), r.exitCode, r.errorSummary, id);
   }
 
-  /** Au démarrage : aucun run ne peut être en cours, le processus qui le portait est mort. */
+  /** At startup: no run can still be in progress, the process that carried it is dead. */
   interruptActive(): number {
     const placeholders = ACTIVE.map(() => "?").join(", ");
     const res = this.db

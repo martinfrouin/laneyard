@@ -3,16 +3,16 @@ import websocket from "@fastify/websocket";
 import type { AppContext } from "./app.js";
 import { SESSION_COOKIE } from "./auth.js";
 
-/** Tout ce dont le concentrateur a besoin d'un client : pouvoir recevoir du texte. */
+/** All the hub needs from a client: the ability to receive text. */
 export interface Sink {
   send(data: string): void;
 }
 
 /**
- * Diffuse les fragments de sortie aux navigateurs qui regardent un run.
+ * Broadcasts output fragments to browsers watching a run.
  *
- * Chaque message porte son décalage en octets : un client qui se reconnecte
- * demande le log depuis son dernier décalage connu et ne perd rien.
+ * Every message carries its byte offset: a client that reconnects requests
+ * the log from its last known offset and loses nothing.
  */
 export class RunSockets {
   private readonly byRun = new Map<number, Set<Sink>>();
@@ -38,7 +38,7 @@ export class RunSockets {
       try {
         sink.send(data);
       } catch {
-        // Un client mort ne doit jamais interrompre la diffusion aux autres.
+        // A dead client must never interrupt the broadcast to the others.
         set.delete(sink);
       }
     }
@@ -58,12 +58,13 @@ export async function registerWebSocket(app: FastifyInstance, ctx: AppContext): 
   await app.register(websocket);
 
   app.get("/api/runs/:id/stream", { websocket: true }, (socket, req) => {
-    // Redondance assumée : le hook global d'`app.ts` refuse déjà tout `/api`
-    // sans session, et le fait dès la poignée de main — un client non authentifié
-    // reçoit un 401 HTTP et n'arrive jamais ici. Ce garde ne coûte rien et évite
-    // qu'une exemption future de ce hook ouvre silencieusement le flux.
+    // Deliberate redundancy: `app.ts`'s global hook already refuses every
+    // `/api` route without a session, and does so right at the handshake —
+    // an unauthenticated client gets a 401 HTTP response and never reaches
+    // here. This guard costs nothing and prevents a future exemption of
+    // that hook from silently opening the stream.
     if (!ctx.sessions.valid(req.cookies[SESSION_COOKIE])) {
-      socket.close(4001, "Session requise");
+      socket.close(4001, "Session required");
       return;
     }
 

@@ -6,7 +6,7 @@ import { resolveRubyEnv } from "../../src/sidecar/ruby-env.js";
 const exec = promisify(execFile);
 
 describe("resolveRubyEnv", () => {
-  it("rend un environnement où Ruby sait charger fastlane", async () => {
+  it("returns an environment where Ruby can load fastlane", async () => {
     const resolved = await resolveRubyEnv();
     expect(resolved).not.toBeNull();
 
@@ -17,12 +17,12 @@ describe("resolveRubyEnv", () => {
     expect(stdout).toBe("ok");
   }, 240_000);
 
-  it("indique d'où vient l'environnement retenu", async () => {
+  it("indicates where the chosen environment comes from", async () => {
     const resolved = await resolveRubyEnv();
     expect(["process", "launcher"]).toContain(resolved!.source);
   }, 240_000);
 
-  it("mémorise le résultat plutôt que de resonder à chaque appel", async () => {
+  it("memoizes the result rather than probing again on every call", async () => {
     const a = await resolveRubyEnv();
     const b = await resolveRubyEnv();
     expect(b).toBe(a);

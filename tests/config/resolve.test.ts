@@ -14,26 +14,26 @@ const entry = (over: Partial<ProjectEntry> = {}): ProjectEntry => ({
 });
 
 describe("resolveProjectSettings", () => {
-  it("retombe sur les défauts quand rien n'est défini", () => {
+  it("falls back to the defaults when nothing is set", () => {
     const r = resolveProjectSettings(entry(), null);
     expect(r.settings.fastlane_dir).toBe("fastlane");
     expect(r.settings.timeout_minutes).toBe(60);
     expect(r.provenance.fastlane_dir).toBe("default");
   });
 
-  it("le bloc du projet l'emporte sur les défauts", () => {
+  it("the project's block wins over the defaults", () => {
     const r = resolveProjectSettings(entry({ timeout_minutes: 15 }), null);
     expect(r.settings.timeout_minutes).toBe(15);
     expect(r.provenance.timeout_minutes).toBe("server");
   });
 
-  it("le dépôt l'emporte sur le bloc du projet", () => {
+  it("the repository wins over the project's block", () => {
     const r = resolveProjectSettings(entry({ timeout_minutes: 15 }), { timeout_minutes: 90 });
     expect(r.settings.timeout_minutes).toBe(90);
     expect(r.provenance.timeout_minutes).toBe("repo");
   });
 
-  it("mélange les provenances champ par champ", () => {
+  it("mixes provenances field by field", () => {
     const r = resolveProjectSettings(entry({ runtime: "system" }), {
       artifact_globs: ["build/*.ipa"],
     });
@@ -44,7 +44,7 @@ describe("resolveProjectSettings", () => {
     expect(r.provenance.fastlane_dir).toBe("default");
   });
 
-  it("traite un tableau vide comme une valeur définie, pas comme une absence", () => {
+  it("treats an empty array as a defined value, not as an absence", () => {
     const r = resolveProjectSettings(entry(), { artifact_globs: [] });
     expect(r.provenance.artifact_globs).toBe("repo");
   });

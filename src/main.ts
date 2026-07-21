@@ -20,15 +20,15 @@ export interface Started {
   config: ConfigStore;
 }
 
-/** Assemble le serveur à partir d'un dossier de données. */
+/** Assembles the server from a data folder. */
 export async function createServerFromConfig(root: string): Promise<Started> {
   const config = new ConfigStore(join(root, "config.yml"));
   const loaded = await config.load();
-  if (!loaded.ok) throw new Error(`Configuration illisible : ${loaded.error}`);
+  if (!loaded.ok) throw new Error(`Unreadable configuration: ${loaded.error}`);
 
   const db = openDatabase(join(root, "laneyard.db"));
 
-  // Aucun run ne peut survivre à l'arrêt du processus qui le portait.
+  // No run can survive the shutdown of the process that carried it.
   new RunStore(db).interruptActive();
 
   const cache = new CacheStore(db);
@@ -46,18 +46,18 @@ export async function createServerFromConfig(root: string): Promise<Started> {
   return { app, db, config };
 }
 
-/** Démarrage réel, hors tests. */
+/** Real startup, outside tests. */
 async function main(): Promise<void> {
   const root = process.env["LANEYARD_HOME"] ?? join(homedir(), ".laneyard");
   const { app, config } = await createServerFromConfig(root);
 
   config.watch((ok) => {
-    if (!ok) console.error(`Configuration invalide, l'ancienne reste active : ${config.lastError()}`);
+    if (!ok) console.error(`Invalid configuration, the previous one stays active: ${config.lastError()}`);
   });
 
   const server = config.server()!;
   await app.listen({ port: server.port, host: server.bind });
-  console.log(`Laneyard écoute sur http://localhost:${server.port}`);
+  console.log(`Laneyard is listening on http://localhost:${server.port}`);
 }
 
 if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.js")) {
@@ -70,9 +70,9 @@ if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.js")
     try {
       process.exit(await runAddCommand(process.cwd(), join(home, "config.yml"), slug));
     } catch (cause) {
-      // Un slug déjà pris, un fichier illisible : ce sont des situations
-      // ordinaires côté utilisateur. Une trace de pile n'est pas un message
-      // d'erreur, elle donne juste l'impression que l'outil a cassé.
+      // A slug already taken, an unreadable file: these are ordinary
+      // situations from the user's side. A stack trace isn't an error
+      // message, it just gives the impression that the tool is broken.
       process.stderr.write(`${(cause as Error).message}\n`);
       process.exit(1);
     }

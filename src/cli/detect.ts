@@ -10,7 +10,7 @@ export interface Detection {
   slug: string;
   gitUrl: string | null;
   defaultBranch: string;
-  /** Chemin relatif du dossier contenant le Fastfile, ou null si introuvable. */
+  /** Relative path of the folder containing the Fastfile, or null if not found. */
   fastlaneDir: string | null;
   runtime: "bundle" | "system";
   artifactGlobs: string[];
@@ -35,23 +35,23 @@ const gitOr = async (args: string[], cwd: string, fallback: string | null): Prom
   }
 };
 
-/** Un nom de dossier n'est pas un slug : on le normalise sans jamais échouer. */
+/** A folder name isn't a slug: normalize it, but never fail. */
 function slugify(name: string): string {
   const s = name
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return s === "" ? "projet" : s;
+  return s === "" ? "project" : s;
 }
 
 /**
- * Inspecte un projet existant et propose une configuration.
+ * Inspects an existing project and proposes a configuration.
  *
- * Ne décide rien d'irréversible : tout ce qu'elle renvoie est une proposition que
- * l'utilisateur voit et peut corriger avant écriture.
+ * Decides nothing irreversible: everything it returns is a proposal the
+ * user sees and can correct before it's written.
  */
 export async function detectProject(dir: string): Promise<Detection> {
-  // Le Fastfile peut être à la racine ou sous un sous-dossier, cas des monorepos.
+  // The Fastfile can be at the root or under a subfolder, for monorepos.
   const fastfiles = await glob(["fastlane/Fastfile", "*/fastlane/Fastfile", "*/*/fastlane/Fastfile"], {
     cwd: dir,
     absolute: true,

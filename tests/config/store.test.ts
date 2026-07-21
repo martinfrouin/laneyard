@@ -19,32 +19,32 @@ async function configFile(content: string): Promise<string> {
 }
 
 describe("ConfigStore", () => {
-  it("charge la configuration au démarrage", async () => {
+  it("loads the configuration at startup", async () => {
     const store = new ConfigStore(await configFile(CONFIG("popotes")));
     await store.load();
     expect(store.projects().map((p) => p.slug)).toEqual(["popotes"]);
   });
 
-  it("retrouve un projet par son slug", async () => {
+  it("finds a project by its slug", async () => {
     const store = new ConfigStore(await configFile(CONFIG("popotes")));
     await store.load();
     expect(store.project("popotes")?.git_url).toBe("u");
-    expect(store.project("inconnu")).toBeNull();
+    expect(store.project("unknown")).toBeNull();
   });
 
-  it("prend en compte une modification du fichier", async () => {
-    const path = await configFile(CONFIG("un"));
+  it("takes a file change into account", async () => {
+    const path = await configFile(CONFIG("one"));
     const store = new ConfigStore(path);
     await store.load();
 
-    await writeFile(path, CONFIG("deux"), "utf8");
+    await writeFile(path, CONFIG("two"), "utf8");
     await store.load();
 
-    expect(store.projects().map((p) => p.slug)).toEqual(["deux"]);
+    expect(store.projects().map((p) => p.slug)).toEqual(["two"]);
   });
 
-  it("conserve la dernière configuration valide si le fichier devient invalide", async () => {
-    const path = await configFile(CONFIG("un"));
+  it("keeps the last valid configuration if the file becomes invalid", async () => {
+    const path = await configFile(CONFIG("one"));
     const store = new ConfigStore(path);
     await store.load();
 
@@ -52,18 +52,18 @@ describe("ConfigStore", () => {
     const res = await store.load();
 
     expect(res.ok).toBe(false);
-    expect(store.projects().map((p) => p.slug)).toEqual(["un"]);
+    expect(store.projects().map((p) => p.slug)).toEqual(["one"]);
     expect(store.lastError()).not.toBeNull();
   });
 
-  it("efface l'erreur quand le fichier redevient valide", async () => {
-    const path = await configFile(CONFIG("un"));
+  it("clears the error once the file becomes valid again", async () => {
+    const path = await configFile(CONFIG("one"));
     const store = new ConfigStore(path);
     await store.load();
     await writeFile(path, "projects: [", "utf8");
     await store.load();
 
-    await writeFile(path, CONFIG("un"), "utf8");
+    await writeFile(path, CONFIG("one"), "utf8");
     await store.load();
 
     expect(store.lastError()).toBeNull();

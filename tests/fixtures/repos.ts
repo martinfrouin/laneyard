@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 
-/** Crée un dépôt git local servant de « distant » dans les tests. */
+/** Creates a local git repository serving as a "remote" in the tests. */
 export async function makeOriginRepo(files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "laneyard-origin-"));
   await run("git", ["init", "-q", "-b", "main"], { cwd: dir });

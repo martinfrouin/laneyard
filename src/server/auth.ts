@@ -1,9 +1,9 @@
 import { randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
 
 /**
- * scrypt de la bibliothèque standard : aucune dépendance native supplémentaire,
- * et une résistance au calcul suffisante pour un mot de passe unique local.
- * Format : scrypt$<sel hex>$<clé hex>.
+ * scrypt from the standard library: no extra native dependency, and enough
+ * computational resistance for a single local password.
+ * Format: scrypt$<hex salt>$<hex key>.
  */
 export function hashPassword(password: string): string {
   const salt = randomBytes(16);
@@ -12,15 +12,15 @@ export function hashPassword(password: string): string {
 }
 
 /**
- * Vérifie un mot de passe sans bloquer la boucle d'événements.
+ * Verifies a password without blocking the event loop.
  *
- * scrypt coûte une trentaine de millisecondes par appel — c'est le but. Mais en
- * version synchrone, chaque tentative de connexion gèle tout le serveur pendant
- * ce temps : les logs en direct des runs en cours s'arrêtent net. Quiconque est
- * sur le réseau pourrait ainsi paralyser la machine avec une boucle de curl.
+ * scrypt costs some thirty milliseconds per call — that's the point. But in
+ * its synchronous form, every login attempt would freeze the whole server
+ * for that long: live logs of runs in progress would stop dead. Anyone on
+ * the network could paralyze the machine with a curl loop.
  *
- * Ne lève jamais : un `password_hash` corrompu doit refuser la connexion, pas
- * transformer une erreur de configuration en 500.
+ * Never throws: a corrupted `password_hash` must refuse the login, not
+ * turn a configuration error into a 500.
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [scheme, saltHex, keyHex] = stored.split("$");
@@ -41,7 +41,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   }
 }
 
-/** Sessions en mémoire : elles ne survivent pas à un redémarrage, et c'est très bien. */
+/** In-memory sessions: they don't survive a restart, and that's just fine. */
 export class SessionStore {
   private readonly tokens = new Set<string>();
 
@@ -63,24 +63,24 @@ export class SessionStore {
 export const SESSION_COOKIE = "laneyard_session";
 
 /**
- * Freine les tentatives de connexion répétées.
+ * Slows down repeated login attempts.
  *
- * Sans cela, un voisin de réseau peut essayer des mots de passe aussi vite que
- * le serveur répond. Le délai croît avec les échecs et se remet à zéro dès une
- * réussite : l'utilisateur légitime qui se trompe une fois ne le sent pas.
+ * Without this, a network neighbour could try passwords as fast as the
+ * server responds. The delay grows with failures and resets to zero on a
+ * success: the legitimate user who mistypes once doesn't feel it.
  */
 export class LoginThrottle {
   private failures = 0;
   private until = 0;
 
-  /** Millisecondes restant à attendre, 0 si la voie est libre. */
+  /** Milliseconds left to wait, 0 if the way is clear. */
   retryAfterMs(now = Date.now()): number {
     return Math.max(0, this.until - now);
   }
 
   recordFailure(now = Date.now()): void {
     this.failures += 1;
-    // 0, 0, 0, puis 1 s, 2 s, 4 s… plafonné à une minute.
+    // 0, 0, 0, then 1s, 2s, 4s… capped at one minute.
     if (this.failures > 3) {
       this.until = now + Math.min(60_000, 2 ** (this.failures - 4) * 1000);
     }

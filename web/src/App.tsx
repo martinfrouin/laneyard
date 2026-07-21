@@ -13,7 +13,7 @@ export function App() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
 
-  // Un 401 sur cet appel signifie qu'il faut se connecter.
+  // A 401 on this call means it's time to log in.
   const load = () =>
     api
       .projects()
@@ -27,7 +27,7 @@ export function App() {
     void load();
   }, []);
 
-  if (authenticated === null) return <p className="dim">chargement…</p>;
+  if (authenticated === null) return <p className="dim">loading…</p>;
   if (!authenticated) return <Login onSuccess={() => void load()} />;
 
   return (
@@ -38,8 +38,8 @@ export function App() {
       </header>
 
       <nav>
-        <p className="section nav-head">projets</p>
-        {projects.length === 0 && <p className="dim nav-item">aucun</p>}
+        <p className="section nav-head">projects</p>
+        {projects.length === 0 && <p className="dim nav-item">none</p>}
         {projects.map((p) => (
           <NavLink
             key={p.slug}
@@ -57,7 +57,7 @@ export function App() {
           <Route path="/" element={<Projects />} />
           <Route path="/p/:slug" element={<Project />} />
           <Route path="/r/:id" element={<Run />} />
-          <Route path="*" element={<p className="dim">page inconnue.</p>} />
+          <Route path="*" element={<p className="dim">unknown page.</p>} />
         </Routes>
       </main>
     </div>

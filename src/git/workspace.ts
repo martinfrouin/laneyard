@@ -11,8 +11,8 @@ export interface GitAuth {
 }
 
 /**
- * Un clone géré par Laneyard, conservé entre les runs.
- * Toutes les commandes git passent par ici pour partager l'environnement d'authentification.
+ * A clone managed by Laneyard, kept between runs.
+ * All git commands go through here to share the authentication environment.
  */
 export class Workspace {
   constructor(
@@ -22,7 +22,7 @@ export class Workspace {
   ) {}
 
   private env(): NodeJS.ProcessEnv {
-    // Sans cela, git peut bloquer sur une demande d'identifiants et figer le run.
+    // Without this, git can block on a credentials prompt and freeze the run.
     const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
     if (this.auth.kind === "ssh_key" && this.auth.ref) {
       env["GIT_SSH_COMMAND"] = `ssh -i ${this.auth.ref} -o IdentitiesOnly=yes -o BatchMode=yes`;
@@ -31,15 +31,15 @@ export class Workspace {
   }
 
   /**
-   * Remplace l'URL du dépôt par un jeton neutre dans un texte.
+   * Replaces the repository URL with a neutral token in a piece of text.
    *
-   * Une URL HTTPS peut porter un mot de passe — `https://user:token@github.com/…`
-   * est parfaitement légal dans `config.yml`. Or les erreurs git finissent dans
-   * le fichier de log du run. Le caviardage général des secrets viendra au jalon
-   * suivant ; cette fuite-ci vient de notre propre formatage, elle se répare ici.
+   * An HTTPS URL can carry a password — `https://user:token@github.com/…`
+   * is perfectly legal in `config.yml`. But git errors end up in the run's
+   * log file. General secret redaction comes at the next milestone; this
+   * particular leak comes from our own formatting, and is fixed here.
    */
   private redact(text: string): string {
-    return text.split(this.gitUrl).join("<dépôt>");
+    return text.split(this.gitUrl).join("<repository>");
   }
 
   private async git(args: string[], cwd = this.path): Promise<string> {
@@ -49,7 +49,7 @@ export class Workspace {
     } catch (cause) {
       const err = cause as { stderr?: string; message: string };
       const detail = (err.stderr || err.message).trim();
-      throw new Error(`git ${this.redact(args.join(" "))} a échoué : ${this.redact(detail)}`);
+      throw new Error(`git ${this.redact(args.join(" "))} failed: ${this.redact(detail)}`);
     }
   }
 
@@ -63,12 +63,12 @@ export class Workspace {
   }
 
   /**
-   * Vrai s'il existe des modifications *suivies* non commitées.
+   * True if there are uncommitted changes to *tracked* files.
    *
-   * Les fichiers non suivis sont volontairement ignorés : un build en sème
-   * (fastlane réécrit `fastlane/README.md` à chaque exécution, les artefacts
-   * atterrissent dans `build/`), et surtout `git checkout` ne les détruit pas.
-   * Les compter rendrait tout second run impossible sans protéger quoi que ce soit.
+   * Untracked files are deliberately ignored: a build scatters them around
+   * (fastlane rewrites `fastlane/README.md` on every run, artifacts land in
+   * `build/`), and above all `git checkout` doesn't destroy them. Counting
+   * them would make every second run impossible without protecting anything.
    */
   async isDirty(): Promise<boolean> {
     if (!(await this.exists())) return false;
@@ -80,20 +80,20 @@ export class Workspace {
   }
 
   /**
-   * Garantit la présence du clone, sans toucher à la branche courante.
+   * Guarantees the clone is present, without touching the current branch.
    *
-   * Nécessaire avant toute lecture du dépôt hors run — lister les lanes, lire le
-   * laneyard.yml — puisque ces informations vivent dans les fichiers du projet.
+   * Needed before any read of the repository outside a run — listing lanes,
+   * reading laneyard.yml — since that information lives in the project's files.
    */
   async ensureCloned(onProgress?: (line: string) => void): Promise<void> {
     if (await this.exists()) return;
-    onProgress?.(`Clonage de ${this.redact(this.gitUrl)}…`);
+    onProgress?.(`Cloning ${this.redact(this.gitUrl)}…`);
     await this.git(["clone", this.gitUrl, this.path], process.cwd());
   }
 
   /**
-   * Amène le workspace sur la branche demandée, à jour.
-   * Clone au premier appel, se contente d'un fetch ensuite.
+   * Brings the workspace to the requested branch, up to date.
+   * Clones on the first call, just fetches afterwards.
    */
   async prepare(branch: string, onProgress?: (line: string) => void): Promise<string> {
     if (!(await this.exists())) {
@@ -101,15 +101,15 @@ export class Workspace {
     } else {
       if (await this.isDirty()) {
         throw new Error(
-          "Le workspace contient des modifications non commitées. " +
-            "Committez-les ou nettoyez le workspace avant de lancer un run.",
+          "The workspace has uncommitted changes. " +
+            "Commit them or clean the workspace before starting a run.",
         );
       }
-      onProgress?.("Récupération des nouveautés…");
+      onProgress?.("Fetching updates…");
       await this.git(["fetch", "--prune", "origin"]);
     }
 
-    onProgress?.(`Bascule sur ${branch}…`);
+    onProgress?.(`Switching to ${branch}…`);
     await this.git(["checkout", "-q", "-B", branch, `origin/${branch}`]);
     return this.headSha();
   }

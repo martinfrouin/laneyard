@@ -17,24 +17,24 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
   app.get("/api/projects/:slug/lanes", async (req, reply) => {
     const { slug } = req.params as { slug: string };
     const entry = ctx.config.project(slug);
-    if (!entry) return reply.code(404).send({ error: "Projet inconnu" });
+    if (!entry) return reply.code(404).send({ error: "Unknown project" });
 
     try {
-      // Les lanes vivent dans le dépôt : sans clone, il n'y a rien à lire.
-      // Un projet fraîchement déclaré doit être utilisable sans lancer un run à l'aveugle.
+      // Lanes live in the repository: with no clone, there's nothing to read.
+      // A freshly declared project must be usable without launching a run blind.
       await ctx.ensureWorkspace(slug);
       const resolved = await ctx.config.resolve(slug, ctx.workspacePath(slug));
       return await ctx.lanes(slug, ctx.workspacePath(slug), resolved!.settings.fastlane_dir);
     } catch (cause) {
-      // Workspace pas encore cloné, Fastfile cassé, sidecar en échec : l'interface
-      // doit pouvoir le dire à l'utilisateur plutôt qu'afficher une liste vide.
+      // Workspace not cloned yet, broken Fastfile, sidecar failure: the
+      // interface must be able to tell the user, rather than show an empty list.
       return reply.code(503).send({ error: (cause as Error).message });
     }
   });
 
   app.get("/api/projects/:slug/runs", async (req, reply) => {
     const { slug } = req.params as { slug: string };
-    if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Projet inconnu" });
+    if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
     return ctx.runs.listByProject(slug);
   });
 }

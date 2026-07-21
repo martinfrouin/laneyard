@@ -12,11 +12,11 @@ export interface ResolvedProject {
 }
 
 /**
- * La configuration vivante du serveur.
+ * The server's live configuration.
  *
- * Règle de sûreté : une configuration invalide ne remplace jamais une configuration
- * valide. Le serveur continue de tourner avec ce qu'il avait, et l'erreur est
- * exposée à l'interface — jamais de démarrage à moitié configuré.
+ * Safety rule: an invalid configuration never replaces a valid one. The
+ * server keeps running with what it had, and the error is exposed to the
+ * interface — never a half-configured startup.
  */
 export class ConfigStore {
   private config: ServerConfig | null = null;
@@ -35,7 +35,7 @@ export class ConfigStore {
     return { ok: true };
   }
 
-  /** Surveille le fichier et recharge, en absorbant les rafales d'événements. */
+  /** Watches the file and reloads, absorbing bursts of events. */
   watch(onReload: (ok: boolean) => void): () => void {
     let timer: NodeJS.Timeout | undefined;
     const watcher = watch(this.path, () => {
@@ -67,9 +67,9 @@ export class ConfigStore {
   }
 
   /**
-   * Résout les réglages effectifs d'un projet en lisant le laneyard.yml de son
-   * workspace s'il existe. Le workspace peut ne pas encore être cloné : on
-   * retombe alors sur le bloc du projet et les défauts.
+   * Resolves a project's effective settings by reading its workspace's
+   * laneyard.yml if it exists. The workspace may not be cloned yet: we
+   * then fall back to the project's block and the defaults.
    */
   async resolve(slug: string, workspacePath: string): Promise<ResolvedProject | null> {
     const entry = this.project(slug);

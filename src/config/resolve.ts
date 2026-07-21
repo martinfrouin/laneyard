@@ -7,9 +7,9 @@ export type Provenance = Record<keyof ProjectSettings, Origin>;
 const SETTING_KEYS = Object.keys(projectSettingsSchema.shape) as (keyof ProjectSettings)[];
 
 /**
- * Fusionne les trois sources champ par champ.
- * `undefined` signifie « non défini » ; toute autre valeur, y compris un tableau vide
- * ou `false`, est une décision explicite de l'utilisateur.
+ * Merges the three sources field by field.
+ * `undefined` means "not set"; any other value, including an empty array
+ * or `false`, is an explicit decision by the user.
  */
 export function resolveProjectSettings(
   entry: ProjectEntry,
@@ -33,7 +33,7 @@ export function resolveProjectSettings(
     }
   }
 
-  // Le schéma applique les défauts pour tout ce qui reste absent.
+  // The schema applies the defaults for anything still absent.
   const settings = projectSettingsSchema.parse(chosen);
   return { settings, provenance };
 }

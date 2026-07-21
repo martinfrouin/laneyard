@@ -7,7 +7,7 @@ function store(): RunStore {
 }
 
 describe("RunStore", () => {
-  it("crée un run en attente et le relit", () => {
+  it("creates a queued run and reads it back", () => {
     const s = store();
     const id = s.create({ projectSlug: "p", lane: "beta", platform: "ios", params: { v: "1.2" } });
     const run = s.get(id);
@@ -16,7 +16,7 @@ describe("RunStore", () => {
     expect(run?.startedAt).toBeNull();
   });
 
-  it("horodate le passage à running et à un état terminal", () => {
+  it("timestamps the transition to running and to a terminal state", () => {
     const s = store();
     const id = s.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
     s.markRunning(id, { branch: "main", commitSha: "abc123" });
@@ -29,15 +29,15 @@ describe("RunStore", () => {
     expect(done?.finishedAt).not.toBeNull();
   });
 
-  it("liste les runs d'un projet du plus récent au plus ancien", () => {
+  it("lists a project's runs from most recent to oldest", () => {
     const s = store();
     const a = s.create({ projectSlug: "p", lane: "a", platform: null, params: {} });
     const b = s.create({ projectSlug: "p", lane: "b", platform: null, params: {} });
-    s.create({ projectSlug: "autre", lane: "c", platform: null, params: {} });
+    s.create({ projectSlug: "other", lane: "c", platform: null, params: {} });
     expect(s.listByProject("p").map((r) => r.id)).toEqual([b, a]);
   });
 
-  it("marque interrompu tout run resté actif", () => {
+  it("marks any run still active as interrupted", () => {
     const s = store();
     const id = s.create({ projectSlug: "p", lane: "a", platform: null, params: {} });
     s.markRunning(id, { branch: "main", commitSha: "x" });
@@ -46,7 +46,7 @@ describe("RunStore", () => {
     expect(s.interruptActive()).toBe(0);
   });
 
-  it("enregistre étapes et artefacts rattachés au run", () => {
+  it("records steps and artifacts attached to the run", () => {
     const s = store();
     const id = s.create({ projectSlug: "p", lane: "a", platform: null, params: {} });
     s.replaceSteps(id, [

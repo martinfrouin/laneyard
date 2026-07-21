@@ -8,13 +8,13 @@ import { RunStore } from "../src/db/runs.js";
 import { tmpDir } from "./fixtures/repos.js";
 
 describe("createServerFromConfig", () => {
-  it("refuse de démarrer si la configuration est invalide", async () => {
+  it("refuses to start if the configuration is invalid", async () => {
     const root = await tmpDir("laneyard-main-");
     await writeFile(join(root, "config.yml"), "projects: [", "utf8");
     await expect(createServerFromConfig(root)).rejects.toThrow(/configuration/i);
   });
 
-  it("marque interrompus les runs restés actifs au démarrage", async () => {
+  it("marks runs still active at startup as interrupted", async () => {
     const root = await tmpDir("laneyard-main-");
     await mkdir(root, { recursive: true });
     await writeFile(

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 type Theme = "dark" | "light";
 
-/** Deux thèmes, un seul interrupteur. Le choix survit au rechargement. */
+/** Two themes, one switch. The choice survives a reload. */
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem("laneyard-theme") as Theme | null) ?? "dark",
@@ -15,7 +15,7 @@ export function ThemeToggle() {
 
   return (
     <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-      {theme === "dark" ? "papier" : "sombre"}
+      {theme === "dark" ? "paper" : "dark"}
     </button>
   );
 }

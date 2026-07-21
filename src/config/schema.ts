@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Réglages de comportement de build. Ils peuvent venir du dépôt ou du serveur. */
+/** Build behaviour settings. They can come from the repository or the server. */
 export const projectSettingsSchema = z.object({
   fastlane_dir: z.string().default("fastlane"),
   runtime: z.enum(["bundle", "system"]).default("bundle"),
@@ -16,13 +16,13 @@ export const projectSettingsSchema = z.object({
     .optional(),
 });
 
-/** Même vocabulaire, mais tout est facultatif dans les fichiers. */
+/** Same vocabulary, but everything is optional in the files. */
 export const projectSettingsInputSchema = projectSettingsSchema.partial();
 
-/** Un slug sert de nom de dossier et de segment d'URL. */
+/** A slug is used as a folder name and a URL segment. */
 const slugSchema = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]*$/, "slug : minuscules, chiffres et tirets uniquement");
+  .regex(/^[a-z0-9][a-z0-9-]*$/, "slug: lowercase letters, digits and hyphens only");
 
 export const projectEntrySchema = projectSettingsInputSchema.extend({
   slug: slugSchema,
@@ -32,7 +32,7 @@ export const projectEntrySchema = projectSettingsInputSchema.extend({
   git_auth: z
     .object({
       kind: z.enum(["none", "ssh_key", "token"]),
-      /** Chemin de fichier si kind vaut ssh_key, nom de secret si kind vaut token. */
+      /** File path if kind is ssh_key, secret name if kind is token. */
       ref: z.string().optional(),
     })
     .default({ kind: "none" }),
@@ -57,7 +57,7 @@ export const serverConfigSchema = z.object({
   projects: z.array(projectEntrySchema).default([]),
 });
 
-/** Contenu de laneyard.yml : uniquement du comportement de build. */
+/** Content of laneyard.yml: build behaviour only. */
 export const repoConfigSchema = projectSettingsInputSchema;
 
 export type ProjectSettings = z.infer<typeof projectSettingsSchema>;

@@ -6,7 +6,7 @@ import { tmpDir } from "../fixtures/repos.js";
 const FAKE_DIR = join(process.cwd(), "tests", "fixtures", "fake-fastlane");
 
 describe("runInPty", () => {
-  it("diffuse la sortie et rend un code de sortie nul en cas de succès", async () => {
+  it("streams the output and returns a zero exit code on success", async () => {
     const chunks: string[] = [];
     const res = await runInPty({
       command: "fastlane",
@@ -20,7 +20,7 @@ describe("runInPty", () => {
     expect(chunks.join("")).toContain("Step: build_app");
   });
 
-  it("remonte le code de sortie d'un échec", async () => {
+  it("reports the exit code of a failure", async () => {
     const res = await runInPty({
       command: "fastlane",
       args: ["beta"],
@@ -31,7 +31,7 @@ describe("runInPty", () => {
     expect(res.exitCode).toBe(1);
   });
 
-  it("tue le processus au-delà du délai imparti", async () => {
+  it("kills the process past the allotted timeout", async () => {
     const res = await runInPty({
       command: "fastlane",
       args: ["beta"],
@@ -41,17 +41,17 @@ describe("runInPty", () => {
       timeoutMs: 1000,
     });
     expect(res.timedOut).toBe(true);
-    // Tué par signal : le code doit refléter la mort violente, pas valoir 0.
+    // Killed by signal: the code must reflect the violent death, not be 0.
     expect(res.exitCode).not.toBe(0);
     expect(res.signal).not.toBeNull();
   }, 20_000);
 
-  it("échoue proprement si la commande n'existe pas", async () => {
+  it("fails cleanly if the command doesn't exist", async () => {
     const res = await runInPty({
-      command: "commande-inexistante-xyz",
+      command: "nonexistent-command-xyz",
       args: [],
       cwd: await tmpDir(),
-      env: { PATH: "/nexistepas" },
+      env: { PATH: "/does-not-exist" },
       onData: () => {},
     });
     expect(res.exitCode).not.toBe(0);

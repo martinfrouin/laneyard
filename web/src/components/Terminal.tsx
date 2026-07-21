@@ -3,15 +3,15 @@ import type { RefObject } from "react";
 import { ansiToSegments } from "../ansi";
 
 export interface TerminalHandle {
-  /** Amène la ligne qui commence à ce décalage en octets en haut de la vue. */
+  /** Brings the line that starts at this byte offset to the top of the view. */
   scrollToOffset: (offset: number) => void;
 }
 
 /**
- * Index de la ligne qui contient un décalage en octets.
+ * Index of the line that contains a byte offset.
  *
- * Calculé à la demande, jamais à chaque fragment reçu : parcourir le log entier
- * à chaque ligne de sortie coûterait bien plus que le service rendu.
+ * Computed on demand, never on every fragment received: scanning the whole
+ * log on every line of output would cost far more than the service it renders.
  */
 function lineAtByteOffset(text: string, offset: number): number {
   const encoder = new TextEncoder();
@@ -33,8 +33,8 @@ export function Terminal({
   handle: RefObject<TerminalHandle | null>;
 }) {
   const pre = useRef<HTMLPreElement>(null);
-  // Le suivi ne reprend pas tout seul : tant que l'utilisateur est remonté, on
-  // le laisse lire. Rien n'est plus agaçant qu'un log qui vous arrache la page.
+  // Following doesn't resume on its own: as long as the user has scrolled up, we
+  // let them read. Nothing is more annoying than a log that yanks the page away.
   const [follow, setFollow] = useState(true);
 
   const segments = useMemo(() => ansiToSegments(text), [text]);
@@ -48,7 +48,7 @@ export function Terminal({
     scrollToOffset: (offset: number) => {
       const el = pre.current;
       if (!el) return;
-      // Sans repli de ligne, une ligne du log vaut exactement une ligne à l'écran.
+      // With no line wrapping, one line of the log is exactly one line on screen.
       const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
       setFollow(false);
       el.scrollTop = lineAtByteOffset(text, offset) * lineHeight;
@@ -64,10 +64,10 @@ export function Terminal({
   return (
     <div className="terminal panel">
       <div className="pane-title">
-        <span className="section">sortie</span>
-        {/* Le suivi ne se signale que lorsqu'il est suspendu : le dire quand tout
-            va bien n'apprendrait rien et ferait du bruit à chaque écran. */}
-        {!follow && <span className="dim">suivi suspendu — revenez en bas pour reprendre</span>}
+        <span className="section">output</span>
+        {/* Following only signals itself when suspended: saying so when
+            everything's fine would teach nothing and add noise to every screen. */}
+        {!follow && <span className="dim">following suspended — scroll to bottom to resume</span>}
       </div>
 
       <pre ref={pre} onScroll={onScroll}>
@@ -76,17 +76,17 @@ export function Terminal({
             {s.text}
           </span>
         ))}
-        {text === "" && <span className="dim">en attente de sortie…</span>}
+        {text === "" && <span className="dim">waiting for output…</span>}
       </pre>
 
       {/*
-        La ligne de saisie reste visible, désactivée, avec sa raison : la masquer
-        laisserait croire qu'une entrée est peut-être possible ailleurs.
+        The input line stays visible, disabled, with its reason: hiding it
+        would suggest input might be possible elsewhere.
       */}
       <div className="terminal-input">
         <span className="prompt">$</span>
-        <input disabled value="" readOnly aria-label="entrée du terminal" />
-        <span className="reason">mode interactif désactivé</span>
+        <input disabled value="" readOnly aria-label="terminal input" />
+        <span className="reason">interactive mode disabled</span>
       </div>
     </div>
   );

@@ -17,11 +17,11 @@ export function Projects() {
   if (projects.length === 0) {
     return (
       <>
-        <h2 className="section">projets</h2>
-        {/* Un état vide est une consigne, pas une humeur : il donne la commande. */}
+        <h2 className="section">projects</h2>
+        {/* An empty state is an instruction, not a mood: it gives the command. */}
         <p className="dim">
-          aucun projet. lancez <code>laneyard add</code> depuis le dossier d'un projet pour le
-          déclarer.
+          no projects. run <code>laneyard add</code> from a project's folder to
+          declare it.
         </p>
       </>
     );
@@ -29,7 +29,7 @@ export function Projects() {
 
   return (
     <>
-      <h2 className="section">projets</h2>
+      <h2 className="section">projects</h2>
       <ul className="projects rows">
         {projects.map((p) => (
           <li key={p.slug}>

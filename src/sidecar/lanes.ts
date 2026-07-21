@@ -12,8 +12,8 @@ export interface Lane {
 }
 
 /**
- * Empreinte de tout le dossier fastlane, pas seulement du Fastfile :
- * un Appfile, un Pluginfile ou un fichier importé changent les lanes tout autant.
+ * Hash of the whole fastlane folder, not just the Fastfile:
+ * an Appfile, a Pluginfile, or an imported file change the lanes just as much.
  */
 async function hashFastlaneDir(root: string, fastlaneDir: string): Promise<string> {
   const dir = join(root, fastlaneDir);

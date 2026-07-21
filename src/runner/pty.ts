@@ -21,10 +21,10 @@ export interface PtyHandle {
 }
 
 /**
- * Lance une commande dans un pseudo-terminal.
+ * Runs a command in a pseudo-terminal.
  *
- * Le PTY sert deux buts : fastlane se croit dans un vrai terminal et garde son
- * affichage habituel, et une saisie reste possible si un jour un run en demande une.
+ * The PTY serves two purposes: fastlane believes it's in a real terminal and
+ * keeps its usual display, and input remains possible if a run ever needs one.
  */
 export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promise<PtyRunResult> } {
   let proc: pty.IPty;
@@ -37,9 +37,9 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
       env: opts.env as Record<string, string>,
     });
   } catch (cause) {
-    // Commande introuvable : selon la plateforme, node-pty lève ou rend 127.
-    // On uniformise pour que l'appelant n'ait qu'un seul cas à traiter.
-    opts.onData(`\nLancement impossible : ${(cause as Error).message}\n`);
+    // Command not found: depending on the platform, node-pty throws or returns 127.
+    // We normalize so the caller only has one case to handle.
+    opts.onData(`\nCould not launch: ${(cause as Error).message}\n`);
     return {
       handle: { write: () => {}, kill: () => {} },
       done: Promise.resolve({ exitCode: 127, signal: null, timedOut: false }),
@@ -55,17 +55,17 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
     if (opts.timeoutMs !== undefined) {
       timer = setTimeout(() => {
         timedOut = true;
-        // SIGINT d'abord : fastlane fait son ménage. SIGKILL si l'obstination persiste.
+        // SIGINT first: fastlane cleans up after itself. SIGKILL if it keeps stalling.
         try {
           proc.kill("SIGINT");
         } catch {
-          /* le processus a pu mourir entre-temps */
+          /* the process may have died in the meantime */
         }
         setTimeout(() => {
           try {
             proc.kill("SIGKILL");
           } catch {
-            /* idem */
+            /* same */
           }
         }, 5000);
       }, opts.timeoutMs);
@@ -73,10 +73,10 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
 
     proc.onExit(({ exitCode, signal }) => {
       if (timer) clearTimeout(timer);
-      // `waitpid` ne renseigne un code de sortie que pour une fin normale : un
-      // processus tué par signal laisse 0, ce qui ferait passer une annulation
-      // pour une réussite. On applique la convention du shell, 128 + signal,
-      // pour qu'un code de sortie reste toujours interprétable.
+      // `waitpid` only reports an exit code for a normal end: a process
+      // killed by a signal leaves 0, which would pass a cancellation off
+      // as a success. We apply the shell convention, 128 + signal, so an
+      // exit code always stays interpretable.
       const killed = signal !== undefined && signal !== 0;
       resolve({
         exitCode: killed && exitCode === 0 ? 128 + signal : exitCode,
@@ -92,7 +92,7 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
       try {
         proc.kill(signal);
       } catch {
-        /* déjà terminé */
+        /* already finished */
       }
     },
   };
@@ -100,7 +100,7 @@ export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promis
   return { handle, done };
 }
 
-/** Variante bloquante, pratique pour les tests et les commandes courtes. */
+/** Blocking variant, handy for tests and short commands. */
 export async function runInPty(opts: PtyRunOptions): Promise<PtyRunResult> {
   return startPty(opts).done;
 }

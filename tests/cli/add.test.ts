@@ -5,10 +5,10 @@ import { parse } from "yaml";
 import { addProjectToConfig } from "../../src/cli/add.js";
 import { tmpDir } from "../fixtures/repos.js";
 
-const EXISTING = `# Ma configuration Laneyard
+const EXISTING = `# My Laneyard configuration
 server:
   port: 7890
-  password_hash: "scrypt$a$b"   # mot de passe du serveur
+  password_hash: "scrypt$a$b"   # server password
 
 projects:
   - slug: deja-la
@@ -33,7 +33,7 @@ const entry = {
 };
 
 describe("addProjectToConfig", () => {
-  it("ajoute le projet sans supprimer les projets existants", async () => {
+  it("adds the project without removing existing projects", async () => {
     const path = await configAt(EXISTING);
     await addProjectToConfig(path, entry);
 
@@ -41,21 +41,21 @@ describe("addProjectToConfig", () => {
     expect(parsed.projects.map((p) => p.slug)).toEqual(["deja-la", "popotes-ios"]);
   });
 
-  it("préserve les commentaires du fichier", async () => {
+  it("preserves the file's comments", async () => {
     const path = await configAt(EXISTING);
     await addProjectToConfig(path, entry);
 
     const raw = await readFile(path, "utf8");
-    expect(raw).toContain("# Ma configuration Laneyard");
-    expect(raw).toContain("# mot de passe du serveur");
+    expect(raw).toContain("# My Laneyard configuration");
+    expect(raw).toContain("# server password");
   });
 
-  it("refuse un slug déjà pris", async () => {
+  it("refuses an already-taken slug", async () => {
     const path = await configAt(EXISTING);
     await expect(addProjectToConfig(path, { ...entry, slug: "deja-la" })).rejects.toThrow(/deja-la/);
   });
 
-  it("crée le fichier et la section serveur s'il n'existe pas", async () => {
+  it("creates the file and the server section if they don't exist", async () => {
     const dir = await tmpDir("laneyard-add-");
     const path = join(dir, "config.yml");
 
@@ -66,11 +66,11 @@ describe("addProjectToConfig", () => {
       projects: unknown[];
     };
     expect(parsed.projects).toHaveLength(1);
-    // Un mot de passe doit exister, sinon le serveur refuserait toute connexion.
+    // A password must exist, otherwise the server would refuse every connection.
     expect(parsed.server.password_hash).toMatch(/^scrypt\$/);
   });
 
-  it("ajoute une section projects absente d'un fichier existant", async () => {
+  it("adds a projects section missing from an existing file", async () => {
     const path = await configAt('server:\n  password_hash: "scrypt$a$b"\n');
     await addProjectToConfig(path, entry);
 

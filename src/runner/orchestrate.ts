@@ -21,13 +21,13 @@ export interface ExecuteRunOptions {
   gitAuth?: GitAuth;
   branch: string;
   /**
-   * Résout les réglages effectifs. Appelée **après** la préparation du workspace,
-   * parce que le laneyard.yml qu'elle lit vit dans le dépôt : au premier run,
-   * il n'existe pas encore sur disque au moment où le run est créé.
+   * Resolves the effective settings. Called **after** the workspace is
+   * prepared, because the laneyard.yml it reads lives in the repository:
+   * on the first run, it doesn't exist on disk yet when the run is created.
    */
   resolveSettings: () => Promise<ProjectSettings>;
   env: NodeJS.ProcessEnv;
-  /** Appelé pour chaque fragment de sortie, avec sa position dans le log. */
+  /** Called for each output fragment, with its position in the log. */
   onChunk: (chunk: string, offset: number) => void;
 }
 
@@ -37,11 +37,11 @@ export interface ExecuteRunResult {
 
 
 /**
- * Enchaîne un run complet et pose ses transitions d'état.
+ * Runs a complete run through and sets its state transitions.
  *
- * Ne lève jamais : toute erreur est convertie en run `failed` documenté, parce
- * qu'un run qui disparaît sans laisser de trace est le pire des comportements
- * pour un serveur de build.
+ * Never throws: every error is converted into a documented `failed` run,
+ * because a run that disappears without a trace is the worst possible
+ * behaviour for a build server.
  */
 export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
   const { runId, runs, logs } = opts;
@@ -61,7 +61,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     return { status: "failed" };
   };
 
-  // --- Préparation -------------------------------------------------------
+  // --- Preparation --------------------------------------------------------
   runs.setStatus(runId, "preparing");
   const workspace = new Workspace(opts.workspacePath, opts.gitUrl, opts.gitAuth);
 
@@ -69,29 +69,29 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   try {
     commitSha = await workspace.prepare(opts.branch, (line) => void emit(`${line}\n`));
   } catch (cause) {
-    return fail(`Préparation du workspace impossible : ${(cause as Error).message}`);
+    return fail(`Could not prepare the workspace: ${(cause as Error).message}`);
   }
 
   runs.markRunning(runId, { branch: opts.branch, commitSha });
 
-  // Le workspace existe enfin : c'est seulement maintenant que le laneyard.yml
-  // du dépôt est lisible, donc seulement maintenant que les réglages sont connus.
-  // La résolution est protégée : le projet peut avoir disparu de config.yml
-  // pendant la préparation, et un run ne doit jamais s'évaporer sur une exception.
+  // The workspace finally exists: only now is the repository's laneyard.yml
+  // readable, so only now are the settings known. The resolution is guarded:
+  // the project may have disappeared from config.yml during preparation,
+  // and a run must never evaporate on an exception.
   let settings: ProjectSettings;
   try {
     settings = await opts.resolveSettings();
   } catch (cause) {
-    return fail(`Réglages du projet illisibles : ${(cause as Error).message}`);
+    return fail(`Unreadable project settings: ${(cause as Error).message}`);
   }
 
-  // --- Exécution ---------------------------------------------------------
+  // --- Execution -----------------------------------------------------------
   const useBundle = settings.runtime === "bundle";
   const reportPath = join(opts.workspacePath, settings.fastlane_dir, "report.xml");
 
-  // Un rapport traîne peut-être là, laissé par un run précédent que fastlane
-  // n'a pas eu le temps d'écraser. Sans ce ménage, un run qui échoue avant
-  // même d'atteindre fastlane adopterait la chronologie du run d'avant.
+  // A report may still be lying around, left by a previous run that fastlane
+  // didn't have time to overwrite. Without this cleanup, a run that fails
+  // before even reaching fastlane would adopt the previous run's timeline.
   await rm(reportPath, { force: true });
 
   const { done } = startPty({
@@ -102,7 +102,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     cwd: opts.workspacePath,
     env: {
       ...opts.env,
-      // Un run non interactif échoue vite au lieu de figer sur un prompt invisible.
+      // A non-interactive run fails fast instead of freezing on an invisible prompt.
       CI: "true",
       FASTLANE_SKIP_UPDATE_CHECK: "1",
       FORCE_COLOR: "1",
@@ -114,15 +114,16 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   const outcome = await done;
   await writer.close();
 
-  // --- Chronologie -------------------------------------------------------
-  // Tout ce qui suit est de l'après-vente : la chronologie et les artefacts
-  // enjolivent un run déjà terminé. Une base qui refuse une insertion ou un
-  // fichier qui s'évapore ne doit pas coûter le verdict du run, ni faire
-  // remonter une exception jusqu'au serveur qui n'a personne pour l'attraper.
+  // --- Timeline -------------------------------------------------------------
+  // Everything that follows is after-sales service: the timeline and the
+  // artifacts embellish a run that's already finished. A database that
+  // refuses an insert or a file that evaporates must not cost the run's
+  // verdict, nor let an exception bubble up to the server, which has no one
+  // to catch it.
   try {
     await recordOutcome();
   } catch (cause) {
-    await emit(`\nChronologie ou artefacts incomplets : ${(cause as Error).message}\n`);
+    await emit(`\nIncomplete timeline or artifacts: ${(cause as Error).message}\n`);
   }
 
   if (outcome.exitCode === 0 && !outcome.timedOut) {
@@ -131,7 +132,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   }
 
   const summary = outcome.timedOut
-    ? `Run interrompu après ${settings.timeout_minutes} minutes`
+    ? `Run interrupted after ${settings.timeout_minutes} minutes`
     : summarizeFailure(await logs.read(runId), outcome.exitCode);
 
   runs.finish(runId, { status: "failed", exitCode: outcome.exitCode, errorSummary: summary });
@@ -142,7 +143,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     const live = tracker.steps();
 
     if (report) {
-      // Le rapport fait autorité ; le repérage en direct n'apporte que les décalages.
+      // The report is authoritative; live spotting only contributes the offsets.
       const steps: Step[] = report.map((s, i) => ({
         idx: s.idx,
         name: s.name,
@@ -154,7 +155,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
       runs.replaceSteps(runId, steps);
       await rm(reportPath, { force: true });
     } else if (live.length > 0) {
-      // Run annulé, expiré ou interrompu : on garde ce qui a été vu, en le signalant.
+      // Cancelled, timed out, or interrupted run: we keep what was seen, flagging it.
       runs.replaceSteps(
         runId,
         live.map((s, i) => ({
@@ -168,7 +169,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
       );
     }
 
-    // --- Artefacts --------------------------------------------------------
+    // --- Artifacts ----------------------------------------------------------
     const collected = await collectArtifacts(
       opts.workspacePath,
       settings.artifact_globs,

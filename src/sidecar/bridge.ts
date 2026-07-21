@@ -19,9 +19,9 @@ export type Invoke = (
 ) => Promise<SidecarResponse>;
 
 /**
- * Lance le sidecar dans le contexte du projet.
- * En mode `bundle`, l'invocation passe par `bundle exec` pour voir la bonne version
- * de fastlane et les plugins déclarés par le projet.
+ * Runs the sidecar in the project's context.
+ * In `bundle` mode, the invocation goes through `bundle exec` to see the
+ * right version of fastlane and the plugins the project declares.
  */
 export function makeInvoke(runtime: "bundle" | "system"): Invoke {
   return async (command, cwd, fastlaneDir) => {
@@ -30,8 +30,8 @@ export function makeInvoke(runtime: "bundle" | "system"): Invoke {
         ? ["bundle", ["exec", "ruby", SCRIPT, command, "--fastlane-dir", fastlaneDir]]
         : ["ruby", [SCRIPT, command, "--fastlane-dir", fastlaneDir]];
 
-    // En mode bundle, `bundle exec` fournit déjà le bon environnement. En mode
-    // system, il faut le trouver : selon l'installation, `ruby` ne voit pas fastlane.
+    // In bundle mode, `bundle exec` already provides the right environment. In
+    // system mode, it has to be found: depending on the install, `ruby` may not see fastlane.
     let env = process.env;
     if (runtime === "system") {
       const ruby = await resolveRubyEnv();
@@ -51,7 +51,7 @@ export function makeInvoke(runtime: "bundle" | "system"): Invoke {
       const err = cause as { stderr?: string; message: string };
       return {
         ok: false,
-        error: `Le sidecar Ruby a échoué : ${(err.stderr || err.message).trim()}`,
+        error: `The Ruby sidecar failed: ${(err.stderr || err.message).trim()}`,
       };
     }
   };

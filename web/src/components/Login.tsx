@@ -16,11 +16,11 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
       <form className="panel" onSubmit={(e) => void submit(e)}>
         <p className="brand">laneyard</p>
         <label>
-          mot de passe{" "}
+          password{" "}
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
         </label>
-        <button type="submit">entrer</button>
-        {failed && <p className="status-failed">mot de passe incorrect</p>}
+        <button type="submit">enter</button>
+        {failed && <p className="status-failed">incorrect password</p>}
       </form>
     </div>
   );

@@ -1,16 +1,16 @@
 /**
- * Repérage des séparateurs d'étape dans la sortie de fastlane, pendant le run.
+ * Spotting of step separators in fastlane's output, during the run.
  *
- * Fragile par nature : c'est du texte destiné aux humains. On n'en conserve donc
- * qu'une seule chose, le décalage en octets où chaque étape commence — la seule
- * information que report.xml ne contient pas. Les noms et durées qui font foi
- * viendront du rapport en fin de run.
+ * Fragile by nature: this is text meant for humans. We therefore keep only
+ * one thing from it, the byte offset where each step starts — the only
+ * piece of information report.xml doesn't contain. The names and durations
+ * that count come from the report at the end of the run.
  */
-// Forme réelle observée, séquences ANSI comprises :
+// Real form observed, ANSI sequences included:
 //   [13:14:00]: \x1b[32m--- Step: mkdir -p ../build && echo x > y.ipa ---\x1b[0m
-// Le nom n'est pas un identifiant : pour une action `sh`, c'est la commande
-// entière, espaces inclus. La capture est donc paresseuse jusqu'aux tirets
-// de fermeture, et surtout pas `\S+`.
+// The name isn't an identifier: for a `sh` action, it's the entire command,
+// spaces included. The capture is therefore lazy up to the closing dashes,
+// and definitely not `\S+`.
 const SEPARATOR = /-{2,}\s+Step:\s*(.+?)\s+-{2,}/;
 
 export interface LiveStep {
@@ -23,7 +23,7 @@ export class LiveStepTracker {
   private pendingOffset = 0;
   private found: LiveStep[] = [];
 
-  /** `offset` est la position du fragment dans le fichier de log. */
+  /** `offset` is the fragment's position in the log file. */
   consume(chunk: string, offset: number): void {
     if (this.pending === "") this.pendingOffset = offset;
     this.pending += chunk;

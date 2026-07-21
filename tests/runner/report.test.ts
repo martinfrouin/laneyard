@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { readReport } from "../../src/runner/report.js";
 import { tmpDir } from "../fixtures/repos.js";
 
-// Forme réelle observée : les actions réussies sont auto-fermantes.
+// Real form observed: successful actions are self-closing.
 const OK = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
   <testsuite name="fastlane.lanes">
@@ -13,7 +13,7 @@ const OK = `<?xml version="1.0" encoding="UTF-8"?>
   </testsuite>
 </testsuites>`;
 
-// Rapport mixte : c'est le cas qui piège un motif mal ordonné.
+// Mixed report: this is the case that traps a badly ordered pattern.
 const FAILED = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
   <testsuite name="fastlane.lanes">
@@ -25,7 +25,7 @@ const FAILED = `<?xml version="1.0" encoding="UTF-8"?>
 </testsuites>`;
 
 describe("readReport", () => {
-  it("extrait nom, index et durée de chaque action", async () => {
+  it("extracts name, index, and duration for each action", async () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(join(dir, "report.xml"), OK, "utf8");
     const steps = await readReport(join(dir, "report.xml"));
@@ -36,12 +36,12 @@ describe("readReport", () => {
     ]);
   });
 
-  it("n'attribue l'échec qu'à l'action concernée dans un rapport mixte", async () => {
+  it("attributes the failure only to the action concerned in a mixed report", async () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(join(dir, "report.xml"), FAILED, "utf8");
     const steps = await readReport(join(dir, "report.xml"));
-    // Restreint le type autant que ça vérifie : la suite indexe le tableau.
-    if (!steps) throw new Error("rapport attendu");
+    // Narrows the type as much as it verifies: the rest of the test indexes the array.
+    if (!steps) throw new Error("expected report");
 
     expect(steps).toHaveLength(2);
     expect(steps[0]!.status).toBe("success");
@@ -49,9 +49,9 @@ describe("readReport", () => {
     expect(steps[1]!.status).toBe("failed");
   });
 
-  it("décode les entités XML du nom d'action", async () => {
+  it("decodes the XML entities in an action's name", async () => {
     const dir = await tmpDir("laneyard-rep-");
-    // Cas réel : le nom d'une action `sh` est la commande, échappée par le rapport.
+    // Real case: a `sh` action's name is the command, escaped by the report.
     await writeFile(
       join(dir, "report.xml"),
       `<testsuites><testsuite name="fastlane.lanes">
@@ -63,23 +63,23 @@ describe("readReport", () => {
     expect(steps?.[0]?.name).toBe("mkdir -p b && echo x > y");
   });
 
-  it("renvoie null si le rapport n'existe pas", async () => {
+  it("returns null if the report doesn't exist", async () => {
     const dir = await tmpDir("laneyard-rep-");
     expect(await readReport(join(dir, "report.xml"))).toBeNull();
   });
 
-  it("renvoie null sur un rapport illisible plutôt que de lever", async () => {
+  it("returns null on an unreadable report rather than throwing", async () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(join(dir, "report.xml"), "<testsuites", "utf8");
     expect(await readReport(join(dir, "report.xml"))).toBeNull();
   });
 });
 
-describe("readReport — index non fiables", () => {
-  it("renumérote des index en doublon plutôt que de les laisser entrer en base", async () => {
+describe("readReport — unreliable indexes", () => {
+  it("renumbers duplicate indexes rather than letting them into the database", async () => {
     const dir = await tmpDir("laneyard-rep-");
-    // Deux testsuites, chacune renumérotant à partir de 0 : la clé primaire
-    // (run_id, idx) de run_step refuserait l'insertion.
+    // Two testsuites, each renumbering from 0: run_step's primary key
+    // (run_id, idx) would refuse the insert.
     await writeFile(
       join(dir, "report.xml"),
       `<testsuites>
@@ -88,21 +88,21 @@ describe("readReport — index non fiables", () => {
          </testsuite>
          <testsuite name="fastlane.lanes">
            <testcase classname="fastlane.lanes" name="0: build_app" time="2"/>
-           <testcase classname="fastlane.lanes" name="sans index" time="3"/>
+           <testcase classname="fastlane.lanes" name="no index" time="3"/>
          </testsuite>
        </testsuites>`,
       "utf8",
     );
 
     const steps = await readReport(join(dir, "report.xml"));
-    if (!steps) throw new Error("rapport attendu");
+    if (!steps) throw new Error("expected report");
 
     expect(steps).toHaveLength(3);
     expect(steps.map((s) => s.idx)).toEqual([0, 1, 2]);
     expect(new Set(steps.map((s) => s.idx)).size).toBe(3);
   });
 
-  it("laisse passer une entité numérique hors plage sans lever", async () => {
+  it("lets an out-of-range numeric entity through without throwing", async () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(
       join(dir, "report.xml"),

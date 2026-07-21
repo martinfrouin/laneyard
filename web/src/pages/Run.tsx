@@ -7,7 +7,7 @@ import type { TerminalHandle } from "../components/Terminal";
 import { isActive, mark } from "../status";
 import { useRunStream } from "../useRunStream";
 
-/** Durée lisible, du dixième de seconde à l'heure. */
+/** Readable duration, from tenths of a second to hours. */
 function elapsed(from: string | null, to: string | null): string {
   if (!from) return "—";
   const ms = (to ? Date.parse(to) : Date.now()) - Date.parse(from);
@@ -17,7 +17,7 @@ function elapsed(from: string | null, to: string | null): string {
 }
 
 const size = (bytes: number): string =>
-  bytes < 1024 ? `${bytes} o` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} Ko` : `${(bytes / 1048576).toFixed(1)} Mo`;
+  bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
 
 export function Run() {
   const id = Number(useParams().id);
@@ -27,8 +27,8 @@ export function Run() {
   const terminal = useRef<TerminalHandle>(null);
   const { log, finished } = useRunStream(id);
 
-  // Le détail est relu tant que le run bouge : les étapes et les artefacts
-  // n'arrivent pas par le flux, seule la sortie brute y passe.
+  // The detail is reloaded as long as the run keeps moving: steps and
+  // artifacts don't arrive over the stream, only the raw output does.
   useEffect(() => {
     let stop = false;
     const load = () =>
@@ -49,7 +49,7 @@ export function Run() {
     };
   }, [id, finished]);
 
-  // La durée d'un run en cours avance toute seule.
+  // The duration of an in-progress run advances on its own.
   useEffect(() => {
     if (!run || !isActive(run.status)) return;
     const t = setInterval(() => tick((n) => n + 1), 1000);
@@ -57,7 +57,7 @@ export function Run() {
   }, [run]);
 
   if (error) return <p className="status-failed">{error}</p>;
-  if (!run) return <p className="dim">chargement…</p>;
+  if (!run) return <p className="dim">loading…</p>;
 
   return (
     <>
@@ -73,13 +73,13 @@ export function Run() {
           run <span className="bright">#{run.id}</span>
         </span>
         <span className="dim">
-          branche <span className="bright">{run.branch ?? "—"}</span>
+          branch <span className="bright">{run.branch ?? "—"}</span>
         </span>
         <span className="dim">
           commit <span className="bright">{run.commitSha ? run.commitSha.slice(0, 7) : "—"}</span>
         </span>
         <span className="dim">
-          durée <span className="bright">{elapsed(run.startedAt, run.finishedAt)}</span>
+          duration <span className="bright">{elapsed(run.startedAt, run.finishedAt)}</span>
         </span>
         <span className={`status-${run.status}`}>{run.status}</span>
       </div>
@@ -89,12 +89,12 @@ export function Run() {
       <div className="run-body">
         <div className="panel">
           <div className="pane-title">
-            <span className="section">étapes</span>
+            <span className="section">steps</span>
             <span className="dim">{run.steps.length}</span>
           </div>
           {run.steps.length === 0 && (
             <p className="dim" style={{ padding: "6px 12px" }}>
-              {isActive(run.status) ? "en cours de repérage…" : "aucune étape relevée"}
+              {isActive(run.status) ? "spotting in progress…" : "no step recorded"}
             </p>
           )}
           <ul className="steps">
@@ -104,8 +104,8 @@ export function Run() {
                 <li
                   key={s.idx}
                   className={clickable ? "clickable" : "inert"}
-                  // Une étape sans décalage ne mène nulle part : elle ne prétend pas le contraire.
-                  title={clickable ? "voir dans la sortie" : "position inconnue dans la sortie"}
+                  // A step with no offset leads nowhere: it doesn't pretend otherwise.
+                  title={clickable ? "view in output" : "unknown position in output"}
                   onClick={clickable ? () => terminal.current?.scrollToOffset(s.logOffset!) : undefined}
                 >
                   <span className={`mark status-${s.status}`}>{mark(s.status)}</span>
@@ -123,7 +123,7 @@ export function Run() {
       {run.artifacts.length > 0 && (
         <div className="panel" style={{ marginTop: 12 }}>
           <div className="pane-title">
-            <span className="section">artefacts</span>
+            <span className="section">artifacts</span>
             <span className="dim">{run.artifacts.length}</span>
           </div>
           <ul className="rows" style={{ padding: "0 12px" }}>

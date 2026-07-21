@@ -1,22 +1,22 @@
 /**
- * Traduction minimale des séquences ANSI de fastlane en segments colorés.
+ * Minimal translation of fastlane's ANSI sequences into colored segments.
  *
- * On ne reproduit pas un terminal : seuls les attributs de style (SGR) sont
- * interprétés, tout le reste — déplacements de curseur, effacements, séquences
- * OSC — est retiré du texte affiché. C'est assez pour rendre la sortie telle que
- * fastlane l'a voulue, et assez peu pour rester lisible.
+ * We don't reproduce a terminal: only the style attributes (SGR) are
+ * interpreted, everything else — cursor movement, erasing, OSC sequences —
+ * is stripped from the displayed text. That's enough to render the output
+ * the way fastlane intended it, and little enough to stay readable.
  *
- * Les retours à la ligne sont préservés tels quels : le nombre de lignes du texte
- * brut et du texte affiché est le même, ce dont dépend le repérage par décalage.
+ * Line breaks are preserved as-is: the raw text and the displayed text have
+ * the same number of lines, which is what offset-based spotting depends on.
  */
 export interface Segment {
   text: string;
-  /** Classe CSS ou chaîne vide : couleurs propres au terminal, jamais des jetons du thème. */
+  /** CSS class or empty string: colors belong to the terminal, never theme tokens. */
   className: string;
 }
 
 const SGR = /\x1b\[([0-9;]*)m/;
-/** Toute autre séquence de contrôle : curseur, effacement, OSC, puis les résidus. */
+/** Any other control sequence: cursor, erasing, OSC, then the leftovers. */
 const OTHER = /\x1b\][\s\S]*?(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][0-9A-Za-z]|\x1b./g;
 const CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/g;
 
@@ -51,7 +51,7 @@ function apply(style: Style, params: string): Style {
   return next;
 }
 
-/** Découpe un texte en segments stylés. Les séquences non gérées disparaissent. */
+/** Splits a text into styled segments. Unhandled sequences disappear. */
 export function ansiToSegments(text: string): Segment[] {
   const out: Segment[] = [];
   let style: Style = { fg: null, bold: false, dim: false };

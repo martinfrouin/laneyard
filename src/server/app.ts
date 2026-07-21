@@ -20,9 +20,9 @@ import type { RunSockets } from "./ws.js";
 export interface AppDeps {
   config: ConfigStore;
   db: Db;
-  /** Racine de données : workspaces, logs, artefacts. */
+  /** Data root: workspaces, logs, artifacts. */
   root: string;
-  /** Injecté pour que les tests n'aient pas besoin de Ruby ni de fastlane. */
+  /** Injected so tests don't need Ruby or fastlane. */
   lanes: (slug: string, workspacePath: string, fastlaneDir: string) => Promise<Lane[]>;
 }
 
@@ -33,7 +33,7 @@ export interface AppContext extends AppDeps {
   sockets?: RunSockets;
   workspacePath: (slug: string) => string;
   artifactsDir: (runId: number) => string;
-  /** Clone le dépôt s'il ne l'est pas encore. Lève si le clone échoue. */
+  /** Clones the repository if it isn't cloned yet. Throws if the clone fails. */
   ensureWorkspace: (slug: string) => Promise<void>;
 }
 
@@ -58,7 +58,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     artifactsDir: (runId) => join(deps.root, "artifacts", String(runId)),
     ensureWorkspace: async (slug) => {
       const entry = deps.config.project(slug);
-      if (!entry) throw new Error(`Projet inconnu : ${slug}`);
+      if (!entry) throw new Error(`Unknown project: ${slug}`);
       await new Workspace(workspacePath(slug), entry.git_url, entry.git_auth).ensureCloned();
     },
   };
@@ -74,12 +74,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return reply
         .code(429)
         .header("retry-after", Math.ceil(waitMs / 1000))
-        .send({ error: `Trop de tentatives. Réessayez dans ${Math.ceil(waitMs / 1000)} s.` });
+        .send({ error: `Too many attempts. Try again in ${Math.ceil(waitMs / 1000)}s.` });
     }
 
     if (!password || !hash || !(await verifyPassword(password, hash))) {
       throttle.recordFailure();
-      return reply.code(401).send({ error: "Mot de passe incorrect" });
+      return reply.code(401).send({ error: "Incorrect password" });
     }
 
     throttle.recordSuccess();
@@ -89,11 +89,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       .send({ ok: true });
   });
 
-  // Tout /api sauf /api/login exige une session.
+  // Every /api route except /api/login requires a session.
   app.addHook("onRequest", async (req, reply) => {
     if (!req.url.startsWith("/api") || req.url === "/api/login") return;
     if (!ctx.sessions.valid(req.cookies[SESSION_COOKIE])) {
-      return reply.code(401).send({ error: "Session requise" });
+      return reply.code(401).send({ error: "Session required" });
     }
   });
 
@@ -102,11 +102,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerProjectRoutes(app, ctx);
   await registerRunRoutes(app, ctx);
 
-  // Résolue depuis l'emplacement du module, pas depuis le dossier de données :
-  // `deps.root` est ~/.laneyard, la SPA construite vit dans le dépôt. Deux
-  // positions relatives, selon qu'on tourne sur les sources (`src/server`) ou
-  // sur le build (`dist/src/server`) ; toutes deux désignent `dist/web`, jamais
-  // le dossier `web/` des sources dont l'`index.html` n'est pas construit.
+  // Resolved from the module's location, not from the data folder:
+  // `deps.root` is ~/.laneyard, the built SPA lives in the repository. Two
+  // relative positions, depending on whether we're running on the sources
+  // (`src/server`) or on the build (`dist/src/server`); both point to
+  // `dist/web`, never the source `web/` folder whose `index.html` isn't built.
   const here = dirname(fileURLToPath(import.meta.url));
   const webRoot = [
     join(here, "..", "..", "dist", "web"),
@@ -115,9 +115,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   if (webRoot) {
     await app.register(fastifyStatic, { root: webRoot });
-    // Le routage vit côté navigateur : toute URL inconnue rend l'application.
+    // Routing lives on the browser side: any unknown URL renders the app.
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith("/api")) return reply.code(404).send({ error: "Route inconnue" });
+      if (req.url.startsWith("/api")) return reply.code(404).send({ error: "Unknown route" });
       return reply.sendFile("index.html");
     });
   }
