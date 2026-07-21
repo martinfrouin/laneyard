@@ -27,6 +27,7 @@ d'en suivre l'exécution en direct et de modifier le Fastfile sans ouvrir d'édi
 - Coffre de secrets injectés en variables d'environnement.
 - Notifications de fin de run : notification du navigateur, plus webhook optionnel par projet.
 - Écran « Préparation CI » : check-list d'autonomie par projet.
+- Documentation publique : README, CONTRIBUTING, licence MIT — le dépôt est public dès le départ.
 
 **Hors v1, mais la conception ne doit pas les rendre impossibles**
 
@@ -535,6 +536,37 @@ Contrainte de fond : **aucun vrai build dans la suite de tests.**
 - Caviardage des secrets en amont de toute persistance.
 - Aucune exposition Internet prévue ; un tunnel reste possible mais relève de l'utilisateur.
 
+## Publication
+
+Le dépôt est public dès le départ. La documentation d'accueil est un livrable de la v1, pas une
+tâche de fin de projet : un outil auto-hébergé que personne ne sait installer n'existe pas.
+
+**Licence MIT**, comme fastlane lui-même. Aucune friction pour quiconque veut essayer.
+
+### `README.md`
+
+1. **Une phrase et une capture.** Ce que c'est, montré avant d'être expliqué : le run en cours,
+   avec ses étapes et son terminal. Une seconde capture pour l'éditeur de Fastfile.
+2. **Pourquoi.** Le problème — dépendre d'un service facturé qui détient ta chaîne de signature.
+3. **Situer l'outil.** Tableau court face à Bitrise, Codemagic et GitHub Actions auto-hébergé :
+   ce que Laneyard fait, ce qu'il ne fait délibérément pas, et pour qui. Un lecteur doit pouvoir
+   conclure « ce n'est pas pour moi » en trente secondes — c'est un service qu'on lui rend.
+4. **Installation.** Prérequis (Node, Ruby, fastlane dans le projet), installation, premier
+   démarrage, déclaration d'un premier projet dans `config.yml`, installation en service.
+5. **Configuration.** Les deux fichiers, commentés, en exemples complets.
+6. **Sécurité.** Section explicite et non enfouie : conçu pour un réseau local, à ne pas exposer
+   sur Internet ; ce que contient le coffre, comment il est chiffré, où vit la clé ; le fait que
+   les secrets sont caviardés des logs. Un utilisateur doit savoir ce qu'il confie à l'outil.
+7. **État du projet et limites connues.** L'honnêteté sur ce qui n'existe pas encore vaut mieux
+   qu'un ticket déçu.
+
+### `CONTRIBUTING.md`
+
+L'architecture en une page — le rôle du sidecar surtout, qui est le point non évident du projet —
+comment lancer les tests sans machine de build, et deux recettes guidées : ajouter un item à la
+check-list Préparation CI, ajouter une règle d'heuristique. Ce sont les deux extensions qu'un
+contributeur voudra faire en premier, et les deux endroits où le module isolé doit être respecté.
+
 ## Jalons
 
 Le périmètre v1 couvre cinq sous-systèmes largement indépendants — sidecar Ruby, runner PTY,
@@ -550,7 +582,9 @@ verticale le plus tôt possible** plutôt qu'un empilement de couches :
 3. **Secrets et Préparation CI.** Le coffre, puis les items de check-list un par un.
 4. **Éditeur.** D'abord le mode texte avec vérification et sauvegarde, ensuite seulement la vue
    structurée — le mode texte seul est déjà utile, l'inverse n'est pas vrai.
-5. **Finitions.** Notifications, purge, thèmes, installation en service.
+5. **Finitions et publication.** Notifications, purge, thèmes, installation en service, puis
+   README, CONTRIBUTING et licence — écrits en dernier, quand les captures montrent le produit
+   réel, mais avant toute annonce.
 
 ## Décisions ouvertes
 
