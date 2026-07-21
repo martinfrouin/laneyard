@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { runAddCommand } from "./cli/add.js";
+import { runSecretCommand } from "./cli/secret.js";
 import { ConfigStore } from "./config/store.js";
 import { CacheStore } from "./db/cache.js";
 import { openDatabase } from "./db/open.js";
@@ -88,6 +89,8 @@ function invokedDirectly(): boolean {
 const USAGE = `laneyard — a self-hosted web UI for fastlane
 
   laneyard add        adopt the project in the current directory
+  laneyard secret set NAME [--project <slug>]
+                      store a secret, its value read from standard input
   laneyard            start the server
   laneyard --version  print the version
 
@@ -138,6 +141,20 @@ if (invokedDirectly()) {
       process.stderr.write(`${(cause as Error).message}\n`);
       process.exit(1);
     }
+  }
+
+  // Above the catch-all below, which would otherwise reject it as unknown.
+  if (command === "secret") {
+    const home = homeDir();
+    await mkdir(home, { recursive: true });
+    process.exit(
+      await runSecretCommand(home, rest, {
+        stdin: process.stdin,
+        interactive: process.stdin.isTTY === true,
+        out: (text) => process.stdout.write(text),
+        err: (text) => process.stderr.write(text),
+      }),
+    );
   }
 
   if (command !== undefined) {

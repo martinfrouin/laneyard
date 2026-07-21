@@ -126,6 +126,25 @@ not touch can be configured entirely from `config.yml`.
 Both files are watched: edit them by hand and Laneyard picks the change up. An invalid file is
 reported and the last valid configuration stays live — a typo never takes the server down.
 
+### Secrets
+
+Credentials do not live in a file. They go into an encrypted vault, from the Secrets tab of a
+project or from the command line:
+
+```bash
+laneyard secret set MATCH_PASSWORD --project cartes-ios   # reads the value from standard input
+echo "$GITHUB_TOKEN" | laneyard secret set GITHUB_TOKEN    # global, and out of your shell history
+```
+
+The value is never an argument: a command line ends up in `~/.zsh_history` and in the output of
+`ps`. Typing the command alone leaves you at a blank line — type or paste the value, then
+`Ctrl-D`.
+
+A secret becomes an environment variable for every run of the project it belongs to. Without
+`--project` it applies to every project; a project secret of the same name wins over a global
+one. Secrets are kept out of the logs unless you pass `--no-mask`, and a masked value must be at
+least four characters long — see below.
+
 ## Security
 
 Read this before putting Laneyard on a network.
