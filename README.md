@@ -33,10 +33,11 @@ change here.
 | cost per build               | electricity | per minute   | electricity        |
 | setup                        | one command | a signup form| a weekend          |
 | works offline                | yes         | no           | yes                |
-| build queue across a team    | planned     | yes          | yes                |
+| build queue across a team    | yes, serial | yes          | yes                |
 | runs on pull requests        | planned     | yes          | yes                |
 
-If your team needs parallel builds across a fleet today, use something else and come back later.
+Laneyard's queue is serial: runs are drained one at a time across every project, in the order
+they were asked for. If your team needs parallel builds across a fleet today, use something else.
 Laneyard is for one machine you control.
 
 ## Requirements
@@ -192,14 +193,16 @@ What this does *not* cover, stated plainly:
 - `✓` configuration entirely in files you can version and back up
 - `✓` adopt an existing fastlane project with one command
 - `✓` encrypted secret vault and log redaction
-- `▸` build queue, cancellation, timeouts surfaced in the UI
+- `✓` build queue, cancellation, timeouts surfaced in the UI
 - `○` a checklist that gets a project running unattended
 - `○` Fastfile editor in the browser
 - `○` git-triggered and scheduled builds
 
-Two limitations worth knowing today: listing lanes does not fetch the repository, so a lane you
-have just pushed appears after the next run; and a second run on a project is refused while the
-first is still going, since they would share one git workspace.
+Two things worth knowing today: listing lanes does not fetch the repository, so a lane you have
+just pushed appears after the next run; and runs execute one at a time across all projects, so a
+build triggered while another is going waits its turn rather than starting alongside it. A queued
+run survives a restart of the server — it is still queued when it comes back up, and starts on
+its own.
 
 ## Contributing
 
