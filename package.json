@@ -45,7 +45,7 @@
     "vitest": "^2.1.0"
   },
   "license": "MIT",
-  "description": "Your fastlane build server, on your own machine.",
+  "description": "A self-hosted web UI for fastlane: trigger lanes from your browser, watch builds stream live, keep your artifacts and your signing keys.",
   "repository": {
     "type": "git",
     "url": "https://github.com/martinfrouin/laneyard.git"
@@ -56,5 +56,15 @@
     "scripts",
     "README.md",
     "LICENSE"
+  ],
+  "keywords": [
+    "fastlane",
+    "ci",
+    "self-hosted",
+    "ios",
+    "android",
+    "mobile",
+    "build-server",
+    "testflight"
   ]
 }
