@@ -1,9 +1,9 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
 import { Document, parseDocument, YAMLSeq } from "yaml";
+import { VALID_NAME, ensureFirstAdmin, hasAccount } from "../config/accounts.js";
 import { loadServerConfig } from "../config/load.js";
-import { hashPassword } from "../server/auth.js";
+import { serializeYaml as serialize } from "../config/yaml.js";
 import { bad, bold, dim, field, heading, ok, warn } from "./style.js";
 import { acceptingAsker, terminalAsker } from "./prompt.js";
 import type { Asker } from "./prompt.js";
@@ -29,6 +29,10 @@ export interface NewProjectEntry {
 /**
  * Adds a project block to config.yml while preserving the rest of the file.
  *
+ * It writes no account: accounts are `ensureFirstAdmin`'s business, and a
+ * function that registered a project *and* invented a password would have two
+ * reasons to be called and one of them a surprise.
+ *
  * The edit goes through the YAML document rather than a parse/serialize
  * round trip: the user's comments — and the order of their keys — survive.
  * It's the same requirement as for the Fastfile: a hand-written file must
@@ -42,17 +46,6 @@ export async function addProjectToConfig(path: string, entry: NewProjectEntry): 
     doc = new Document({});
   }
   if (doc.contents === null) doc = new Document({});
-
-  // `server.users` counts as a password already set: adding a `password_hash`
-  // next to it would produce the one combination the loader refuses, and turn
-  // registering a project into breaking the server's configuration.
-  if (!doc.hasIn(["server", "password_hash"]) && !doc.hasIn(["server", "users"])) {
-    // A server with no password would refuse every connection: we generate one
-    // and print it once, leaving it to the caller to note it down.
-    const generated = randomBytes(9).toString("base64url");
-    doc.setIn(["server", "password_hash"], hashPassword(generated));
-    process.stdout.write(`\nGenerated password: ${generated}\n  (write it down, it won't be shown again)\n`);
-  }
 
   const projects = doc.getIn(["projects"]);
   const seq = projects instanceof YAMLSeq ? projects : new YAMLSeq();
@@ -68,17 +61,6 @@ export async function addProjectToConfig(path: string, entry: NewProjectEntry): 
   seq.add(doc.createNode(entry));
   await writeFile(path, serialize(doc), "utf8");
 }
-
-/**
- * The document back as text, with the line width left alone.
- *
- * The default folds anything past eighty columns, which means writing one
- * project rewraps the password hash someone else's line already held — a
- * hand-written file coming back out changed where nobody touched it. A git url
- * or a scrypt hash is a single token; breaking it makes the file harder to read
- * and harder to grep, and gains nothing.
- */
-const serialize = (doc: Document.Parsed | Document): string => doc.toString({ lineWidth: 0 });
 
 /**
  * Takes a project's block out of config.yml, leaving the rest of the file alone.
@@ -182,8 +164,30 @@ export async function runSetupCommand(
       );
     }
 
+    // A machine with no account gets its first admin here. Asked rather than
+    // assumed: the name is typed into a login form every day afterwards, and
+    // `admin` is a poor thing to call a person once there are two of them.
+    const firstAccount = !(await hasAccount(configPath));
+    if (firstAccount) {
+      process.stdout.write(
+        "\n" +
+          warn("This machine has no account yet.\n") +
+          dim("  You will sign in with a name and a password. The password is generated below.\n"),
+      );
+    }
+
     if (interactive) {
       process.stdout.write("\n" + dim("Press Return to accept a value, or type a new one.") + "\n\n");
+    }
+
+    const adminName = firstAccount
+      ? await asker.ask("your name for signing in", DEFAULT_ADMIN_NAME)
+      : null;
+    if (adminName !== null && !VALID_NAME.test(adminName)) {
+      process.stderr.write(
+        "\n" + bad(`Invalid name: "${adminName}". Letters, digits, dot, dash and underscore.`) + "\n",
+      );
+      return 1;
     }
 
     const slug = options.slug ?? (await asker.ask("name for this project", d.slug));
@@ -222,6 +226,12 @@ export async function runSetupCommand(
       process.stdout.write(dim("Nothing written.") + "\n");
       return 0;
     }
+
+    // The account first, so the server block is written before the project list
+    // it sits above. `null` when this machine already has one, and then nothing
+    // is written and nothing is printed.
+    const generatedPassword =
+      adminName === null ? null : await ensureFirstAdmin(configPath, adminName);
 
     // The machine half: how to reach the project. Nothing here belongs in a
     // repository — it is this server's own registry, plus its credentials.
@@ -262,6 +272,18 @@ export async function runSetupCommand(
           ? ok(`Wrote ${bold(LANEYARD_YML)} — ${bold("commit it")} so your team builds the same way.\n`)
           : warn(`Left the existing ${LANEYARD_YML} alone.\n`)) +
         ok(`Registered in ${configPath}\n`) +
+        // Last thing before the invitation to start the server, because it is
+        // the one line here that cannot be read again anywhere: the file holds
+        // a hash, and nothing holds the password.
+        (generatedPassword === null
+          ? ""
+          : heading("Your account") +
+            field("name", bold(adminName!)) + "\n" +
+            field("password", bold(generatedPassword)) + "\n" +
+            field("role", "admin") + "\n" +
+            "\n" +
+            warn("Write the password down — it is not shown again, and it is not stored.\n") +
+            dim("  Add a colleague later with `laneyard user add <name> --role builder`.\n")) +
         heading("Start Laneyard") +
         `  ${bold("laneyard")}\n` +
         `  ${dim(`http://localhost:${port}`)}\n` +
@@ -288,6 +310,14 @@ async function configuredPort(configPath: string): Promise<number> {
 
 /** The repository file, named once so the message and the write cannot disagree. */
 const LANEYARD_YML = "laneyard.yml";
+
+/**
+ * What the first account is called when nobody says otherwise.
+ *
+ * The same name a lone `password_hash` is read under, so a machine set up today
+ * and a machine upgraded from 0.2 sign in the same way.
+ */
+const DEFAULT_ADMIN_NAME = "admin";
 
 /**
  * The repository root, from where the command ran and how deep it sits.

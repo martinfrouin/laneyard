@@ -55,19 +55,27 @@ describe("addProjectToConfig", () => {
     await expect(addProjectToConfig(path, { ...entry, slug: "deja-la" })).rejects.toThrow(/deja-la/);
   });
 
-  it("creates the file and the server section if they don't exist", async () => {
+  it("creates the file if it doesn't exist", async () => {
     const dir = await tmpDir("laneyard-add-");
     const path = join(dir, "config.yml");
 
     await addProjectToConfig(path, entry);
 
-    const parsed = parse(await readFile(path, "utf8")) as {
-      server: { password_hash: string };
-      projects: unknown[];
-    };
+    const parsed = parse(await readFile(path, "utf8")) as { projects: unknown[] };
     expect(parsed.projects).toHaveLength(1);
-    // A password must exist, otherwise the server would refuse every connection.
-    expect(parsed.server.password_hash).toMatch(/^scrypt\$/);
+  });
+
+  it("invents no account — that is not this function's business", async () => {
+    // It used to write a `password_hash` on the way past, which meant
+    // registering a project could quietly create the legacy single-password
+    // form on a machine that was about to be given named accounts.
+    const dir = await tmpDir("laneyard-add-");
+    const path = join(dir, "config.yml");
+
+    await addProjectToConfig(path, entry);
+
+    const raw = await readFile(path, "utf8");
+    expect(raw).not.toContain("password_hash");
   });
 
   it("adds a projects section missing from an existing file", async () => {
@@ -163,7 +171,8 @@ describe("runSetupCommand", () => {
 
   it("takes what the user types over what it guessed", async () => {
     const { app, configPath } = await monorepo();
-    const answers = ["chosen-name", "", "develop", "", "", ""];
+    // The first question is the admin's name, because this machine has none yet.
+    const answers = ["", "chosen-name", "", "develop", "", "", ""];
     let i = 0;
 
     await runSetupCommand(app, configPath, {
@@ -179,6 +188,49 @@ describe("runSetupCommand", () => {
     };
     expect(written.projects[0]!.slug).toBe("chosen-name");
     expect(written.projects[0]!.default_branch).toBe("develop");
+  });
+
+  it("creates the first admin, in the users form and never a bare password_hash", async () => {
+    // A bare `password_hash` beside `users` is the one combination the loader
+    // refuses. Writing the legacy shape on a fresh machine would mean every new
+    // installation needs migrating the first time someone adds a colleague.
+    const { app, configPath } = await monorepo();
+    await runSetupCommand(app, configPath, { yes: true });
+
+    const written = parse(await readFile(configPath, "utf8")) as {
+      server: { password_hash?: string; users: { name: string; role: string; password_hash: string }[] };
+    };
+    expect(written.server.password_hash).toBeUndefined();
+    expect(written.server.users).toHaveLength(1);
+    expect(written.server.users[0]!.role).toBe("admin");
+    expect(written.server.users[0]!.password_hash).toMatch(/^scrypt\$/);
+  });
+
+  it("asks what to call that first account", async () => {
+    const { app, configPath } = await monorepo();
+    await runSetupCommand(app, configPath, {
+      asker: {
+        ask: async (label, proposed) => (label.includes("signing in") ? "martin" : proposed),
+        confirm: async () => true,
+        close: () => {},
+      },
+    });
+
+    const written = parse(await readFile(configPath, "utf8")) as {
+      server: { users: { name: string }[] };
+    };
+    expect(written.server.users[0]!.name).toBe("martin");
+  });
+
+  it("leaves the accounts of a machine that already has some alone", async () => {
+    const { app, configPath } = await monorepo();
+    await writeFile(configPath, 'server:\n  password_hash: "scrypt$a$b"\n', "utf8");
+
+    await runSetupCommand(app, configPath, { yes: true });
+
+    const raw = await readFile(configPath, "utf8");
+    expect(raw).toContain('password_hash: "scrypt$a$b"');
+    expect(raw).not.toContain("users:");
   });
 
   it("writes nothing when the user declines", async () => {

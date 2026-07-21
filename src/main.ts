@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { runSetupCommand } from "./cli/setup.js";
 import { runSecretCommand } from "./cli/secret.js";
+import { runUserCommand } from "./cli/user.js";
 import { ConfigStore } from "./config/store.js";
 import { CacheStore } from "./db/cache.js";
 import { openDatabase } from "./db/open.js";
@@ -128,6 +129,8 @@ const USAGE = `laneyard — a self-hosted web UI for fastlane
                       --yes accepts every detected value without asking
   laneyard secret set NAME [--project <slug>]
                       store a secret, its value read from standard input
+  laneyard user add NAME [--role admin|builder]
+                      create an account, its password read from standard input
   laneyard            start the server
   laneyard --version  print the version
 
@@ -189,6 +192,19 @@ if (invokedDirectly()) {
     await mkdir(home, { recursive: true });
     process.exit(
       await runSecretCommand(home, rest, {
+        stdin: process.stdin,
+        interactive: process.stdin.isTTY === true,
+        out: (text) => process.stdout.write(text),
+        err: (text) => process.stderr.write(text),
+      }),
+    );
+  }
+
+  if (command === "user") {
+    const home = homeDir();
+    await mkdir(home, { recursive: true });
+    process.exit(
+      await runUserCommand(home, rest, {
         stdin: process.stdin,
         interactive: process.stdin.isTTY === true,
         out: (text) => process.stdout.write(text),

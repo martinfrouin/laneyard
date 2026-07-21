@@ -103,6 +103,21 @@ export class SessionStore {
   revoke(token: string): void {
     this.tokens.delete(token);
   }
+
+  /**
+   * Drops every session belonging to a name.
+   *
+   * The identity is snapshotted when the session is issued, which is what makes
+   * a request cheap — but it also means removing an account or changing its role
+   * leaves the old answer live in whatever browsers already had it. Without this,
+   * "remove the account" and "revoke access" are two different things, while
+   * every interface that offers the first implies the second.
+   */
+  revokeAllFor(name: string): void {
+    for (const [token, identity] of this.tokens) {
+      if (identity.name === name) this.tokens.delete(token);
+    }
+  }
 }
 
 export const SESSION_COOKIE = "laneyard_session";

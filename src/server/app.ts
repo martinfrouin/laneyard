@@ -24,6 +24,7 @@ import { registerProjectRoutes } from "./routes/projects.js";
 import { registerReadinessRoutes } from "./routes/readiness.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerSecretRoutes } from "./routes/secrets.js";
+import { registerUserRoutes } from "./routes/users.js";
 import { registerWebSocket } from "./ws.js";
 import type { RunSockets } from "./ws.js";
 
@@ -210,15 +211,37 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.addHook("onRequest", async (req, reply) => {
     if (!req.url.startsWith("/api") || req.url.split("?")[0] === "/api/login") return;
 
-    const identity = ctx.sessions.get(req.cookies[SESSION_COOKIE]);
-    if (!identity) {
+    const session = ctx.sessions.get(req.cookies[SESSION_COOKIE]);
+    // The session holds who someone was when they signed in; the configuration
+    // holds who they are. They part company whenever config.yml is edited —
+    // from `laneyard user add`, which is another process entirely, or by hand.
+    // So the account is looked up again on every request: an account that is
+    // gone has no session, and a demotion takes effect at once rather than at
+    // the next restart. It is one find over a handful of entries.
+    const account = session && ctx.config.server()?.users.find((u) => u.name === session.name);
+    if (!session || !account) {
       return reply.code(401).send({ error: "Session required" });
     }
+    const identity = { name: account.name, role: account.role };
     req.identity = identity;
 
     if (identity.role !== "admin" && requiresAdmin(req.method, req.url)) {
       return reply.code(403).send({ error: "This action requires the admin role" });
     }
+  });
+
+  /**
+   * Signing out ends this session and no other.
+   *
+   * The same person may be signed in on a laptop and on a phone; pressing sign
+   * out on one of them must not be an act on the other. Only removing the
+   * account ends every session it has, and that is a different action with a
+   * different name.
+   */
+  app.post("/api/logout", async (req, reply) => {
+    const token = req.cookies[SESSION_COOKIE];
+    if (token) ctx.sessions.revoke(token);
+    return reply.clearCookie(SESSION_COOKIE, { path: "/" }).code(204).send();
   });
 
   app.get("/api/me", async (req) => {
@@ -235,6 +258,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerSecretRoutes(app, ctx);
   await registerReadinessRoutes(app, ctx);
   await registerFastfileRoutes(app, ctx);
+  await registerUserRoutes(app, ctx);
 
   // Resolved from the module's location, not from the data folder:
   // `deps.root` is ~/.laneyard, the built SPA lives in the repository. Two
