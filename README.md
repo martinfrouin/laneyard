@@ -1,10 +1,13 @@
 # Laneyard
 
-**Your fastlane build server, on your own machine.**
+**A self-hosted web UI for fastlane.**
 
-Laneyard runs the fastlane lanes you already have — on hardware you own. Trigger a build from
-your browser, watch it stream, download the artifact. Nobody else holds your signing keys, and
-nobody meters your minutes.
+Laneyard is a browser interface for the fastlane lanes you already have, running on hardware you
+own. Pick a lane, click run, watch the output stream, download the artifact. Nobody else holds
+your signing keys, and nobody meters your minutes.
+
+It replaces neither fastlane nor your Fastfile — it drives them. Your lanes stay exactly where
+they are.
 
 ![A build running in Laneyard: step timeline on the left, live output on the right, artifacts below](docs/screenshots/run.png)
 
@@ -46,32 +49,34 @@ Laneyard is for one machine you control.
 
 ## Install
 
-There is no published package yet — install from source.
+```bash
+npm install -g laneyard
+```
+
+Then, from a project you already build with fastlane:
+
+```bash
+cd ~/code/your-app
+laneyard add     # adopt this project
+laneyard         # start the server
+```
+
+`laneyard add` inspects what is there — the `fastlane` directory even when nested in a monorepo, a
+`Gemfile`, an Xcode project or a Gradle build — writes the matching block into
+`~/.laneyard/config.yml`, and prints a generated server password once. Write it down; it is not
+shown again.
+
+<details>
+<summary>Running from source instead</summary>
 
 ```bash
 git clone https://github.com/martinfrouin/laneyard.git
 cd laneyard
-npm install
-npm run build
+npm install      # builds on install
+npm link         # puts `laneyard` on your PATH
 ```
 
-Then adopt a project you already build with fastlane:
-
-```bash
-cd ~/code/your-app
-node /path/to/laneyard/dist/src/main.js add
-```
-
-It inspects what is there — the `fastlane` directory even when nested in a monorepo, a `Gemfile`,
-an Xcode project or a Gradle build — writes the matching block into `~/.laneyard/config.yml`, and
-prints a generated server password once. Note it down; it is not shown again.
-
-Start the server:
-
-```bash
-node /path/to/laneyard/dist/src/main.js
-# Laneyard listening on http://localhost:7890
-```
+</details>
 
 Open it from any machine on your network, sign in, and your lanes are listed — because Laneyard
 asked your project's own fastlane for them.

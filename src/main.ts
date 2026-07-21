@@ -1,6 +1,9 @@
+#!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { runAddCommand } from "./cli/add.js";
 import { ConfigStore } from "./config/store.js";
@@ -60,26 +63,86 @@ async function main(): Promise<void> {
   console.log(`Laneyard is listening on http://localhost:${server.port}`);
 }
 
-if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.js")) {
+/**
+ * True when this file is what the user launched, rather than something that
+ * imported it.
+ *
+ * Comparing real paths and not file names: installed globally, `laneyard` is a
+ * symlink whose name has nothing to do with this file, and a check on "main.js"
+ * would leave the command silently doing nothing.
+ */
+function invokedDirectly(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+const USAGE = `laneyard — a self-hosted web UI for fastlane
+
+  laneyard add        adopt the project in the current directory
+  laneyard            start the server
+  laneyard --version  print the version
+
+Configuration lives in ~/.laneyard/config.yml, or in $LANEYARD_HOME.
+`;
+
+function homeDir(): string {
+  return process.env["LANEYARD_HOME"] ?? join(homedir(), ".laneyard");
+}
+
+/** Turns a startup failure into something a newcomer can act on. */
+function explainStartupFailure(cause: unknown): string {
+  const message = (cause as Error).message;
+  if (message.includes("ENOENT") && message.includes("config.yml")) {
+    return (
+      "No configuration yet.\n\n" +
+      "  cd into a project that already uses fastlane, then run:\n" +
+      "    laneyard add\n\n" +
+      "That writes " + join(homeDir(), "config.yml") + " for you."
+    );
+  }
+  return message;
+}
+
+if (invokedDirectly()) {
   const [, , command, ...rest] = process.argv;
+
+  if (command === "--help" || command === "-h" || command === "help") {
+    process.stdout.write(USAGE);
+    process.exit(0);
+  }
+
+  if (command === "--version" || command === "-v") {
+    process.stdout.write(`${version}\n`);
+    process.exit(0);
+  }
+
   if (command === "add") {
-    const home = process.env["LANEYARD_HOME"] ?? join(homedir(), ".laneyard");
+    const home = homeDir();
     await mkdir(home, { recursive: true });
     const slugIndex = rest.indexOf("--slug");
     const slug = slugIndex === -1 ? undefined : rest[slugIndex + 1];
     try {
       process.exit(await runAddCommand(process.cwd(), join(home, "config.yml"), slug));
     } catch (cause) {
-      // A slug already taken, an unreadable file: these are ordinary
-      // situations from the user's side. A stack trace isn't an error
-      // message, it just gives the impression that the tool is broken.
+      // A taken slug or an unreadable file are ordinary situations. A stack
+      // trace is not an error message; it just suggests the tool is broken.
       process.stderr.write(`${(cause as Error).message}\n`);
       process.exit(1);
     }
-  } else {
-    main().catch((err: unknown) => {
-      console.error(err);
-      process.exit(1);
-    });
   }
+
+  if (command !== undefined) {
+    process.stderr.write(`Unknown command: ${command}\n\n${USAGE}`);
+    process.exit(1);
+  }
+
+  main().catch((cause: unknown) => {
+    process.stderr.write(`${explainStartupFailure(cause)}\n`);
+    process.exit(1);
+  });
 }
