@@ -44,6 +44,18 @@ export class Workspace {
   }
 
   private async git(args: string[], cwd = this.path, timeout?: number): Promise<string> {
+    return (await this.gitRaw(args, cwd, timeout)).trim();
+  }
+
+  /**
+   * Same as `git`, but without trimming the output.
+   *
+   * `status --porcelain` output is column-sensitive: its first two characters
+   * are a status code that can themselves be a literal space. Trimming the
+   * whole blob — fine for a commit hash or a single config value — would eat
+   * that leading space and misalign every line parsed after it.
+   */
+  private async gitRaw(args: string[], cwd = this.path, timeout?: number): Promise<string> {
     try {
       const { stdout } = await exec("git", args, {
         cwd,
@@ -51,7 +63,7 @@ export class Workspace {
         maxBuffer: 32 * 1024 * 1024,
         ...(timeout === undefined ? {} : { timeout }),
       });
-      return stdout.trim();
+      return stdout;
     } catch (cause) {
       const err = cause as { stderr?: string; message: string };
       const detail = (err.stderr || err.message).trim();
@@ -96,6 +108,71 @@ export class Workspace {
 
   async headSha(): Promise<string> {
     return this.git(["rev-parse", "HEAD"]);
+  }
+
+  /**
+   * Paths with uncommitted changes, tracked only — the same rule as
+   * `isDirty`, for the same reason: a build scatters untracked files around,
+   * and listing them here would bury the change someone actually made.
+   */
+  async status(): Promise<string[]> {
+    const raw = await this.gitRaw(["status", "--porcelain", "--untracked-files=no"]);
+    // Porcelain v1: two status letters, a space, then the path. The trailing
+    // split produces one empty element for the final newline; drop it rather
+    // than turn it into a bogus empty path.
+    return raw
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => line.slice(3));
+  }
+
+  /** The unified diff of uncommitted changes, as text. Every path if none is given. */
+  async diff(path?: string): Promise<string> {
+    return this.git(path === undefined ? ["diff"] : ["diff", "--", path]);
+  }
+
+  /**
+   * Stages exactly the given paths and commits them — never `git add -A`. A
+   * build leaves files scattered in the workspace, and committing them
+   * because they happened to be there is how something ends up in someone's
+   * release.
+   *
+   * Commits under the repository's own git identity if it has one; otherwise
+   * as `Laneyard <laneyard@localhost>`, because a commit from a name nobody
+   * recognises is worse than one that admits what made it. The identity
+   * actually used is returned so the interface can say so.
+   */
+  async commit(message: string, paths: string[]): Promise<{ author: string }> {
+    if (paths.length === 0) throw new Error("commit: no paths given");
+    await this.git(["add", "--", ...paths]);
+
+    const identity = await this.gitIdentity();
+    const author = identity ?? "Laneyard <laneyard@localhost>";
+    const asLaneyard = identity
+      ? []
+      : ["-c", "user.name=Laneyard", "-c", "user.email=laneyard@localhost"];
+    await this.git([...asLaneyard, "commit", "-m", message]);
+    return { author };
+  }
+
+  /**
+   * `name <email>` from the repository's own git configuration — local or
+   * global, however git itself resolves it for this workspace — or null if
+   * none is set at all.
+   */
+  private async gitIdentity(): Promise<string | null> {
+    try {
+      const name = await this.git(["config", "user.name"]);
+      const email = await this.git(["config", "user.email"]);
+      return name && email ? `${name} <${email}>` : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Pushes the branch, surfacing git's own message on failure rather than a generic one. */
+  async push(branch: string): Promise<void> {
+    await this.git(["push", "origin", branch]);
   }
 
   /**
