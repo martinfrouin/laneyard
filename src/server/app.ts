@@ -16,7 +16,8 @@ import { RunQueue } from "../runner/queue.js";
 import type { Lane } from "../sidecar/lanes.js";
 import type { LaneUses } from "../sidecar/uses.js";
 import type { Vault } from "../secrets/vault.js";
-import { LoginThrottle, SESSION_COOKIE, SessionStore, verifyPassword } from "./auth.js";
+import { authenticate, LoginThrottle, SESSION_COOKIE, SessionStore } from "./auth.js";
+import type { Identity } from "./auth.js";
 import { registerFastfileRoutes } from "./routes/fastfile.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerReadinessRoutes } from "./routes/readiness.js";
@@ -66,11 +67,24 @@ declare module "fastify" {
      */
     queue: RunQueue;
   }
+
+  interface FastifyRequest {
+    /**
+     * Who is making this request. Set by the session hook, so it is present on
+     * every `/api` route except `/api/login` — and optional in the type because
+     * that exception is real.
+     */
+    identity?: Identity;
+  }
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(cookie);
+
+  // Declared up front so every request carries the field on the same shape,
+  // rather than each one growing a property the first time a hook writes it.
+  app.decorateRequest("identity", undefined);
 
   const workspacePath = (slug: string) => join(deps.root, "workspaces", slug);
 
@@ -156,12 +170,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const throttle = new LoginThrottle();
 
   app.post("/api/login", async (req, reply) => {
-    const { password } = req.body as { password?: string };
-    const hash = deps.config
-      .server()
-      ?.users.find((u) => u.name === LEGACY_ADMIN_NAME)?.password_hash;
+    const { name, password } = (req.body ?? {}) as { name?: string; password?: string };
+    // A body with no name is the 0.2 login form, which knew only a password.
+    // It authenticates as `admin`, which is precisely the account a lone
+    // `server.password_hash` is loaded as — so an upgraded install keeps
+    // working, and the loader still owes nobody an answer about which form
+    // the file used.
+    const account = name ?? LEGACY_ADMIN_NAME;
 
-    const waitMs = throttle.retryAfterMs();
+    const waitMs = throttle.retryAfterMs(account);
     if (waitMs > 0) {
       return reply
         .code(429)
@@ -169,24 +186,41 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         .send({ error: `Too many attempts. Try again in ${Math.ceil(waitMs / 1000)}s.` });
     }
 
-    if (!password || !hash || !(await verifyPassword(password, hash))) {
-      throttle.recordFailure();
-      return reply.code(401).send({ error: "Incorrect password" });
+    const users = deps.config.server()?.users ?? [];
+    const identity = password ? await authenticate(users, account, password) : null;
+    if (!identity) {
+      throttle.recordFailure(account);
+      // One message for a wrong password and for a name that does not exist:
+      // telling them apart is telling a stranger which accounts are worth
+      // attacking.
+      return reply.code(401).send({ error: "Incorrect name or password" });
     }
 
-    throttle.recordSuccess();
-    const token = ctx.sessions.issue();
+    throttle.recordSuccess(account);
+    const token = ctx.sessions.issue(identity);
     return reply
       .setCookie(SESSION_COOKIE, token, { path: "/", httpOnly: true, sameSite: "lax" })
-      .send({ ok: true });
+      .send({ ok: true, name: identity.name, role: identity.role });
   });
 
-  // Every /api route except /api/login requires a session.
+  // Every /api route except /api/login requires a session, and the routes on
+  // the admin list require an admin. Both decided here, once: a permission
+  // expressed as an `if` inside a handler is one nobody finds during an audit.
   app.addHook("onRequest", async (req, reply) => {
-    if (!req.url.startsWith("/api") || req.url === "/api/login") return;
-    if (!ctx.sessions.valid(req.cookies[SESSION_COOKIE])) {
+    if (!req.url.startsWith("/api") || req.url.split("?")[0] === "/api/login") return;
+
+    const identity = ctx.sessions.get(req.cookies[SESSION_COOKIE]);
+    if (!identity) {
       return reply.code(401).send({ error: "Session required" });
     }
+    req.identity = identity;
+  });
+
+  app.get("/api/me", async (req) => {
+    // Non-null because the hook above rejected every request that has no
+    // identity before this handler could be reached.
+    const { name, role } = req.identity!;
+    return { name, role };
   });
 
   ctx.sockets = await registerWebSocket(app, ctx);

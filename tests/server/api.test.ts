@@ -64,6 +64,60 @@ describe("API", () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it("still accepts the legacy password-only form, so a 0.2 install upgrades in place", async () => {
+    // This harness's config.yml is the old single-password form, unedited.
+    const { app } = await harness();
+    const res = await app.inject({ method: "POST", url: "/api/login", payload: { password: "secret" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.cookies[0]!.value.length).toBeGreaterThan(0);
+  });
+
+  it("accepts that same account by its name", async () => {
+    const { app } = await harness();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/login",
+      payload: { name: "admin", password: "secret" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("says who is signed in", async () => {
+    const { app } = await harness();
+    const session = await login(app);
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/me",
+      cookies: { laneyard_session: session },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ name: "admin", role: "admin" });
+  });
+
+  it("refuses to say who is signed in without a session", async () => {
+    const { app } = await harness();
+    expect((await app.inject({ method: "GET", url: "/api/me" })).statusCode).toBe(401);
+  });
+
+  it("answers an unknown name exactly as it answers a wrong password", async () => {
+    // A different status or a different message would turn the login form into
+    // a way to find out which accounts exist.
+    const { app } = await harness();
+    const unknown = await app.inject({
+      method: "POST",
+      url: "/api/login",
+      payload: { name: "nobody", password: "secret" },
+    });
+    const wrong = await app.inject({
+      method: "POST",
+      url: "/api/login",
+      payload: { name: "admin", password: "nope" },
+    });
+    expect(unknown.statusCode).toBe(401);
+    expect(unknown.statusCode).toBe(wrong.statusCode);
+    expect(unknown.json()).toEqual(wrong.json());
+  });
+
   it("lists the projects once logged in", async () => {
     const { app } = await harness();
     const session = await login(app);
