@@ -16,9 +16,14 @@ export function Projects() {
 
   if (projects.length === 0) {
     return (
-      <p className="dim">
-        Aucun projet déclaré. Ajoutez un bloc dans <code>~/.laneyard/config.yml</code>.
-      </p>
+      <>
+        <h2 className="section">projets</h2>
+        {/* Un état vide est une consigne, pas une humeur : il donne la commande. */}
+        <p className="dim">
+          aucun projet. lancez <code>laneyard add</code> depuis le dossier d'un projet pour le
+          déclarer.
+        </p>
+      </>
     );
   }
 

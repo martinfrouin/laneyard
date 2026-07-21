@@ -37,6 +37,19 @@ describe("Workspace", () => {
     await expect(ws.prepare("main")).rejects.toThrow(/non commit/i);
   });
 
+  it("ne se déclare pas sale pour des fichiers non suivis laissés par un build", async () => {
+    const origin = await makeOriginRepo({ "a.txt": "v1" });
+    const ws = new Workspace(join(await tmpDir(), "p"), origin);
+    await ws.prepare("main");
+
+    // Ce que produit un vrai run : fastlane réécrit son README, le build sort un binaire.
+    await writeFile(join(ws.path, "README-fastlane.md"), "généré", "utf8");
+
+    expect(await ws.isDirty()).toBe(false);
+    // Et le run suivant doit pouvoir préparer le workspace.
+    await expect(ws.prepare("main")).resolves.toMatch(/^[0-9a-f]{40}$/);
+  });
+
   it("échoue lisiblement sur une branche inconnue", async () => {
     const origin = await makeOriginRepo({ "a.txt": "v1" });
     const ws = new Workspace(join(await tmpDir(), "p"), origin);

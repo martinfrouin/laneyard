@@ -43,10 +43,10 @@ export function Project() {
     <>
       <h2 className="section">lanes</h2>
       {/* Une erreur de lecture des lanes est dite, jamais masquée par une liste vide. */}
-      {lanesError && <p className="status-failed">Lanes illisibles — {lanesError}</p>}
+      {lanesError && <p className="status-failed">lanes illisibles — {lanesError}</p>}
       {loadingLanes && <p className="dim">lecture du dépôt…</p>}
       {!loadingLanes && !lanesError && lanes.filter((l) => !l.private).length === 0 && (
-        <p className="dim">Aucune lane publique dans ce Fastfile.</p>
+        <p className="dim">aucune lane publique dans ce Fastfile.</p>
       )}
 
       <ul className="rows">
@@ -65,12 +65,12 @@ export function Project() {
             </li>
           ))}
       </ul>
-      {triggerError && <p className="status-failed">Lancement refusé — {triggerError}</p>}
+      {triggerError && <p className="status-failed">lancement refusé — {triggerError}</p>}
 
       <h2 className="section" style={{ marginTop: 20 }}>
         runs
       </h2>
-      {runs.length === 0 && <p className="dim">Aucun run pour l'instant.</p>}
+      {runs.length === 0 && <p className="dim">aucun run pour l'instant.</p>}
       <ul className="rows">
         {runs.map((r) => (
           <li key={r.id}>

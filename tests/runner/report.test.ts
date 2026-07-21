@@ -49,6 +49,20 @@ describe("readReport", () => {
     expect(steps[1]!.status).toBe("failed");
   });
 
+  it("décode les entités XML du nom d'action", async () => {
+    const dir = await tmpDir("laneyard-rep-");
+    // Cas réel : le nom d'une action `sh` est la commande, échappée par le rapport.
+    await writeFile(
+      join(dir, "report.xml"),
+      `<testsuites><testsuite name="fastlane.lanes">
+         <testcase classname="fastlane.lanes" name="0: mkdir -p b &amp;&amp; echo x &gt; y" time="0.1"/>
+       </testsuite></testsuites>`,
+      "utf8",
+    );
+    const steps = await readReport(join(dir, "report.xml"));
+    expect(steps?.[0]?.name).toBe("mkdir -p b && echo x > y");
+  });
+
   it("renvoie null si le rapport n'existe pas", async () => {
     const dir = await tmpDir("laneyard-rep-");
     expect(await readReport(join(dir, "report.xml"))).toBeNull();

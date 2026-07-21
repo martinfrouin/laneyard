@@ -24,6 +24,17 @@ describe("LiveStepTracker", () => {
     expect(t.steps().map((s) => s.name)).toEqual(["build_app"]);
   });
 
+  it("repère un séparateur réel de fastlane, couleurs ANSI comprises", () => {
+    const t = new LiveStepTracker();
+    // Ligne copiée d'une exécution réelle : le nom d'une action `sh` est la
+    // commande entière, avec ses espaces.
+    t.consume(
+      "[13:14:00]: [32m--- Step: mkdir -p ../build && echo x > y.ipa ---[0m\r\n",
+      0,
+    );
+    expect(t.steps().map((s) => s.name)).toEqual(["mkdir -p ../build && echo x > y.ipa"]);
+  });
+
   it("ignore une ligne qui mentionne Step sans être un séparateur", () => {
     const t = new LiveStepTracker();
     t.consume("Le mot Step: apparaît ici sans tirets\n", 0);

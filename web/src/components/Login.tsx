@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { api } from "../api";
 
 export function Login({ onSuccess }: { onSuccess: () => void }) {
   const [password, setPassword] = useState("");
@@ -6,7 +7,6 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { api } = await import("../api");
     if (await api.login(password)) onSuccess();
     else setFailed(true);
   };
@@ -20,7 +20,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
         </label>
         <button type="submit">entrer</button>
-        {failed && <p className="status-failed">Mot de passe incorrect</p>}
+        {failed && <p className="status-failed">mot de passe incorrect</p>}
       </form>
     </div>
   );

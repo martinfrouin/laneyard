@@ -14,8 +14,34 @@ export interface ReportStep {
 const TESTCASE = /<testcase\b([^>]*?)\/>|<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g;
 // `\b` obligatoire : sans lui, chercher `name=` trouve d'abord la fin de
 // `classname=`, que fastlane écrit systématiquement en premier attribut.
-const ATTR = (source: string, name: string): string | null =>
-  new RegExp(`\\b${name}="([^"]*)"`).exec(source)?.[1] ?? null;
+/**
+ * Décode les entités XML d'une valeur d'attribut.
+ *
+ * Indispensable : un nom d'action `sh` contient la commande entière, donc
+ * volontiers un `&&` ou une redirection, que le rapport écrit `&amp;&amp;`
+ * et `&gt;`. Sans décodage, l'interface affiche l'échappement.
+ */
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
+const decodeXml = (value: string): string =>
+  value.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (whole, code: string) => {
+    if (code.startsWith("#x") || code.startsWith("#X")) {
+      return String.fromCodePoint(parseInt(code.slice(2), 16));
+    }
+    if (code.startsWith("#")) return String.fromCodePoint(Number(code.slice(1)));
+    return ENTITIES[code] ?? whole;
+  });
+
+const ATTR = (source: string, name: string): string | null => {
+  const raw = new RegExp(`\\b${name}="([^"]*)"`).exec(source)?.[1];
+  return raw === undefined ? null : decodeXml(raw);
+};
 
 /**
  * Lit le rapport JUnit que fastlane écrit à chaque exécution.

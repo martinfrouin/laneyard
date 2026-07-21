@@ -49,9 +49,17 @@ export class Workspace {
     }
   }
 
+  /**
+   * Vrai s'il existe des modifications *suivies* non commitées.
+   *
+   * Les fichiers non suivis sont volontairement ignorés : un build en sème
+   * (fastlane réécrit `fastlane/README.md` à chaque exécution, les artefacts
+   * atterrissent dans `build/`), et surtout `git checkout` ne les détruit pas.
+   * Les compter rendrait tout second run impossible sans protéger quoi que ce soit.
+   */
   async isDirty(): Promise<boolean> {
     if (!(await this.exists())) return false;
-    return (await this.git(["status", "--porcelain"])) !== "";
+    return (await this.git(["status", "--porcelain", "--untracked-files=no"])) !== "";
   }
 
   async headSha(): Promise<string> {

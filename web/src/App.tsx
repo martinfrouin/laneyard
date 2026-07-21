@@ -4,6 +4,7 @@ import { Login } from "./components/Login";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Project } from "./pages/Project";
 import { Projects } from "./pages/Projects";
+import { Run } from "./pages/Run";
 import { api } from "./api";
 import type { ProjectSummary } from "./api";
 import { mark } from "./status";
@@ -55,8 +56,8 @@ export function App() {
         <Routes>
           <Route path="/" element={<Projects />} />
           <Route path="/p/:slug" element={<Project />} />
-          <Route path="/r/:id" element={<p className="dim">run</p>} />
-          <Route path="*" element={<p className="dim">Page inconnue.</p>} />
+          <Route path="/r/:id" element={<Run />} />
+          <Route path="*" element={<p className="dim">page inconnue.</p>} />
         </Routes>
       </main>
     </div>

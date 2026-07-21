@@ -1,7 +1,10 @@
 import cookie from "@fastify/cookie";
+import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ConfigStore } from "../config/store.js";
 import type { Db } from "../db/open.js";
 import { RunStore } from "../db/runs.js";
@@ -86,6 +89,26 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await registerProjectRoutes(app, ctx);
   await registerRunRoutes(app, ctx);
+
+  // Résolue depuis l'emplacement du module, pas depuis le dossier de données :
+  // `deps.root` est ~/.laneyard, la SPA construite vit dans le dépôt. Deux
+  // positions relatives, selon qu'on tourne sur les sources (`src/server`) ou
+  // sur le build (`dist/src/server`) ; toutes deux désignent `dist/web`, jamais
+  // le dossier `web/` des sources dont l'`index.html` n'est pas construit.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const webRoot = [
+    join(here, "..", "..", "dist", "web"),
+    join(here, "..", "..", "..", "dist", "web"),
+  ].find((candidate) => existsSync(join(candidate, "index.html")));
+
+  if (webRoot) {
+    await app.register(fastifyStatic, { root: webRoot });
+    // Le routage vit côté navigateur : toute URL inconnue rend l'application.
+    app.setNotFoundHandler((req, reply) => {
+      if (req.url.startsWith("/api")) return reply.code(404).send({ error: "Route inconnue" });
+      return reply.sendFile("index.html");
+    });
+  }
 
   return app;
 }
