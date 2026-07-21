@@ -373,7 +373,11 @@ import type { RepoConfig, ServerConfig } from "./schema.js";
 export type LoadResult<T> = { ok: true; config: T } | { ok: false; error: string };
 
 /** Lit et valide un fichier YAML. N'échoue jamais par exception : l'appelant décide. */
-async function loadYamlFile<T>(path: string, schema: ZodType<T>): Promise<LoadResult<T>> {
+// `ZodType<T, any, any>` et non `ZodType<T>` : sur un schéma comportant des `.default()`,
+// le type d'entrée diffère du type de sortie, et TypeScript infère alors `T` sur l'entrée
+// — donc avec des champs optionnels. Neutraliser les deux derniers paramètres force
+// l'inférence sur la sortie, seule pertinente ici.
+async function loadYamlFile<T>(path: string, schema: ZodType<T, any, any>): Promise<LoadResult<T>> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
