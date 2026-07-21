@@ -3804,6 +3804,10 @@ export async function registerWebSocket(app: FastifyInstance, ctx: AppContext): 
   await app.register(websocket);
 
   app.get("/api/runs/:id/stream", { websocket: true }, (socket, req) => {
+    // Redondance assumée : le hook global d'`app.ts` refuse déjà tout `/api`
+    // sans session, et le fait dès la poignée de main — un client non authentifié
+    // reçoit un 401 HTTP et n'arrive jamais ici. Ce garde ne coûte rien et évite
+    // qu'une exemption future de ce hook ouvre silencieusement le flux.
     if (!ctx.sessions.valid(req.cookies[SESSION_COOKIE])) {
       socket.close(4001, "Session requise");
       return;
