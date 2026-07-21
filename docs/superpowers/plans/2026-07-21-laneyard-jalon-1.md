@@ -101,8 +101,8 @@ Expected: échec — le module `src/main.ts` n'existe pas.
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "dev": "node --watch --experimental-strip-types src/main.ts",
-    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json && cp src/db/schema.sql dist/src/db/",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -121,11 +121,15 @@ Expected: échec — le module `src/main.ts` n'existe pas.
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   }
 }
 ```
+
+> `tsx` plutôt que `node --experimental-strip-types` : le retrait de types natif ne réécrit pas les
+> spécificateurs `./x.js` vers `./x.ts`, or c'est la forme qu'impose `moduleResolution: NodeNext`.
 
 `tsconfig.json` :
 
@@ -707,9 +711,9 @@ export function openDatabase(path: string): Db {
 }
 ```
 
-> Le fichier `schema.sql` doit être copié à côté du JS compilé. Ajouter au script `build` :
-> `&& cp src/db/schema.sql dist/src/db/`. En développement, `--experimental-strip-types` exécute
-> les sources, le chemin est donc déjà correct.
+> Le fichier `schema.sql` doit être copié à côté du JS compilé — le script `build` de la tâche 1
+> s'en charge déjà. En développement, `tsx` exécute les sources : le chemin est correct sans rien
+> faire.
 
 `src/db/runs.ts` :
 
@@ -1020,6 +1024,18 @@ describe("Workspace", () => {
     const ws = new Workspace(join(await tmpDir(), "p"), origin);
     await expect(ws.prepare("nexiste-pas")).rejects.toThrow(/nexiste-pas/);
   });
+
+  it("clone à la demande sans basculer de branche", async () => {
+    const origin = await makeOriginRepo({ "laneyard.yml": "runtime: system\n" });
+    const ws = new Workspace(join(await tmpDir(), "p"), origin);
+
+    await ws.ensureCloned();
+    expect(await ws.exists()).toBe(true);
+
+    // Idempotent : un second appel ne refait rien et ne lève pas.
+    await ws.ensureCloned();
+    expect(await ws.exists()).toBe(true);
+  });
 });
 ```
 
@@ -1094,13 +1110,24 @@ export class Workspace {
   }
 
   /**
+   * Garantit la présence du clone, sans toucher à la branche courante.
+   *
+   * Nécessaire avant toute lecture du dépôt hors run — lister les lanes, lire le
+   * laneyard.yml — puisque ces informations vivent dans les fichiers du projet.
+   */
+  async ensureCloned(onProgress?: (line: string) => void): Promise<void> {
+    if (await this.exists()) return;
+    onProgress?.(`Clonage de ${this.gitUrl}…`);
+    await this.git(["clone", this.gitUrl, this.path], process.cwd());
+  }
+
+  /**
    * Amène le workspace sur la branche demandée, à jour.
    * Clone au premier appel, se contente d'un fetch ensuite.
    */
   async prepare(branch: string, onProgress?: (line: string) => void): Promise<string> {
     if (!(await this.exists())) {
-      onProgress?.(`Clonage de ${this.gitUrl}…`);
-      await this.git(["clone", this.gitUrl, this.path], process.cwd());
+      await this.ensureCloned(onProgress);
     } else {
       if (await this.isDirty()) {
         throw new Error(
@@ -1236,9 +1263,18 @@ Expected: échec — `ruby/introspect.rb` n'existe pas.
 
 require "json"
 
-def fail_with(message)
-  puts JSON.generate({ ok: false, error: message.to_s })
+# Voir plus bas : la vraie sortie standard est mise de côté dès le départ pour que
+# rien d'autre que notre JSON ne puisse s'y glisser.
+REAL_STDOUT = $stdout.dup
+
+def respond(payload)
+  REAL_STDOUT.puts JSON.generate(payload)
+  REAL_STDOUT.flush
   exit 0
+end
+
+def fail_with(message)
+  respond({ ok: false, error: message.to_s })
 end
 
 command = ARGV[0]
@@ -1247,6 +1283,12 @@ fastlane_dir = dir_index ? ARGV[dir_index + 1] : "fastlane"
 fastfile_path = File.join(Dir.pwd, fastlane_dir, "Fastfile")
 
 fail_with("Fastfile introuvable : #{fastfile_path}") unless File.exist?(fastfile_path)
+
+# fastlane écrit volontiers sur la sortie standard — avertissements de plugin,
+# messages de dépréciation, bandeau de mise à jour. Un seul de ces messages
+# corromprait le JSON attendu par l'appelant. Tout part donc vers l'erreur standard,
+# et seule `respond` écrit sur la vraie sortie.
+$stdout = $stderr
 
 begin
   require "fastlane"
@@ -1273,7 +1315,7 @@ end
 case command
 when "lanes"
   begin
-    puts JSON.generate({ ok: true, lanes: collect_lanes(fastfile_path) })
+    respond({ ok: true, lanes: collect_lanes(fastfile_path) })
   rescue Exception => e # rubocop:disable Lint/RescueException
     # Un Fastfile est du Ruby arbitraire : son chargement peut lever n'importe quoi,
     # y compris des erreurs de syntaxe qui ne descendent pas de StandardError.
@@ -1387,7 +1429,7 @@ Expected: échec — modules introuvables.
 ```ts
 import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:util";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -1614,6 +1656,7 @@ import { join } from "node:path";
  */
 export class LogWriter {
   private _offset = 0;
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly handle: FileHandle) {}
 
@@ -1621,15 +1664,27 @@ export class LogWriter {
     return this._offset;
   }
 
+  /**
+   * Réserve le décalage immédiatement puis sérialise les écritures.
+   *
+   * Les fragments arrivent d'un PTY, sans attendre : si le décalage était calculé
+   * après l'écriture, deux fragments concurrents pourraient s'attribuer la même
+   * position et le rattrapage côté navigateur dupliquerait ou perdrait du texte.
+   */
   async append(chunk: string): Promise<number> {
     const buf = Buffer.from(chunk, "utf8");
-    await this.handle.write(buf);
     const start = this._offset;
     this._offset += buf.byteLength;
+
+    this.queue = this.queue.then(() => this.handle.write(buf)).catch(() => {
+      // Le fichier a pu être fermé pendant que le processus finissait de parler.
+    });
+    await this.queue;
     return start;
   }
 
   async close(): Promise<void> {
+    await this.queue;
     await this.handle.close();
   }
 }
@@ -2091,14 +2146,16 @@ git commit -m "feat(runner): collecte des artefacts par motifs"
 # Faux fastlane pour les tests : rejoue une sortie enregistrée sans rien construire.
 #
 #   FAKE_FASTLANE_SCENARIO=success|failure|slow
-#   FAKE_FASTLANE_REPORT_DIR=<dossier où écrire report.xml>
+#   FAKE_FASTLANE_REPORT_DIR=<dossier où écrire report.xml, défaut $PWD/fastlane>
 #
-# Il imite le format de sortie réel — séparateurs d'étape et rapport JUnit — sans
-# aucune dépendance à Xcode, ce qui rend la suite de tests exécutable partout.
+# Il imite le comportement réel : séparateurs d'étape, rapport JUnit écrit
+# relativement au dossier courant, et production d'un artefact. Aucune dépendance
+# à Xcode, la suite de tests est donc exécutable partout.
 set -euo pipefail
 
 scenario="${FAKE_FASTLANE_SCENARIO:-success}"
-report_dir="${FAKE_FASTLANE_REPORT_DIR:-}"
+# Comme le vrai fastlane, le rapport est écrit dans le dossier fastlane du projet.
+report_dir="${FAKE_FASTLANE_REPORT_DIR:-$PWD/fastlane}"
 
 echo "[09:41:01]: Driving the lane '$*'"
 echo "[09:41:02]: ------ Step: match ------"
@@ -2110,8 +2167,12 @@ if [ "$scenario" = "slow" ]; then
   sleep 30
 fi
 
+# Un build produit son artefact. Le dossier build/ est ignoré par git dans les
+# fixtures, ce qui évite qu'un artefact déplacé salisse le workspace.
+mkdir -p "$PWD/build"
+echo "faux binaire" > "$PWD/build/Popotes.ipa"
+
 write_report() {
-  [ -n "$report_dir" ] || return 0
   mkdir -p "$report_dir"
   cat > "$report_dir/report.xml" <<XML
 <?xml version="1.0" encoding="UTF-8"?>
@@ -2236,13 +2297,24 @@ export interface PtyHandle {
  * affichage habituel, et une saisie reste possible si un jour un run en demande une.
  */
 export function startPty(opts: PtyRunOptions): { handle: PtyHandle; done: Promise<PtyRunResult> } {
-  const proc = pty.spawn(opts.command, opts.args, {
-    name: "xterm-256color",
-    cols: 120,
-    rows: 40,
-    cwd: opts.cwd,
-    env: opts.env as Record<string, string>,
-  });
+  let proc: pty.IPty;
+  try {
+    proc = pty.spawn(opts.command, opts.args, {
+      name: "xterm-256color",
+      cols: 120,
+      rows: 40,
+      cwd: opts.cwd,
+      env: opts.env as Record<string, string>,
+    });
+  } catch (cause) {
+    // Commande introuvable : selon la plateforme, node-pty lève ou rend 127.
+    // On uniformise pour que l'appelant n'ait qu'un seul cas à traiter.
+    opts.onData(`\nLancement impossible : ${(cause as Error).message}\n`);
+    return {
+      handle: { write: () => {}, kill: () => {} },
+      done: Promise.resolve({ exitCode: 127, signal: null, timedOut: false }),
+    };
+  }
 
   let timedOut = false;
   let timer: NodeJS.Timeout | undefined;
@@ -2334,10 +2406,22 @@ import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
 const FAKE_DIR = join(process.cwd(), "tests", "fixtures", "fake-fastlane");
 
+const SETTINGS = {
+  fastlane_dir: "fastlane",
+  runtime: "system" as const,
+  timeout_minutes: 5,
+  interactive_default: false,
+  artifact_globs: ["build/**/*.ipa"],
+  required_secrets: [],
+};
+
 async function harness(scenario: "success" | "failure") {
   const origin = await makeOriginRepo({
     "fastlane/Fastfile": "lane :beta do\nend\n",
-    "build/Popotes.ipa": "faux binaire",
+    // build/ est ignoré : l'artefact est produit par le faux fastlane pendant le
+    // run, comme en vrai. Rien de suivi par git n'est déplacé, le workspace
+    // reste donc propre pour le run suivant.
+    ".gitignore": "build/\n",
   });
   const root = await tmpDir("laneyard-root-");
   const db = openDatabase(":memory:");
@@ -2354,14 +2438,7 @@ async function harness(scenario: "success" | "failure") {
     artifactsDir: join(root, "artifacts", String(runId)),
     gitUrl: origin,
     branch: "main",
-    settings: {
-      fastlane_dir: "fastlane",
-      runtime: "system",
-      timeout_minutes: 5,
-      interactive_default: false,
-      artifact_globs: ["build/**/*.ipa"],
-      required_secrets: [],
-    },
+    resolveSettings: async () => SETTINGS,
     env: { PATH: `${FAKE_DIR}:${process.env["PATH"]}`, FAKE_FASTLANE_SCENARIO: scenario },
     onChunk: () => {},
   });
@@ -2423,14 +2500,7 @@ describe("executeRun", () => {
       artifactsDir: join(root, "art"),
       gitUrl: "/nexiste/pas/depot.git",
       branch: "main",
-      settings: {
-        fastlane_dir: "fastlane",
-        runtime: "system",
-        timeout_minutes: 5,
-        interactive_default: false,
-        artifact_globs: [],
-        required_secrets: [],
-      },
+      resolveSettings: async () => SETTINGS,
       env: {},
       onChunk: () => {},
     });
@@ -2475,7 +2545,12 @@ export interface ExecuteRunOptions {
   gitUrl: string;
   gitAuth?: GitAuth;
   branch: string;
-  settings: ProjectSettings;
+  /**
+   * Résout les réglages effectifs. Appelée **après** la préparation du workspace,
+   * parce que le laneyard.yml qu'elle lit vit dans le dépôt : au premier run,
+   * il n'existe pas encore sur disque au moment où le run est créé.
+   */
+  resolveSettings: () => Promise<ProjectSettings>;
   env: NodeJS.ProcessEnv;
   /** Appelé pour chaque fragment de sortie, avec sa position dans le log. */
   onChunk: (chunk: string, offset: number) => void;
@@ -2504,7 +2579,7 @@ function summarizeFailure(log: string, exitCode: number): string {
  * pour un serveur de build.
  */
 export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
-  const { runId, runs, logs, settings } = opts;
+  const { runId, runs, logs } = opts;
   const writer = await logs.open(runId);
   const tracker = new LiveStepTracker();
 
@@ -2533,6 +2608,10 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   }
 
   runs.markRunning(runId, { branch: opts.branch, commitSha });
+
+  // Le workspace existe enfin : c'est seulement maintenant que le laneyard.yml
+  // du dépôt est lisible, donc seulement maintenant que les réglages sont connus.
+  const settings = await opts.resolveSettings();
 
   // --- Exécution ---------------------------------------------------------
   const useBundle = settings.runtime === "bundle";
@@ -3034,11 +3113,14 @@ import { join } from "node:path";
 import type { ConfigStore } from "../config/store.js";
 import type { Db } from "../db/open.js";
 import { RunStore } from "../db/runs.js";
+import { Workspace } from "../git/workspace.js";
 import { LogStore } from "../logs/store.js";
 import type { Lane } from "../sidecar/lanes.js";
 import { SESSION_COOKIE, SessionStore, verifyPassword } from "./auth.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerRunRoutes } from "./routes/runs.js";
+import { registerWebSocket } from "./ws.js";
+import type { RunSockets } from "./ws.js";
 
 export interface AppDeps {
   config: ConfigStore;
@@ -3053,21 +3135,37 @@ export interface AppContext extends AppDeps {
   runs: RunStore;
   logs: LogStore;
   sessions: SessionStore;
+  sockets?: RunSockets;
   workspacePath: (slug: string) => string;
   artifactsDir: (runId: number) => string;
+  /** Clone le dépôt s'il ne l'est pas encore. Lève si le clone échoue. */
+  ensureWorkspace: (slug: string) => Promise<void>;
+}
+
+declare module "fastify" {
+  interface FastifyInstance {
+    broadcastRunChunk?: (runId: number, chunk: string, offset: number) => void;
+  }
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(cookie);
 
+  const workspacePath = (slug: string) => join(deps.root, "workspaces", slug);
+
   const ctx: AppContext = {
     ...deps,
     runs: new RunStore(deps.db),
     logs: new LogStore(join(deps.root, "logs")),
     sessions: new SessionStore(),
-    workspacePath: (slug) => join(deps.root, "workspaces", slug),
+    workspacePath,
     artifactsDir: (runId) => join(deps.root, "artifacts", String(runId)),
+    ensureWorkspace: async (slug) => {
+      const entry = deps.config.project(slug);
+      if (!entry) throw new Error(`Projet inconnu : ${slug}`);
+      await new Workspace(workspacePath(slug), entry.git_url, entry.git_auth).ensureCloned();
+    },
   };
 
   app.post("/api/login", async (req, reply) => {
@@ -3091,6 +3189,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return reply.code(401).send({ error: "Session requise" });
     }
   });
+
+  ctx.sockets = await registerWebSocket(app, ctx);
 
   await registerProjectRoutes(app, ctx);
   await registerRunRoutes(app, ctx);
@@ -3120,11 +3220,15 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
 
   app.get("/api/projects/:slug/lanes", async (req, reply) => {
     const { slug } = req.params as { slug: string };
-    const resolved = await ctx.config.resolve(slug, ctx.workspacePath(slug));
-    if (!resolved) return reply.code(404).send({ error: "Projet inconnu" });
+    const entry = ctx.config.project(slug);
+    if (!entry) return reply.code(404).send({ error: "Projet inconnu" });
 
     try {
-      return await ctx.lanes(slug, ctx.workspacePath(slug), resolved.settings.fastlane_dir);
+      // Les lanes vivent dans le dépôt : sans clone, il n'y a rien à lire.
+      // Un projet fraîchement déclaré doit être utilisable sans lancer un run à l'aveugle.
+      await ctx.ensureWorkspace(slug);
+      const resolved = await ctx.config.resolve(slug, ctx.workspacePath(slug));
+      return await ctx.lanes(slug, ctx.workspacePath(slug), resolved!.settings.fastlane_dir);
     } catch (cause) {
       // Workspace pas encore cloné, Fastfile cassé, sidecar en échec : l'interface
       // doit pouvoir le dire à l'utilisateur plutôt qu'afficher une liste vide.
@@ -3153,13 +3257,15 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
     const { slug } = req.params as { slug: string };
     const body = req.body as { lane?: string; platform?: string | null; params?: Record<string, string> };
 
-    const resolved = await ctx.config.resolve(slug, ctx.workspacePath(slug));
-    if (!resolved) return reply.code(404).send({ error: "Projet inconnu" });
+    const entry = ctx.config.project(slug);
+    if (!entry) return reply.code(404).send({ error: "Projet inconnu" });
     if (!body.lane) return reply.code(400).send({ error: "Lane manquante" });
 
     // On vérifie que la lane existe vraiment avant de créer un run voué à l'échec.
     try {
-      const lanes = await ctx.lanes(slug, ctx.workspacePath(slug), resolved.settings.fastlane_dir);
+      await ctx.ensureWorkspace(slug);
+      const resolved = await ctx.config.resolve(slug, ctx.workspacePath(slug));
+      const lanes = await ctx.lanes(slug, ctx.workspacePath(slug), resolved!.settings.fastlane_dir);
       if (!lanes.some((l) => l.name === body.lane)) {
         return reply.code(400).send({ error: `Lane inconnue : ${body.lane}` });
       }
@@ -3181,10 +3287,14 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
       logs: ctx.logs,
       workspacePath: ctx.workspacePath(slug),
       artifactsDir: ctx.artifactsDir(id),
-      gitUrl: resolved.entry.git_url,
-      gitAuth: resolved.entry.git_auth,
-      branch: resolved.entry.default_branch,
-      settings: resolved.settings,
+      gitUrl: entry.git_url,
+      gitAuth: entry.git_auth,
+      branch: entry.default_branch,
+      // Résolus après le clone, quand le laneyard.yml du dépôt est enfin lisible.
+      resolveSettings: async () => {
+        const r = await ctx.config.resolve(slug, ctx.workspacePath(slug));
+        return r!.settings;
+      },
       env: process.env,
       onChunk: (chunk, offset) => app.broadcastRunChunk?.(id, chunk, offset),
     });
@@ -3219,16 +3329,10 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
 }
 ```
 
-> `app.broadcastRunChunk` est ajouté par le module WebSocket de la tâche 15. L'appel optionnel
-> permet aux tests d'API de tourner sans lui. Déclarer le type dans `src/server/app.ts` :
->
-> ```ts
-> declare module "fastify" {
->   interface FastifyInstance {
->     broadcastRunChunk?: (runId: number, chunk: string, offset: number) => void;
->   }
-> }
-> ```
+> `app.broadcastRunChunk` et `ctx.sockets` viennent du module WebSocket de la tâche 15. Les appels
+> optionnels (`?.`) permettent d'écrire et de faire passer les tests d'API de cette tâche avant
+> qu'il existe : créer `src/server/ws.ts` avec un export vide provisoire si le typage bloque, la
+> tâche 15 le remplit.
 
 - [ ] **Step 4 : Lancer les tests**
 
@@ -3410,16 +3514,8 @@ export async function registerWebSocket(app: FastifyInstance, ctx: AppContext): 
 }
 ```
 
-Dans `src/server/app.ts`, après l'enregistrement des routes :
-
-```ts
-import { registerWebSocket } from "./ws.js";
-// …
-const hub = await registerWebSocket(app, ctx);
-ctx.sockets = hub;
-```
-
-Ajouter `sockets?: RunSockets` à `AppContext`, et dans `routes/runs.ts`, notifier la fin du run :
+`src/server/app.ts` appelle déjà `registerWebSocket` (tâche 14) : remplacer le module provisoire
+par celui-ci suffit. Dans `routes/runs.ts`, notifier la fin du run :
 
 ```ts
 void executeRun({ /* … */ }).then((r) => ctx.sockets?.finish(id, r.status));
@@ -3733,16 +3829,90 @@ export const api = {
 };
 ```
 
-`web/vite.config.ts` :
+`web/index.html` :
+
+```html
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>laneyard</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+`web/src/main.tsx` :
+
+```tsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import { App } from "./App";
+import "./theme.css";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </StrictMode>,
+);
+```
+
+`web/src/App.tsx` — coquille de navigation. Les écrans arrivent aux tâches 18 et 19 ; à ce stade,
+des composants vides suffisent à faire construire le projet.
+
+```tsx
+import { useEffect, useState } from "react";
+import { Route, Routes } from "react-router-dom";
+import { Login } from "./components/Login";
+import { api } from "./api";
+
+export function App() {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // Un 401 sur le premier appel signifie qu'il faut se connecter.
+    api
+      .projects()
+      .then(() => setAuthenticated(true))
+      .catch(() => setAuthenticated(false));
+  }, []);
+
+  if (authenticated === null) return <p className="dim">chargement…</p>;
+  if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
+
+  return (
+    <div className="shell">
+      <header>laneyard</header>
+      <Routes>
+        <Route path="/" element={<p className="dim">projets</p>} />
+      </Routes>
+    </div>
+  );
+}
+```
+
+`web/vite.config.ts` — la racine se résout depuis le dossier du fichier de configuration, il ne
+faut donc surtout pas y remettre `"web"`.
 
 ```ts
 import react from "@vitejs/plugin-react";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
+const here = dirname(fileURLToPath(import.meta.url));
+
 export default defineConfig({
-  root: "web",
+  root: here,
   plugins: [react()],
-  build: { outDir: "../dist/web", emptyOutDir: true },
+  build: { outDir: join(here, "..", "dist", "web"), emptyOutDir: true },
   server: {
     proxy: {
       "/api": { target: "http://localhost:7890", ws: true },
@@ -3750,6 +3920,9 @@ export default defineConfig({
   },
 });
 ```
+
+`web/src/components/Login.tsx` doit exister avant que ce squelette construise : le prendre tel
+quel dans la tâche 18, ou écrire une version minimale ici et la compléter ensuite.
 
 - [ ] **Step 3 : Vérifier que le front se construit**
 
@@ -3829,7 +4002,7 @@ export function Projects() {
 
 ```tsx
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { Lane, RunDetail } from "../api";
 
@@ -3871,9 +4044,9 @@ export function Project() {
       <ul>
         {runs.map((r) => (
           <li key={r.id}>
-            <a href={`/r/${r.id}`} className={`status-${r.status}`}>
+            <Link to={`/r/${r.id}`} className={`status-${r.status}`}>
               #{r.id} {r.lane} — {r.status}
-            </a>
+            </Link>
           </li>
         ))}
       </ul>
@@ -4019,10 +4192,33 @@ défilent le terminal jusqu'à la bonne position au clic.
 Lancer un run depuis l'interface et vérifier : la sortie arrive en direct, les étapes apparaissent
 en fin de run, l'artefact se télécharge, et recharger la page en plein run ne perd aucune ligne.
 
-- [ ] **Step 3 : Commit**
+- [ ] **Step 3 : Servir la SPA construite depuis le serveur**
+
+Sans cela, l'application n'est accessible que derrière le serveur de développement Vite, et un
+rechargement sur `/r/42` renvoie 404. Dans `src/server/app.ts`, après les routes :
+
+```ts
+import fastifyStatic from "@fastify/static";
+import { existsSync } from "node:fs";
+// …
+const webRoot = join(deps.root, "..", "dist", "web");
+if (existsSync(webRoot)) {
+  await app.register(fastifyStatic, { root: webRoot });
+  // Le routage vit côté navigateur : toute URL inconnue rend l'application.
+  app.setNotFoundHandler((req, reply) => {
+    if (req.url.startsWith("/api")) return reply.code(404).send({ error: "Route inconnue" });
+    return reply.sendFile("index.html");
+  });
+}
+```
+
+En développement, `dist/web` n'existe pas et le bloc est simplement ignoré : le proxy Vite prend
+le relais.
+
+- [ ] **Step 4 : Commit**
 
 ```bash
-git add web/src
+git add web/src src/server/app.ts
 git commit -m "feat(web): écran de run, terminal en direct et artefacts"
 ```
 
@@ -4054,7 +4250,7 @@ describe("fil complet", () => {
     const origin = await makeOriginRepo({
       "fastlane/Fastfile": "lane :beta do\nend\n",
       "laneyard.yml": 'runtime: system\nartifact_globs: ["build/**/*.ipa"]\n',
-      "build/Popotes.ipa": "faux binaire",
+      ".gitignore": "build/\n",
     });
     const root = await tmpDir("laneyard-e2e-");
 
@@ -4124,8 +4320,14 @@ projects:
 });
 ```
 
-Ce test vérifie au passage que le `laneyard.yml` du dépôt est bien pris en compte : sans lui,
-`runtime` vaudrait `bundle` et les motifs d'artefacts seraient vides.
+Ce test vérifie au passage deux choses non évidentes : que le `laneyard.yml` du dépôt est pris en
+compte — sans lui, `runtime` vaudrait `bundle` et les motifs d'artefacts seraient vides — et qu'il
+l'est **dès le premier run**, alors que le fichier n'existait pas sur disque au moment où le run a
+été créé. C'est le scénario que la résolution tardive des réglages est là pour couvrir.
+
+Il vérifie aussi que le workspace reste propre : l'artefact est produit par le run dans un dossier
+ignoré par git, donc son déplacement ne laisse pas de modification non commitée qui ferait échouer
+le run suivant.
 
 - [ ] **Step 2 : Lancer le test**
 
