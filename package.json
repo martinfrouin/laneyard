@@ -51,7 +51,8 @@
     "url": "https://github.com/martinfrouin/laneyard.git"
   },
   "files": [
-    "dist",
+    "dist/src",
+    "dist/web",
     "ruby",
     "scripts",
     "README.md",
