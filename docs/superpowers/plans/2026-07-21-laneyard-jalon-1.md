@@ -2001,6 +2001,8 @@ describe("readReport", () => {
     const dir = await tmpDir("laneyard-rep-");
     await writeFile(join(dir, "report.xml"), FAILED, "utf8");
     const steps = await readReport(join(dir, "report.xml"));
+    // Restreint le type autant que ça vérifie : la suite indexe le tableau.
+    if (!steps) throw new Error("rapport attendu");
 
     expect(steps).toHaveLength(2);
     expect(steps[0]!.status).toBe("success");
