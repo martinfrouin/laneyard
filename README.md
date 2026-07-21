@@ -181,6 +181,29 @@ until the lane runs, so it is reported as undetermined — `○`, with the reaso
 guessed either way. The same applies to anything a lane computes: a checklist that guesses gets
 believed, and then it is worse than no checklist. Android signing is not covered at all yet.
 
+### The Fastfile
+
+Every project has a Fastfile tab. **It is a text editor** — your file, in a box, with Ruby
+syntax highlighting and nothing between you and it. The structured view described in the design
+document, where lanes and actions are things you arrange rather than type, is still to come. This
+is the honest first half of it, and it is useful on its own: fixing a lane at 2am should not
+require an SSH session.
+
+**Every write is verified.** Saving sends the file to the server, which writes it byte-for-byte —
+no reformatting, no trailing-newline fixing, no reordering — then asks fastlane to parse it and
+list its lanes. If that fails, the previous content is put back on disk before the request
+answers, and the reason fastlane gave appears above the editor with your work still in the box.
+A broken Fastfile never reaches a workspace a run might build from.
+
+Saving is explicit, never automatic: verification is a Ruby subprocess, not a regular expression,
+and an editor that ran it on every keystroke would be both slow and dangerous. `⌘S` is another
+way to ask, not an autosave. Laneyard also refuses to write at all while a run of that project is
+in flight — that run is reading the very file the write would replace.
+
+Below the editor is what git makes of the workspace: the diff, a message field, `commit` and
+`push`. A commit stages exactly the files that changed and never `git add -A` — a build leaves
+artifacts and reports scattered around, and none of them belong in your history.
+
 ## Security
 
 Read this before putting Laneyard on a network.
@@ -225,7 +248,7 @@ What this does *not* cover, stated plainly:
 - `✓` encrypted secret vault and log redaction
 - `✓` build queue, cancellation, timeouts surfaced in the UI
 - `✓` a checklist that gets a project running unattended
-- `○` Fastfile editor in the browser
+- `✓` edit the Fastfile in the browser, verified on every save
 - `○` git-triggered and scheduled builds
 
 Two things worth knowing today: listing lanes does not fetch the repository, so a lane you have

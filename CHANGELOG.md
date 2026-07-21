@@ -32,6 +32,26 @@ instead of leaving you to find out at 2am.
 - The checks run when you open the tab or press refresh, never on their own, and the tab shows
   when they last ran.
 
+### Edit the Fastfile from the browser
+
+A new tab per project, and it is a text editor: your file, in a box, with Ruby syntax
+highlighting. The structured view described in the design document is still to come — this is the
+half that is useful on its own, because fixing a lane at 2am should not require an SSH session.
+
+- **Every write is verified.** The file is written byte-for-byte, then fastlane is asked to parse
+  it and list its lanes. If that fails, the previous content is back on disk before the request
+  answers, and fastlane's own reason appears above the editor with your work still in the box.
+- Saving is explicit — verification is a Ruby subprocess, not a regular expression. `⌘S` is
+  another way to ask, not an autosave.
+- Writing is refused outright while a run of that project is in flight: that run is reading the
+  file the write would replace.
+- Below the editor: the diff, a message field, `commit` and `push`. A commit stages exactly the
+  files that changed and never `git add -A` — a build leaves artifacts and reports scattered
+  around, and none of them belong in your history.
+- CodeMirror is bundled, never fetched from a CDN, and loaded only by this tab: a build machine
+  with no route to the internet opens this screen like any other, and the other three tabs weigh
+  what they did before.
+
 ### Builds queue instead of being refused
 
 - Triggering a run while another is in flight no longer returns an error. Runs queue and execute
