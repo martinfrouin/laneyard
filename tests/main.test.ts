@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createServerFromConfig } from "../src/main.js";
@@ -32,5 +32,21 @@ describe("createServerFromConfig", () => {
     await app.close();
 
     expect(new RunStore(db).get(id)?.status).toBe("interrupted");
+  });
+
+  it("creates the vault key on first start", async () => {
+    const root = await tmpDir("laneyard-main-");
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      join(root, "config.yml"),
+      `server: { password_hash: "${hashPassword("x")}" }\nprojects: []\n`,
+      "utf8",
+    );
+
+    const { app } = await createServerFromConfig(root);
+    await app.close();
+
+    const info = await stat(join(root, "key"));
+    expect(info.mode & 0o077).toBe(0);
   });
 });

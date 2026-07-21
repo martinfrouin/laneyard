@@ -11,7 +11,9 @@ import { CacheStore } from "./db/cache.js";
 import { openDatabase } from "./db/open.js";
 import type { Db } from "./db/open.js";
 import { RunStore } from "./db/runs.js";
+import { SecretStore } from "./db/secrets.js";
 import { buildApp } from "./server/app.js";
+import { Vault } from "./secrets/vault.js";
 import { makeInvoke } from "./sidecar/bridge.js";
 import { LaneReader } from "./sidecar/lanes.js";
 
@@ -35,10 +37,12 @@ export async function createServerFromConfig(root: string): Promise<Started> {
   new RunStore(db).interruptActive();
 
   const cache = new CacheStore(db);
+  const vault = await Vault.open(root, new SecretStore(db));
   const app = await buildApp({
     config,
     db,
     root,
+    vault,
     lanes: async (slug, workspacePath, fastlaneDir) => {
       const resolved = await config.resolve(slug, workspacePath);
       const reader = new LaneReader(cache, makeInvoke(resolved?.settings.runtime ?? "bundle"));
