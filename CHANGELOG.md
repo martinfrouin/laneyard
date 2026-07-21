@@ -71,6 +71,11 @@ loaded, with an explanation:
   per run, which does not exist yet.
 
 ### Fixed
+- A Fastfile whose top level called an action — `default_platform(:ios)`, the first line of most
+  real ones — could not be read at all: the lane list came back as an error about an unknown
+  action. Loading a Fastfile runs it, so fastlane's action catalogue now goes in first.
+- Installing the package no longer downloads React and CodeMirror. They build the interface, which
+  ships already built; nine runtime dependencies remain.
 
 - A run could take the whole server down with it: `executeRun` could throw on three paths after
   the build finished, and its only caller had no rejection handler. An unhandled rejection ends

@@ -66,4 +66,21 @@ describe("introspect.rb lanes", () => {
     expect(res.ok).toBe(false);
     expect(res.error.length).toBeGreaterThan(0);
   }, 180_000);
+
+  it("reads a Fastfile that calls an action at top level", async () => {
+    // `default_platform(:ios)` is the first line of most real Fastfiles. Loading
+    // a Fastfile runs it, so the action catalogue has to be in place first —
+    // without it fastlane raises "Could not find action, lane or variable" and
+    // the whole lane list is lost over an ordinary line.
+    const dir = await projectWithFastfile(`
+      default_platform(:ios)
+
+      lane :beta do
+      end
+    `);
+
+    const res = (await introspect(dir, "lanes")) as { ok: boolean; lanes: { name: string }[] };
+    expect(res.ok).toBe(true);
+    expect(res.lanes.map((l) => l.name)).toContain("beta");
+  }, 180_000);
 });

@@ -50,6 +50,12 @@ rescue LoadError => e
 end
 
 def collect_lanes(fastfile_path)
+  # Loading a Fastfile *runs* it, and its top level may call actions —
+  # `default_platform(:ios)` is on the first line of most real Fastfiles. Without
+  # the action catalogue loaded first, fastlane raises "Could not find action,
+  # lane or variable" and the whole lane list is lost over an ordinary line.
+  Fastlane.load_actions
+
   ff = Fastlane::FastFile.new(fastfile_path)
   lanes = []
   ff.runner.lanes.each do |platform, platform_lanes|
