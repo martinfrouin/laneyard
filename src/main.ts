@@ -1,6 +1,8 @@
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
+import { runAddCommand } from "./cli/add.js";
 import { ConfigStore } from "./config/store.js";
 import { CacheStore } from "./db/cache.js";
 import { openDatabase } from "./db/open.js";
@@ -59,8 +61,17 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.js")) {
-  main().catch((err: unknown) => {
-    console.error(err);
-    process.exit(1);
-  });
+  const [, , command, ...rest] = process.argv;
+  if (command === "add") {
+    const home = process.env["LANEYARD_HOME"] ?? join(homedir(), ".laneyard");
+    await mkdir(home, { recursive: true });
+    const slugIndex = rest.indexOf("--slug");
+    const slug = slugIndex === -1 ? undefined : rest[slugIndex + 1];
+    process.exit(await runAddCommand(process.cwd(), join(home, "config.yml"), slug));
+  } else {
+    main().catch((err: unknown) => {
+      console.error(err);
+      process.exit(1);
+    });
+  }
 }
