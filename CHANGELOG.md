@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.1 — unreleased
+
+Everything below shipped in 0.2.0 except the three entries under *Changed*, which landed just
+after it went out. If you installed 0.2.0, `laneyard add` still guesses silently and writes a
+`fastlane_dir` measured from the wrong directory — upgrade.
+
+## 0.2.0
 
 ### Secrets are encrypted, and kept out of the logs
 
@@ -69,6 +75,14 @@ loaded, with an explanation:
 - `git_auth: { kind: token }` — only SSH keys are implemented.
 - `max_concurrent_runs` above 1 — the queue is serial; parallel builds need a working directory
   per run, which does not exist yet.
+
+### Fixed in 0.2.1
+
+- **Listing lanes never worked from an installed copy.** The sidecar script was located two levels
+  above its module, which is right when running from the sources and wrong once built — an
+  installed Laneyard looked for it in `dist/ruby/` and reported "No such file or directory". Both
+  0.1.0 and 0.2.0 are affected: the feature the whole tool is built on was broken for everyone who
+  installed it, and worked perfectly for the one person running it from a checkout.
 
 ### Changed
 

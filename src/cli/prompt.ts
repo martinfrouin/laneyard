@@ -7,8 +7,12 @@ import { createInterface } from "node:readline/promises";
  * that a user runs once should not drag in a UI toolkit.
  */
 export interface Asker {
-  /** Shows a proposed value and returns it, or whatever the user typed instead. */
-  ask(label: string, proposed: string): Promise<string>;
+  /**
+   * Shows a proposed value and returns it, or whatever the user typed instead.
+   * `hint` is printed above the question, for the ones whose wording cannot
+   * carry the explanation on its own.
+   */
+  ask(label: string, proposed: string, hint?: string): Promise<string>;
   /** A yes/no question. `defaultYes` decides what a bare Return means. */
   confirm(question: string, defaultYes: boolean): Promise<boolean>;
   close(): void;
@@ -19,7 +23,8 @@ export function terminalAsker(): Asker {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
   return {
-    async ask(label, proposed) {
+    async ask(label, proposed, hint) {
+      if (hint) process.stdout.write(`\n  ${hint}\n`);
       // The proposal is shown in the prompt rather than typed for the user:
       // pressing Return accepts it, which is what someone does nine times out
       // of ten, and correcting it costs one line.

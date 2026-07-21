@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { Document, parseDocument, YAMLSeq } from "yaml";
+import { loadServerConfig } from "../config/load.js";
 import { hashPassword } from "../server/auth.js";
 import { acceptingAsker, terminalAsker } from "./prompt.js";
 import type { Asker } from "./prompt.js";
@@ -95,6 +96,7 @@ export async function runSetupCommand(
     return 1;
   }
 
+  const interactive = options.asker === undefined && options.yes !== true;
   const asker = options.asker ?? (options.yes ? acceptingAsker : terminalAsker());
 
   try {
@@ -108,7 +110,10 @@ export async function runSetupCommand(
           `  the whole repository — so the paths below are relative to its root.\n`,
       );
     }
-    process.stdout.write("\nPress Return to accept a value, or type a new one.\n\n");
+    // Only worth saying when something is actually being asked.
+    if (interactive) {
+      process.stdout.write("\nPress Return to accept a value, or type a new one.\n\n");
+    }
 
     const slug = options.slug ?? (await asker.ask("name for this project", d.slug));
     if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
@@ -117,15 +122,25 @@ export async function runSetupCommand(
     }
 
     const gitUrl = await asker.ask("repository", d.gitUrl);
-    const branch = await asker.ask("branch to build", d.defaultBranch);
+    const branch = await asker.ask(
+      "default branch",
+      d.defaultBranch,
+      "The branch a run uses unless you pick another one when you start it.",
+    );
     const fastlaneDir = await asker.ask("fastlane directory", d.fastlaneDir);
-    const runtime = (await asker.ask("how to run fastlane (bundle|system)", d.runtime)) as
-      | "bundle"
-      | "system";
-    const globs = (await asker.ask("artifacts to keep", d.artifactGlobs.join(", ")))
-      .split(",")
-      .map((g) => g.trim())
-      .filter((g) => g !== "");
+
+    const useBundler = await asker.confirm(
+      "\n  Bundler runs the fastlane version pinned in the project's Gemfile.\n" +
+        "  Without it, whichever fastlane is installed on this machine is used.\n" +
+        "  Run fastlane through bundler?",
+      d.runtime === "bundle",
+    );
+    const runtime = useBundler ? "bundle" : "system";
+
+    // Artifact patterns are shown, not asked. Typing four globs correctly at a
+    // prompt is a miserable way to start, the detected ones are right nearly
+    // always, and `config.yml` is there for the times they are not.
+    const globs = d.artifactGlobs;
 
     if (!(await asker.confirm(`\nAdd "${slug}" to ${configPath}?`, true))) {
       process.stdout.write("Nothing written.\n");
@@ -142,18 +157,38 @@ export async function runSetupCommand(
       artifact_globs: globs,
     });
 
+    const port = await configuredPort(configPath);
+
     process.stdout.write(
       `\nProject "${slug}" added to ${configPath}\n` +
         `  repository   ${gitUrl} (${branch})\n` +
         `  fastlane     ${fastlaneDir}\n` +
         `  runtime      ${runtime}\n` +
-        `  artifacts    ${globs.join(", ") || "none — set artifact_globs by hand"}\n` +
-        `\nRestart Laneyard or wait for the automatic reload, the project will appear in the interface.\n`,
+        `  artifacts    ${globs.join(", ") || "none detected"}\n` +
+        `               (change artifact_globs in config.yml if that is wrong)\n` +
+        // Someone setting up their first project has nothing running yet, so the
+        // message says what to do rather than assuming a server is listening.
+        `\nStart Laneyard and open it:\n` +
+        `  laneyard\n` +
+        `  http://localhost:${port}\n` +
+        `\nAlready running? The configuration is watched — the project appears on its own.\n`,
     );
     return 0;
   } finally {
     asker.close();
   }
+}
+
+/**
+ * The port the server will actually listen on.
+ *
+ * Read back from the file rather than assumed: telling someone to open a port
+ * their configuration does not use is the kind of small wrongness that makes a
+ * tool feel unreliable on first contact.
+ */
+async function configuredPort(configPath: string): Promise<number> {
+  const res = await loadServerConfig(configPath);
+  return res.ok ? res.config.server.port : 7890;
 }
 
 /** `git@github.com:you/thing.git` reads better as `you/thing` in a sentence. */

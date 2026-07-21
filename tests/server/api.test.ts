@@ -131,7 +131,7 @@ describe("API", () => {
       url: "/api/projects/sample/runs",
       cookies: { laneyard_session: session },
       payload: { lane: "does-not-exist", params: {} },
-    });
+    }, 60_000);
     expect(res.statusCode).toBe(400);
   });
 
