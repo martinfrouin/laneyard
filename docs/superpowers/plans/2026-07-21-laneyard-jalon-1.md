@@ -3625,11 +3625,19 @@ export async function registerRunRoutes(app: FastifyInstance, ctx: AppContext): 
 > module vide ne suffit pas, l'import échouerait :
 >
 > ```ts
+> import type { FastifyInstance } from "fastify";
+>
 > export class RunSockets {
 >   broadcast(_runId: number, _chunk: string, _offset: number): void {}
 >   finish(_runId: number, _status: string): void {}
 > }
-> export async function registerWebSocket(): Promise<RunSockets> {
+>
+> // La signature accepte déjà les arguments du site d'appel dans `app.ts`,
+> // sinon le typage échoue avant même que la tâche 15 existe.
+> export async function registerWebSocket(
+>   _app?: FastifyInstance,
+>   _ctx?: unknown,
+> ): Promise<RunSockets> {
 >   return new RunSockets();
 > }
 > ```
