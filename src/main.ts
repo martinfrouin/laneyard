@@ -176,7 +176,7 @@ if (invokedDirectly()) {
   // 0.1.0 shipped this as `add`. Anyone who learned that name deserves a
   // sentence rather than "Unknown command".
   if (command === "add") {
-    process.stderr.write("`laneyard setup` is now `laneyard setup`.\n");
+    process.stderr.write("`laneyard add` is now `laneyard setup`.\n");
     process.exit(1);
   }
 

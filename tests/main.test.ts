@@ -77,3 +77,22 @@ describe("createServerFromConfig", () => {
     expect(info.mode & 0o077).toBe(0);
   });
 });
+
+describe("the renamed command", () => {
+  it("tells anyone still typing `add` what the command is called now", async () => {
+    // 0.1.0 shipped this as `add`. Someone who learned that name deserves a
+    // sentence rather than "Unknown command".
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+
+    const result = await promisify(execFile)(
+      process.execPath,
+      // Run the built entry point: type stripping does not rewrite the `.js`
+      // specifiers NodeNext requires, so the sources cannot be run directly.
+      ["dist/src/main.js", "add"],
+      { cwd: process.cwd(), env: { ...process.env, LANEYARD_HOME: await tmpDir() } },
+    ).catch((e: { stderr: string; code: number }) => e);
+
+    expect((result as { stderr: string }).stderr).toContain("`laneyard add` is now `laneyard setup`");
+  }, 60_000);
+});
