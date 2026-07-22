@@ -28,6 +28,72 @@ pairs. Each is a file plus the fields that make it usable — an issuer id, an
 alias, a passphrase. Stored as loose rows, nothing knows they belong together,
 and deleting one leaves a half-dead group that no check can detect.
 
+## The governing constraint
+
+**Laneyard adapts to the project. The project never adapts to Laneyard.**
+
+It is a complement, not a framework. A repository that builds today must keep
+building, unedited, the moment it is pointed at Laneyard — no Fastfile changed,
+no build script rewritten, no file it did not already have. Anything Laneyard
+needs, Laneyard supplies.
+
+This is not an aspiration to keep in mind. It decides three things in this
+design that would otherwise have gone the other way, and it condemns three
+messages the product ships today.
+
+It decides that **variable names are editable**, because a project that reads
+`ASC_KEY_FILEPATH` is not wrong and must not be asked to rename anything. It
+decides that **files are materialised** rather than passed as contents, because
+a lane written for `key_filepath:` must keep working. And it decides that
+Laneyard **writes the Gradle properties file** rather than reporting that the
+build script needs fixing.
+
+The three messages it condemns:
+
+- `heuristics/readiness.ts:740-742` tells the user to supply the keystore
+  through the environment and make a missing key an error — that is, to rewrite
+  their `build.gradle.kts`.
+- `heuristics/readiness.ts:469-470` tells them to read the passphrase in the
+  lane with `storePassword: ENV[...]` — to rewrite their Fastfile.
+- `cli/secret.ts:301-306` tells them to point their lanes at contents instead of
+  paths — to rewrite their Fastfile again.
+
+Each replaces an instruction to the user with a statement of what Laneyard will
+do. A check may still report that it cannot tell, or that something is genuinely
+missing; what it may not do is hand the user homework Laneyard could have done
+itself.
+
+`laneyard.yml` is not an exception. Build settings already come "from the
+repository or the server" (`config/schema.ts:3`), so a project can be configured
+entirely server-side and the file stays a convenience for teams who want the
+settings versioned.
+
+### Asking is allowed. Requiring is not.
+
+The constraint forbids changing the project. It does not forbid Laneyard from
+asking, once, at configuration time, where something lives.
+
+That distinction is what keeps detection honest. Laneyard reads the repository
+to *propose* an answer, and the answer is a field the user can correct — never a
+guess it acts on silently, and never a demand that the repository be rearranged
+to match what the guess expected.
+
+Two places in this design take that shape rather than the shape they would have
+had otherwise:
+
+**Where the properties file goes.** `rootProject.file("key.properties")` means
+`android/`; a `file(...)` in the module means `android/app/`. Detection proposes
+the scope it read; the block carries the path, editable. A parser that cannot
+tell asks instead of choosing wrong.
+
+**What the property names are.** `conditionalOn` gives the file's name, not the
+keys inside it. The Flutter documentation's four — `storeFile`, `storePassword`,
+`keyPassword`, `keyAlias` — are the defaults, and a project reading
+`keystoreProperties["alias"]` changes the field rather than its build script.
+
+The rule for every such field: **detected by default, corrected by the user,
+never demanded of the repository.**
+
 ## Design
 
 ### Credentials are their own entity
@@ -161,10 +227,12 @@ If `key.properties` coverage ever proves too narrow, the answer is a Gradle
 `--init-script`, which overrides the signing config without touching the
 repository. Not built now.
 
-**Known limits.** `conditionalOn` gives the file's name, not the property names
-inside it. A project reading `keystoreProperties["alias"]` would get an unusable
-file. The four names come from the Flutter documentation and cover the
-overwhelming majority; readiness must state the assumption rather than hide it.
+**Known limits, now configurable.** `conditionalOn` gives the file's name, not
+the property names inside it, and cannot distinguish `rootProject` scope from
+module scope. Neither is guessed silently: both become fields on the block,
+pre-filled from detection and correctable at configuration time, per *Asking is
+allowed*. Readiness states which values are in use rather than hiding an
+assumption.
 Separately, `rootProject.file("key.properties")` means `android/` while a
 `file(...)` in the module means `android/app/`. `PROPERTIES_FILE` is run over
 the whole source and does not distinguish the two scopes

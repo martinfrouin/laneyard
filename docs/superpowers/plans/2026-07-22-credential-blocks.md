@@ -483,6 +483,8 @@ In `web/src/api.ts`, beside the secret methods: `listCredentials`, `putCredentia
 
 One card per kind: file drop zone (`accept` from `kinds.ts`), one input per field (`type="password"` where `secret`), and the exported variable names pre-filled with the defaults and editable.
 
+The keystore card also carries the two settings from Task 8 — where the properties file goes, and the property names inside it — pre-filled from detection. Present them as answers Laneyard has proposed, not as questions the user must research: the point of asking at configuration time is that it replaces a silent guess, not that it adds homework.
+
 The card shows the stored file's name, never its contents. A stored block shows `••••••` for secret fields, matching the marker the logs use and the rule the page already follows.
 
 - [ ] **Step 3: Restructure the page**
@@ -696,7 +698,14 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
-`writeGradleProperties` writes only when all three hold: an `android_keystore` block applies, `releaseCanUseDebugKey` is true, and `conditionalOn` is non-null. The path comes from `conditionalOn.scope`. Mode `0600`.
+`writeGradleProperties` writes only when all three hold: an `android_keystore` block applies, `releaseCanUseDebugKey` is true, and a properties path is known. Mode `0600`.
+
+**Two things are configuration, not deduction.** Per *Asking is allowed. Requiring is not.* in the spec, the `android_keystore` block gains two optional settings, both pre-filled from detection and both correctable by the user:
+
+- `properties_path` — where the file goes. Detection proposes it from `conditionalOn.scope`; a parser that cannot tell the scope leaves the field for the user rather than picking wrong.
+- `property_names` — the keys inside it, defaulting to the Flutter documentation's `storeFile` / `storePassword` / `keyPassword` / `keyAlias`. A project reading `keystoreProperties["alias"]` corrects the field; it does not touch its build script.
+
+Task 2 shipped `kinds.ts` before this was decided, so add both here, in `src/credentials/kinds.ts` and the block's stored `varNames` sibling.
 
 The property names — `storeFile`, `storePassword`, `keyPassword`, `keyAlias` — are the Flutter documentation's, and a convention rather than a reading: `conditionalOn` gives the file's name, not the names inside it. Say so in the header comment, because readiness will have to say it to the user.
 
@@ -815,7 +824,10 @@ Pass applicable block kinds into the checks. Then:
 - `checkAndroidKeystore` (`:466-545`): a block satisfies it; the recommendation becomes the block, not `ANDROID_KEYSTORE_PASSWORD` as a loose secret.
 - `checkPlayStore` (`:553-565`): recommend the Play block instead of `SUPPLY_JSON_KEY_DATA`. Keep accepting `/^SUPPLY_JSON_KEY/`.
 - `checkAppStoreConnect` (`:215,219,260`): narrow `API_KEY` so it no longer matches the `_P8` suffix, and report a stored `_P8` as a value no lane can see, offering the block.
+- `checkReleaseSigning` (`:735-742`): today it tells the user to supply the keystore through the environment and make a missing key an error — that is, to rewrite their `build.gradle.kts`. Under the governing constraint that is not Laneyard's to ask. With a keystore block present it states what Laneyard will do: supply the properties file, naming the four assumed keys. Without one, it says a block is missing — never that the build script is wrong.
 - Where a properties file will be supplied, say so, and name the four assumed keys. The assumption is stated, not hidden.
+
+Add a test that no readiness recommendation asks the user to edit a Fastfile or a build script. The constraint is easy to honour once and lose later.
 
 Existing installations keep working: every check accepts either route, and recommends a block only when neither is present. The single exception is `_P8`, which never worked.
 
@@ -857,7 +869,9 @@ Run: `npx vitest run tests/cli/secret-import.test.ts`
 
 - [ ] **Step 3: Implement**
 
-Point the import at the Apple block instead: a `.p8` path in a `.env` becomes a suggestion to create the block, not a secret under a dead name. Rewrite the advice at `secret.ts:301-306` to match — the path forms are the supported ones now.
+Point the import at the Apple block instead: a `.p8` path in a `.env` becomes a suggestion to create the block, not a secret under a dead name.
+
+Rewrite the advice at `secret.ts:301-306`. It currently tells the user to change `key_filepath:` to `key_content:` in their lanes — homework Laneyard exists to remove. The path forms are the supported ones now, precisely because blocks materialise real files. Say that instead: nothing in their lanes needs to change.
 
 - [ ] **Step 4: Run the suite**
 
@@ -880,6 +894,8 @@ git commit -m "fix(cli): say the same thing as the rest of the product"
 - Modify: `README.md`, `CHANGELOG.md`, the landing page
 
 **`/Users/martin/Projets/popotheque` is not yours to change beyond that one file.** Do not touch `app/android/app/build.gradle.kts`, and do not commit anything in that repository without being asked. The file is currently untracked there.
+
+**`laneyard.yml` is optional.** Build settings come "from the repository or the server" (`src/config/schema.ts:3`), so a project can be configured entirely server-side. The file exists here because this one is already using it — not because Laneyard requires a project to carry anything.
 
 - [ ] **Step 1: Reconcile the existing file, do not overwrite it**
 
