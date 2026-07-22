@@ -4,6 +4,10 @@ import { api } from "../api";
 import type { CredentialSummary, SecretSummary } from "../api";
 import { CredentialCard } from "../components/CredentialCard";
 import { CREDENTIAL_KINDS } from "../../../src/credentials/kinds";
+import type { CredentialKind, Platform } from "../../../src/credentials/kinds";
+
+/** Fixed, so the two groups keep their order whatever the table is written in. */
+const PLATFORMS: Platform[] = ["ios", "android"];
 
 /**
  * What one project stores, in three zones: variables, secrets, signing.
@@ -19,8 +23,8 @@ import { CREDENTIAL_KINDS } from "../../../src/credentials/kinds";
  * here is exactly what a run's output would show.
  *
  * The third zone is for the projects that sign and upload. A project whose
- * lanes take screenshots or run tests needs none of it, and three untouched
- * circles are an offer, not a checklist it is failing.
+ * lanes take screenshots or run tests needs none of it, and it should cost that
+ * project three closed lines — an offer, not a checklist it is failing.
  */
 export function Secrets() {
   const { slug = "" } = useParams();
@@ -94,6 +98,15 @@ export function Secrets() {
    * leaving the page drops all of them. Nothing here is ever fetched in bulk.
    */
   const [shown, setShown] = useState<Record<string, string>>({});
+
+  /**
+   * Which signing blocks are open, which is a fact about this screen and about
+   * nothing else. Not stored, not sent anywhere, and gone when the page is:
+   * what someone opened to read is not a setting of their project.
+   */
+  const [opened, setOpened] = useState<CredentialKind[]>([]);
+  const toggleBlock = (kind: CredentialKind) =>
+    setOpened((prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]));
 
   /**
    * The names this project needs but does not have, and what is being typed
@@ -316,27 +329,40 @@ export function Secrets() {
           Every kind is offered whether or not this project has any use for it.
           fastlane is not only for shipping — lanes take screenshots, run tests,
           sync certificates — and a project that signs nothing should read three
-          quiet circles, not three things it is missing. */}
+          quiet lines, not three things it is missing. Which is why they rest
+          closed: the zone asks for a glance, and gives back the whole card only
+          to somebody who asked for it. */}
       <h2 className="section" style={{ marginTop: 20 }}>
         signing
       </h2>
       <p className="dim">
         only for the lanes that sign and upload. the file stays here, encrypted, and reaches a run as
-        a path plus the names below.
+        a path plus the names each block exports.
       </p>
       {blocksError && <p className="status-failed">unreadable signing blocks — {blocksError}</p>}
-      <ul className="rows credentials">
-        {CREDENTIAL_KINDS.map((spec) => (
-          <CredentialCard
-            key={spec.kind}
-            slug={slug}
-            spec={spec}
-            stored={credentials.find((c) => c.kind === spec.kind)}
-            onChanged={load}
-            onError={setFormError}
-          />
-        ))}
-      </ul>
+      {PLATFORMS.map((platform) => (
+        <div key={platform} className="credentials-group">
+          {/* The platform is a label on a group, not a question anybody is
+              asked: both groups are here whatever this project builds, and an
+              android-only project reads one short list instead of skipping
+              past an apple block on its way down. */}
+          <p className="dim platform">{platform}</p>
+          <ul className="rows credentials">
+            {CREDENTIAL_KINDS.filter((spec) => spec.platform === platform).map((spec) => (
+              <CredentialCard
+                key={spec.kind}
+                slug={slug}
+                spec={spec}
+                stored={credentials.find((c) => c.kind === spec.kind)}
+                open={opened.includes(spec.kind)}
+                onToggle={() => toggleBlock(spec.kind)}
+                onChanged={load}
+                onError={setFormError}
+              />
+            ))}
+          </ul>
+        </div>
+      ))}
 
       {/* Before the free-form form, because it is the reason most people open
           this page — and because a name that is already on screen is a name

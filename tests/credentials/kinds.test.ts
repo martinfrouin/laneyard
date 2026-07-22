@@ -32,6 +32,16 @@ describe("credential kinds", () => {
   it("covers every kind", () => {
     expect(CREDENTIAL_KINDS).toHaveLength(3);
   });
+
+  it("puts every kind on a platform, so none falls out of the groups", () => {
+    // The secrets screen renders one group per platform. A kind with a platform
+    // the screen does not list would be offered nowhere at all.
+    expect(CREDENTIAL_KINDS.map((k) => [k.kind, k.platform])).toEqual([
+      ["apple_asc", "ios"],
+      ["android_keystore", "android"],
+      ["play_service_account", "android"],
+    ]);
+  });
 });
 
 describe("exportedVarNames", () => {

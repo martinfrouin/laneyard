@@ -243,11 +243,42 @@ code { color: var(--text-bright); }
 /* The browser's own file button is a rounded grey lozenge with a label in the
    system's language — the one control that could not obey the grammar. It is
    hidden, and its label is the control. */
-/* The two file credentials, one row each. The platform sits in its own column
-   so the eye can skip the half that is not its project — a fixed width, because
-   a column that moves between two rows is not a column. */
+/* A signing block at rest is one line, and the line is the control: the whole
+   width answers to a click, so there is nothing to aim at. It borrows the row
+   grammar rather than a button's — no border, no inset background — because a
+   button drawn here would read as an action rather than as a heading you can
+   open. The hover wash is the sidebar's, and it is the only thing that moves. */
+.credentials > li { display: block; }
+
+.block-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  background: none;
+  border: none;
+}
+
+.block-head:hover { background: var(--bg-inset); }
+.block-head:hover .dim { color: var(--text); }
+
+/* Open, the block indents under its own line — the same two-pixel rule the
+   checklist draws in the margin, here only to say what belongs to what. */
+.block-body {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+  margin: 2px 0 6px 1ch;
+}
+
+.block-body[hidden] { display: none; }
+
+/* The group's name, above its blocks. Dim and lowercase like every other
+   sentence on this screen: it labels, it does not announce. */
+.credentials-group .platform { margin: 10px 0 0; }
+
 .credentials .grow { white-space: normal; overflow: visible; }
-.credentials .platform { width: 7ch; color: var(--text-dim); flex: none; }
 
 /* A name waiting for its value: the name holds a column of its own so the
    fields line up, and the field takes the rest of the row. */

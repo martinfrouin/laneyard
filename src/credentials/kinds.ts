@@ -20,8 +20,16 @@ export interface FieldSpec {
   suggested?: string;
 }
 
+/**
+ * Which half of a mobile project a block belongs to. Only ever a way of
+ * arranging what is offered — a project is never asked which one it is, and a
+ * project that is neither still sees both.
+ */
+export type Platform = "ios" | "android";
+
 export interface KindSpec {
   kind: CredentialKind;
+  platform: Platform;
   what: string;
   accept: string;
   fields: FieldSpec[];
@@ -48,6 +56,7 @@ export interface KindSpec {
 export const CREDENTIAL_KINDS: KindSpec[] = [
   {
     kind: "apple_asc",
+    platform: "ios",
     what: "app store connect key",
     accept: ".p8",
     fields: [
@@ -62,6 +71,7 @@ export const CREDENTIAL_KINDS: KindSpec[] = [
   },
   {
     kind: "android_keystore",
+    platform: "android",
     what: "android upload keystore",
     accept: ".jks,.keystore",
     fields: [
@@ -98,6 +108,7 @@ export const CREDENTIAL_KINDS: KindSpec[] = [
   },
   {
     kind: "play_service_account",
+    platform: "android",
     what: "play store service account",
     accept: ".json,application/json",
     fields: [],

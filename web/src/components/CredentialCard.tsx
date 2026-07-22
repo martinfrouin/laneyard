@@ -13,6 +13,14 @@ import type { KindSpec } from "../../../src/credentials/kinds";
  * block again in full, which is the honest consequence: the server takes a
  * block whole or refuses it, because a keystore stored without its alias is not
  * a partial success, it is a build that fails in a month.
+ *
+ * It rests closed. Three blocks laid open — a file picker, five fields and four
+ * editable names apiece — was most of the screen given to the part most people
+ * never touch. Closed, a block is one line that still answers the only question
+ * worth asking from across the room: is the credential in place, and which file
+ * is it. Opening one is a click, and where it is open lives here, in the page,
+ * for as long as the page does — never stored, because which block someone had
+ * open ten minutes ago is not a fact about their project.
  */
 
 /**
@@ -37,12 +45,16 @@ export function CredentialCard({
   slug,
   spec,
   stored,
+  open,
+  onToggle,
   onChanged,
   onError,
 }: {
   slug: string;
   spec: KindSpec;
   stored: CredentialSummary | undefined;
+  open: boolean;
+  onToggle: () => void;
   onChanged: () => void;
   onError: (message: string | null) => void;
 }) {
@@ -121,19 +133,28 @@ export function CredentialCard({
 
   return (
     <li>
-      {/* The same three characters as the readiness checklist: a tick is a thing
-          settled, a circle a thing not done — never a thing missing. */}
-      <span className={`mark ${stored ? "status-success" : "dim"}`}>{stored ? "✓" : "○"}</span>
-      <span className="grow">
-        <span className="bright">{spec.what}</span> <span className="dim">{spec.accept}</span>
+      {/* The one line that is always on screen. The same three characters as the
+          readiness checklist — a tick is a thing settled, a circle a thing not
+          done, never a thing missing — and then the fact somebody scanning this
+          screen came for: the file that is in place, or that none is. The whole
+          line is the control, because a line that says something and a separate
+          thing to press would be two places for one idea. */}
+      <button type="button" className="block-head" onClick={onToggle} aria-expanded={open}>
+        <span className={`mark ${stored ? "status-success" : "dim"}`}>{stored ? "✓" : "○"}</span>
+        <span className="grow">
+          <span className="bright">{spec.what}</span>{" "}
+          <span className="dim">
+            {stored ? stored.fileName : "nothing stored"}
+            {stored?.scope === "global" && " — set for every project"}
+          </span>
+        </span>
+        {/* A word rather than a wedge: everything else on this screen says what
+            it does, and the one thing that opens the rest should not be the
+            exception. */}
+        <span className="dim">{open ? "close" : stored ? "open" : "add"}</span>
+      </button>
 
-        {stored && (
-          <div className="dim">
-            {stored.fileName}
-            {stored.scope === "global" && " — set for every project"}
-          </div>
-        )}
-
+      <div className="block-body" hidden={!open}>
         {stored && !composing && (
           <>
             {/* The block's own fields, not the settings beside them: an
@@ -167,20 +188,26 @@ export function CredentialCard({
           <>
             <div className="secret-form">
               {file === null ? (
-                <label className="file-pick">
-                  <input
-                    key={fileControls}
-                    type="file"
-                    accept={spec.accept}
-                    onChange={(e) => {
-                      const chosen = e.target.files?.[0] ?? null;
-                      if (chosen === null) return;
-                      setFile(chosen);
-                      onError(null);
-                    }}
-                  />
-                  <span className="accent">{stored ? "another file" : "choose a file"} →</span>
-                </label>
+                <>
+                  <label className="file-pick">
+                    <input
+                      key={fileControls}
+                      type="file"
+                      accept={spec.accept}
+                      onChange={(e) => {
+                        const chosen = e.target.files?.[0] ?? null;
+                        if (chosen === null) return;
+                        setFile(chosen);
+                        onError(null);
+                      }}
+                    />
+                    <span className="accent">{stored ? "another file" : "choose a file"} →</span>
+                  </label>
+                  {/* What the picker will accept, beside the picker itself —
+                      it belongs to the act of choosing, not to the line that
+                      reports what is stored. */}
+                  <span className="dim">{spec.accept}</span>
+                </>
               ) : (
                 // The file's name, never a preview of what is in it. Same line
                 // grammar as everything else here: marker, name, dim note, ✗.
@@ -239,26 +266,29 @@ export function CredentialCard({
             </div>
           </>
         )}
-      </span>
 
-      {stored && !composing && (
-        <button type="button" onClick={() => setReplacing(true)} title="upload it again">
-          replace
-        </button>
-      )}
-      {stored &&
-        (stored.scope === "global" ? (
-          // A global block belongs to every project. Replacing it from here
-          // stores this project's own, which is an override and reads as one;
-          // deleting it from here would be a deletion for everybody.
-          <span className="dim" title="set for every project, so not removed from inside one">
-            global
-          </span>
-        ) : (
-          <button onClick={() => void remove()} title="remove">
-            ✗
-          </button>
-        ))}
+        {stored && !composing && (
+          <div className="secret-form">
+            <button type="button" onClick={() => setReplacing(true)} title="upload it again">
+              replace
+            </button>
+            {stored.scope === "global" ? (
+              // A global block belongs to every project. Replacing it from here
+              // stores this project's own, which is an override and reads as one;
+              // deleting it from here would be a deletion for everybody.
+              <span className="dim" title="set for every project, so not removed from inside one">
+                global
+              </span>
+            ) : (
+              // The word, not the mark: ✗ belongs at the end of a row, and this
+              // sits inside an opened block beside another verb.
+              <button onClick={() => void remove()} title="remove this block">
+                remove
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </li>
   );
 }
