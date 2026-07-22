@@ -54,10 +54,39 @@ string and a `.jks` is binary. Accessors live on `Vault`. The header of
 `vault.ts` promises it is the only component that ever holds plaintext; a second
 decrypting site would turn a checkable claim into a hopeful one.
 
+`Vault.resolve()` deliberately swallows a row that will not decrypt, on the
+grounds that a rotated key should cost one variable rather than the whole build.
+A block does not get that leniency: a keystore that will not decrypt costs a
+debug-signed artifact that ships and is rejected days later. An undecryptable
+block fails the run, by name, before anything is built.
+
+The routes that create and delete blocks are credential routes, and go in
+`REQUIRES_ADMIN` (`src/server/permissions.ts`) — a list whose whole premise is
+that it names all of them.
+
 ### Exported variable names are editable
 
 Each block proposes the canonical names fastlane reads itself, and every name
 can be overridden on the block.
+
+The defaults, per kind:
+
+| kind | variable | default |
+|---|---|---|
+| `apple_asc` | path | `APP_STORE_CONNECT_API_KEY_KEY_FILEPATH` |
+| | key id | `APP_STORE_CONNECT_API_KEY_KEY_ID` |
+| | issuer id | `APP_STORE_CONNECT_API_KEY_ISSUER_ID` |
+| `play_service_account` | path | `SUPPLY_JSON_KEY` |
+| `android_keystore` | path | `ANDROID_KEYSTORE_PATH` |
+| | store password | `ANDROID_KEYSTORE_PASSWORD` |
+| | key alias | `ANDROID_KEY_ALIAS` |
+| | key password | `ANDROID_KEY_PASSWORD` |
+
+Android has no fastlane-canonical names — nothing in fastlane reads a keystore
+by convention — so these are Laneyard's. `ANDROID_KEYSTORE_PASSWORD` is chosen
+to match the `/(^|_)(KEYSTORE|STORE)_PASSWORD$/` pattern `heuristics/readiness.ts:466`
+already recognises, so the check and the block agree by construction rather than
+by coincidence.
 
 This is not a convenience. Popotheque's Fastfile calls
 `ENV.fetch("ASC_KEY_FILEPATH")` — a private name fastlane does not know — and
@@ -66,10 +95,15 @@ existing project can be onboarded without changing its Fastfile first.
 
 ### Files are materialised, uniformly
 
-At run preparation, each applicable block writes its file into the run
-directory with mode `0600` and exports the configured path variable. The
-directory is removed in a `finally`, so a failed or killed run leaves nothing
-behind.
+At run preparation, each applicable block writes its file into a per-run
+directory with mode `0600`, and exports the configured path variable. The
+directory is removed in a `finally`, so a failed run leaves nothing behind.
+
+That directory is `<home>/runs/<run id>/secrets`, mode `0700` — **not** inside
+the clone. The clone is `git`-managed and, per `workspace.ts:14`, kept between
+runs; writing credentials into it would both dirty a tree that lanes commit from
+and leave keys on disk indefinitely. `executeRun` currently knows only
+`workspacePath` and `artifactsDir`, so this is a third path it must be given.
 
 Uniform materialisation rather than "contents where possible": the keystore
 forces a real file regardless, and one rule is worth more than saving a write
@@ -89,13 +123,31 @@ That information is currently spent on a warning.
 
 When all three hold — an `android_keystore` block exists, `parseAndroidSigning`
 reports `releaseCanUseDebugKey`, and it named a `conditionalOn` — Laneyard
-writes that properties file into the ephemeral clone, with the four keys of the
-documented snippet: `storeFile` pointing at the materialised `.jks`, plus
+writes that properties file, with the four keys of the documented snippet:
+`storeFile` as an absolute path into the per-run directory, plus
 `storePassword`, `keyPassword`, `keyAlias`.
 
 The rule reads in one sentence: *Laneyard writes the properties file only where
 its absence would ship a debug-signed artifact.* No block, or a build that does
 not make that bet, and it writes nothing.
+
+This one file cannot live in the per-run directory — Gradle resolves it at a
+fixed place relative to the build — so it is the single credential written into
+the persistent clone, and it needs three guards.
+
+**A marker.** Its first line is `# written by laneyard, do not commit`. Laneyard
+removes such a file in the run's `finally`, and sweeps it again at the start of
+every run, so a process killed mid-build cannot leave passwords behind for long.
+
+**Readiness must not read its own writing.** `server/routes/readiness.ts:70-99`
+computes
+`signingFilePresent` from the clone. A leftover would turn the "absent from the
+clone" warning into "present, so the release key is used" — a green verdict
+Laneyard manufactured. The check treats a marked file as absent.
+
+**A file without the marker is never touched.** It is the user's own, possibly
+their real signing config, and clobbering it would be worse than any warning.
+Laneyard leaves it alone and uses it as-is.
 
 **Rejected: patching `build.gradle`.** The Fastfile tags and pushes. A rewritten
 build script would make that tag name a source that did not produce the
@@ -114,9 +166,12 @@ inside it. A project reading `keystoreProperties["alias"]` would get an unusable
 file. The four names come from the Flutter documentation and cover the
 overwhelming majority; readiness must state the assumption rather than hide it.
 Separately, `rootProject.file("key.properties")` means `android/` while a
-`file(...)` in the module means `android/app/`; the current regex captures both
-without distinguishing them, and must start reporting which, or the file lands
-in the wrong place half the time.
+`file(...)` in the module means `android/app/`. `PROPERTIES_FILE` is run over
+the whole source and does not distinguish the two scopes
+(`heuristics/android-signing.ts:42, 82`), so `conditionalOn` cannot say where
+the file belongs. It must start reporting the scope, or the file lands in the
+wrong place half the time. `server/routes/readiness.ts:87-90` inherits the same
+blind spot when it looks for the file.
 
 ### Interface
 
@@ -136,10 +191,50 @@ identifier/secret line is that one. No new concept, two lists instead of one.
 ### Readiness
 
 The recommendations invert. Where it says "store the JSON as
-`SUPPLY_JSON_KEY_DATA`" (`readiness.ts:565`) or "the `.p8` contents" (`:219`),
+`SUPPLY_JSON_KEY_DATA`" (`heuristics/readiness.ts:565`) or "the `.p8` contents" (`:219`),
 it will say "add the Play / Apple block". The Android check gains the verdict it
 lacks: with the debug fallback detected and a keystore block present, it reports
 that Laneyard will supply the properties file, naming the four assumed keys.
+
+`checkAndroidKeystore` (`heuristics/readiness.ts:466-545`) must learn about blocks too.
+Today it warns when no key matching the passphrase pattern is stored, and tells
+the user to add `ANDROID_KEYSTORE_PASSWORD` to the secrets tab. A user who has
+done exactly what this design asks would still get that warning, advising them
+to duplicate a password they already gave. The check therefore considers an
+applicable `android_keystore` block as satisfying it, and its recommendation
+becomes the block rather than a loose secret.
+
+### Existing installations
+
+Nothing is migrated and nothing stops working. Removing `FILE_CREDENTIALS`
+removes an upload form, not the rows it created: a secret named
+`SUPPLY_JSON_KEY_DATA` remains a valid secret, is still exported, and still
+satisfies `checkPlayStore`'s `/^SUPPLY_JSON_KEY/`. Every readiness check accepts
+either route — a block or the old loose secrets — and recommends the block only
+where neither is present.
+
+The one name that is not carried forward is `APP_STORE_CONNECT_API_KEY_P8`,
+because fastlane never read it — the single exception to the rule above, and it
+takes a code change to deliver. `checkAppStoreConnect` matches
+`/^APP_STORE_CONNECT_API_KEY/` (`heuristics/readiness.ts:215`, used at `:260`),
+which prefix-matches the dead name and returns a green "an App Store Connect API
+key is in the vault." That regex must be narrowed to exclude the `_P8` suffix,
+so the row is reported as a value no lane can see, with the block offered as the
+fix. Left as-is, the promised warning does not exist and the manufactured green
+tick stays.
+
+This is the only case where a user is asked to redo work, and it is work that
+was never doing anything.
+
+The CLI produces the same shape and must move with the interface. `laneyard
+secret import` maps `ASC_KEY_FILEPATH` and `APP_STORE_CONNECT_API_KEY_PATH` onto
+`APP_STORE_CONNECT_API_KEY_P8` (`src/cli/secret-import.ts:32-38`), minting the
+one name this design declares dead. And `src/cli/secret.ts:301-306` advises
+"point them at the contents instead — `key_content:` rather than
+`key_filepath:`", which inverts the design: blocks materialise a real file
+precisely so that `key_filepath` lanes keep working untouched. Both belong in
+the same phase as the readiness rewrite, or the product ships two contradictory
+instructions.
 
 ### `laneyard.yml` for popotheque
 
@@ -154,9 +249,36 @@ artifact_globs:
   - app/build/ios/ipa/*.ipa
 ```
 
-Its three blocks are configured with the names its Fastfile already reads —
-`ASC_KEY_FILEPATH`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `SUPPLY_JSON_KEY` — so
-nothing in the Fastfile changes.
+Its blocks are configured in Laneyard's database, not in this file. The Apple
+and Play ones take the names that Fastfile already reads — `ASC_KEY_FILEPATH`,
+`ASC_KEY_ID`, `ASC_ISSUER_ID`, `SUPPLY_JSON_KEY` — so nothing in the Fastfile
+changes. The keystore block keeps the defaults, since no lane reads those names:
+Gradle receives them through the properties file instead.
+
+Its Android build only signs correctly because of the properties file. That
+repository's `build.gradle.kts` reads nothing but `key.properties` and falls back
+to the debug key when it is missing — the exact pattern this design detects — and
+it is out of scope for edits.
+
+## Implementation notes
+
+Mechanical facts a plan will hit, verified against the working tree:
+
+- There is no `runs/` tree today; the siblings are `workspaces/<slug>`,
+  `artifacts/<runId>` and `logs/` (`server/app.ts:93,99,101`). The new directory
+  wants an `AppContext` accessor next to `artifactsDir`.
+- `executeRun` has no `try`/`finally` and returns early in six places. "Removed
+  in a `finally`" means wrapping the body.
+- `maskedValues()` derives entirely from the `secret` table via `maskedKeys` and
+  `resolve` (`vault.ts:100-105`). Including block passwords changes that
+  signature and its call site (`server/app.ts:146`).
+- `Workspace.isDirty()` uses `--untracked-files=no` (`workspace.ts:132-135`), so
+  a gitignored properties file cannot trip the dirty guard that would block the
+  next run. `RunQueue` is serial (`runner/queue.ts:56-66`), so the shared clone
+  has no concurrent-write hazard.
+- `Secrets.tsx:47` still says "There is no reveal button anywhere on this screen,
+  and no route behind it either." That is already false (`api.revealSecret`,
+  `server/routes/secrets.ts:68,105`). The rewrite is the moment to fix it.
 
 ## Testing
 
@@ -168,6 +290,22 @@ nothing in the Fastfile changes.
 - The properties file is written only under the three conditions, and not
   otherwise.
 - Project blocks shadow global ones of the same kind.
+- A marked properties file is swept at the next run's start, and reported as
+  absent by readiness in the meantime.
+- An unmarked properties file already in the clone is left untouched.
+- An undecryptable block fails the run instead of being skipped.
+- Old loose secrets keep satisfying every readiness check.
+
+## Phases
+
+The plan should stage this, since a half-landed version must never be one that
+signs with the wrong key:
+
+1. Storage — table, migration, `Vault` accessors, permissions.
+2. API and interface — three zones, upload, editable names.
+3. Run — per-run directory, exported variables, cleanup.
+4. Gradle properties file — marker, sweep, readiness agreement.
+5. Readiness rewrite and `laneyard.yml` for popotheque.
 
 ## Notes
 
