@@ -10,6 +10,7 @@ import { Readiness } from "./pages/Readiness";
 import { Run } from "./pages/Run";
 import { Secrets } from "./pages/Secrets";
 import { Settings } from "./pages/Settings";
+import { Signing } from "./pages/Signing";
 import { Users } from "./pages/Users";
 import { api } from "./api";
 import type { Identity, ProjectSummary } from "./api";
@@ -117,11 +118,12 @@ export function App() {
               {/* The tabs live in Project, which renders either its own content or
                   the nested route's — so the strip is the same on both. */}
               <Route path="/p/:slug" element={<Project />}>
-                {/* The three that would only ever answer 403 to a builder are
+                {/* The four that would only ever answer 403 to a builder are
                     not routed for one. Courtesy again: `permissions.ts` is what
                     actually refuses them, whatever address is typed. */}
                 {admin && <Route path="fastfile" element={<Fastfile />} />}
                 {admin && <Route path="secrets" element={<Secrets />} />}
+                {admin && <Route path="signing" element={<Signing />} />}
                 <Route path="readiness" element={<Readiness />} />
                 {admin && <Route path="settings" element={<Settings />} />}
               </Route>

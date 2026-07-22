@@ -1,38 +1,35 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { CredentialSummary, SecretSummary } from "../api";
-import { CredentialCard } from "../components/CredentialCard";
-import { CREDENTIAL_KINDS } from "../../../src/credentials/kinds";
-import type { CredentialKind, Platform } from "../../../src/credentials/kinds";
-
-/** Fixed, so the two groups keep their order whatever the table is written in. */
-const PLATFORMS: Platform[] = ["ios", "android"];
+import { NeededByLanes } from "../components/NeededByLanes";
 
 /**
- * What one project stores, in three zones: variables, secrets, signing.
+ * The values one project stores, in two zones: variables and secrets.
  *
- * The line between the first two is not this screen's invention — it is the
- * user's own tick box. `masked` means "keep this out of the build log", and the
- * vault answers on that basis alone: a value carrying it is never sent back,
- * whoever asks, so those rows offer no `show` and never could. A value without
- * it can be read on request, one named key at a time, which is what makes an
- * imported name something you can check rather than take on faith.
+ * The line between them is not this screen's invention — it is the user's own
+ * tick box. `masked` means "keep this out of the build log", and the vault
+ * answers on that basis alone: a value carrying it is never sent back, whoever
+ * asks, so those rows offer no `show` and never could. A value without it can be
+ * read on request, one named key at a time, which is what makes an imported name
+ * something you can check rather than take on faith.
  *
  * The `••••••` is the same marker the logs use — what you see beside a secret
  * here is exactly what a run's output would show.
  *
- * The third zone is for the projects that sign and upload. A project whose
- * lanes take screenshots or run tests needs none of it, and it should cost that
- * project three closed lines — an offer, not a checklist it is failing.
+ * Everything on this screen is a value somebody types. The files a lane needs to
+ * sign or upload are a different act with a different shape — pick a file, fill
+ * the fields it needs, store it whole — and they have their own tab. What is
+ * left here is one activity, and the page says so in one line at the top.
  */
 export function Secrets() {
   const { slug = "" } = useParams();
   const [secrets, setSecrets] = useState<SecretSummary[]>([]);
   const [credentials, setCredentials] = useState<CredentialSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
-  const [blocksError, setBlocksError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Bumped whenever the vault changed, so the needed list can shrink with it. */
+  const [stamp, setStamp] = useState(0);
 
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
@@ -51,20 +48,15 @@ export function Secrets() {
       .catch((e: Error) => setListError(e.message))
       .finally(() => setLoading(false));
 
+    // Read, never shown: the blocks live on their own tab now, and the only
+    // thing this page has to say about them is which stored rows they overtook.
+    // A failure here costs that one sentence and nothing else, so it is quiet.
     api
       .listCredentials(slug)
-      .then((c) => {
-        setCredentials(c);
-        setBlocksError(null);
-      })
-      .catch((e: Error) => setBlocksError(e.message));
+      .then(setCredentials)
+      .catch(() => setCredentials([]));
 
-    // Alongside, not before: a project whose workspace was never cloned still
-    // has a secrets page, and this failing must cost the prompt, not the page.
-    api
-      .requiredSecrets(slug)
-      .then((r) => setMissing(r.missing))
-      .catch(() => setMissing([]));
+    setStamp((n) => n + 1);
   };
 
   useEffect(load, [slug]);
@@ -98,46 +90,6 @@ export function Secrets() {
    * leaving the page drops all of them. Nothing here is ever fetched in bulk.
    */
   const [shown, setShown] = useState<Record<string, string>>({});
-
-  /**
-   * Which signing blocks are open, which is a fact about this screen and about
-   * nothing else. Not stored, not sent anywhere, and gone when the page is:
-   * what someone opened to read is not a setting of their project.
-   */
-  const [opened, setOpened] = useState<CredentialKind[]>([]);
-  const toggleBlock = (kind: CredentialKind) =>
-    setOpened((prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]));
-
-  /**
-   * The names this project needs but does not have, and what is being typed
-   * into each.
-   *
-   * The names come from the server; the values never do. Someone arriving here
-   * has just been told by the checklist that eight variables are missing, and
-   * retyping those eight names correctly is a chore where one typo stores a
-   * secret nothing will ever read.
-   */
-  const [missing, setMissing] = useState<string[]>([]);
-  const [typed, setTyped] = useState<Record<string, string>>({});
-  const [storing, setStoring] = useState<string | null>(null);
-
-  const storeMissing = async (name: string) => {
-    const value = (typed[name] ?? "").trim();
-    if (value === "") return;
-    setStoring(name);
-    setFormError(null);
-    try {
-      // Masked, like anything typed into this page: a value that turns out not
-      // to be secret costs a redacted line in a log, and the reverse costs a leak.
-      await api.setSecret(slug, name, value, true);
-      setTyped((prev) => ({ ...prev, [name]: "" }));
-      load();
-    } catch (e) {
-      setFormError((e as Error).message);
-    } finally {
-      setStoring(null);
-    }
-  };
 
   const show = async (secret: SecretSummary) => {
     setFormError(null);
@@ -209,13 +161,13 @@ export function Secrets() {
    */
   const superseded = (s: SecretSummary): string | null => {
     if (s.key === "APP_STORE_CONNECT_API_KEY_P8") {
-      return "nothing reads this. no action in fastlane looks for that name — an earlier version of this interface asked for it, which was our mistake. the .p8 belongs under signing, as an app store connect key block.";
+      return "nothing reads this. no action in fastlane looks for that name — an earlier version of this interface asked for it, which was our mistake. the .p8 belongs on the signing tab, as an app store connect key block.";
     }
     if (
       s.key === "SUPPLY_JSON_KEY_DATA" &&
       credentials.some((c) => c.kind === "play_service_account")
     ) {
-      return "superseded by the play store service account block under signing. this still works — but the same credential is now stored twice, and nothing says which one a build used.";
+      return "superseded by the play store service account block on the signing tab. this still works — but the same credential is now stored twice, and nothing says which one a build used.";
     }
     return null;
   };
@@ -299,11 +251,18 @@ export function Secrets() {
 
   return (
     <>
-      <h2 className="section">variables</h2>
+      {/* What this tab is, before the first heading names a half of it: someone
+          landing here cold reads one sentence about values, and the two
+          headings under it are the one distinction that matters. */}
       <p className="dim">
-        names every run of this project reads, stored as they are. encrypted at rest, printed in the
-        logs, and readable here on request.
+        the values this project's lanes read. typed here, encrypted at rest, and handed to every run
+        as environment variables.
       </p>
+
+      <h2 className="section" style={{ marginTop: 16 }}>
+        variables
+      </h2>
+      <p className="dim">stored as they are — printed in the logs, and readable here on request.</p>
 
       {listError && <p className="status-failed">unreadable secrets — {listError}</p>}
       {loading && <p className="dim">reading vault…</p>}
@@ -321,91 +280,21 @@ export function Secrets() {
       {!loading && !listError && kept.length === 0 && <p className="dim">no secrets yet.</p>}
       <ul className="rows">{kept.map(row)}</ul>
 
-      {/* A credential is a file plus the handful of fields that make it usable,
-          and it is worth nothing in pieces: a keystore without its alias is not
-          a partial success, it is an artifact rejected by a store days later.
-          So one block, taken whole.
-
-          Every kind is offered whether or not this project has any use for it.
-          fastlane is not only for shipping — lanes take screenshots, run tests,
-          sync certificates — and a project that signs nothing should read three
-          quiet lines, not three things it is missing. Which is why they rest
-          closed: the zone asks for a glance, and gives back the whole card only
-          to somebody who asked for it. */}
-      <h2 className="section" style={{ marginTop: 20 }}>
-        signing
-      </h2>
-      <p className="dim">
-        only for the lanes that sign and upload. the file stays here, encrypted, and reaches a run as
-        a path plus the names each block exports.
+      {/* One quiet line, where somebody looking for a keystore would look: this
+          page held those blocks until now, and a thing that moved must say where
+          it went rather than leave an absence to be read as a removal. */}
+      <p className="dim" style={{ marginTop: 10 }}>
+        a file rather than a value — an app store connect key, a keystore, a play store service
+        account — is stored on its own tab.{" "}
+        <Link to={`/p/${slug}/signing`} className="accent">
+          signing →
+        </Link>
       </p>
-      {blocksError && <p className="status-failed">unreadable signing blocks — {blocksError}</p>}
-      {PLATFORMS.map((platform) => (
-        <div key={platform} className="credentials-group">
-          {/* The platform is a label on a group, not a question anybody is
-              asked: both groups are here whatever this project builds, and an
-              android-only project reads one short list instead of skipping
-              past an apple block on its way down. */}
-          <p className="dim platform">{platform}</p>
-          <ul className="rows credentials">
-            {CREDENTIAL_KINDS.filter((spec) => spec.platform === platform).map((spec) => (
-              <CredentialCard
-                key={spec.kind}
-                slug={slug}
-                spec={spec}
-                stored={credentials.find((c) => c.kind === spec.kind)}
-                open={opened.includes(spec.kind)}
-                onToggle={() => toggleBlock(spec.kind)}
-                onChanged={load}
-                onError={setFormError}
-              />
-            ))}
-          </ul>
-        </div>
-      ))}
 
       {/* Before the free-form form, because it is the reason most people open
           this page — and because a name that is already on screen is a name
-          nobody can mistype. The values are typed here and nowhere else: the
-          file that holds the real ones is the one that never reaches a clone. */}
-      {missing.length > 0 && (
-        <>
-          <h2 className="section" style={{ marginTop: 20 }}>
-            needed by the lanes
-          </h2>
-          <p className="dim">
-            read by a lane, named in <code>.env.example</code>, or listed under{" "}
-            <code>required_secrets</code> — and not stored yet. type the value; the name is already
-            the one fastlane looks for.
-          </p>
-          <ul className="rows needed">
-            {missing.map((name) => (
-              <li key={name}>
-                <span className="mark dim">○</span>
-                <span className="needed-name bright">{name}</span>
-                <input
-                  type="password"
-                  className="grow"
-                  value={typed[name] ?? ""}
-                  onChange={(e) => setTyped((prev) => ({ ...prev, [name]: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void storeMissing(name);
-                  }}
-                  placeholder="value"
-                  autoComplete="new-password"
-                  aria-label={name}
-                />
-                <button
-                  onClick={() => void storeMissing(name)}
-                  disabled={storing !== null || (typed[name] ?? "").trim() === ""}
-                >
-                  store
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+          nobody can mistype. */}
+      <NeededByLanes slug={slug} refresh={stamp} onStored={load} />
 
       <h2 className="section" style={{ marginTop: 20 }}>
         add

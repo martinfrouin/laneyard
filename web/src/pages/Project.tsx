@@ -20,10 +20,11 @@ export function Project() {
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const onFastfile = useMatch("/p/:slug/fastfile") !== null;
   const onSecrets = useMatch("/p/:slug/secrets") !== null;
+  const onSigning = useMatch("/p/:slug/signing") !== null;
   const onReadiness = useMatch("/p/:slug/readiness") !== null;
   const onSettings = useMatch("/p/:slug/settings") !== null;
   // Every tab but the first renders the nested route and nothing of its own.
-  const onSubTab = onFastfile || onSecrets || onReadiness || onSettings;
+  const onSubTab = onFastfile || onSecrets || onSigning || onReadiness || onSettings;
 
   useEffect(() => {
     // Reading lanes means going out to the repository. On another tab nobody is
@@ -69,6 +70,13 @@ export function Project() {
       {admin && (
         <NavLink to={`/p/${slug}/secrets`} className={({ isActive }) => (isActive ? "current" : "")}>
           secrets
+        </NavLink>
+      )}
+      {/* Beside secrets, because the two are neighbours in the mind of whoever
+          is looking for one: values you type there, files you upload here. */}
+      {admin && (
+        <NavLink to={`/p/${slug}/signing`} className={({ isActive }) => (isActive ? "current" : "")}>
+          signing
         </NavLink>
       )}
       <NavLink to={`/p/${slug}/readiness`} className={({ isActive }) => (isActive ? "current" : "")}>
