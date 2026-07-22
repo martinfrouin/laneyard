@@ -156,6 +156,9 @@ Expected: FAIL — `Cannot find module '../../src/db/credentials.js'`
 The public shape:
 
 ```typescript
+// Declared here in Task 1 and re-exported by `credentials/kinds.ts` in Task 2.
+// If you would rather the domain module own it, move it there and import it
+// back — but pick one direction and keep it.
 export type CredentialKind = "apple_asc" | "android_keystore" | "play_service_account";
 
 /** What a listing may expose. No ciphertext, no field values. */
@@ -300,8 +303,13 @@ git commit -m "feat(credentials): one table says what each kind is made of"
 ### Task 3: Vault accessors
 
 **Files:**
-- Modify: `src/secrets/vault.ts`
+- Modify: `src/secrets/vault.ts:14-21`, and every construction site
 - Test: `tests/secrets/vault-credentials.test.ts`
+
+**How `Vault` reaches the rows, decided here so nobody invents it mid-loop.**
+`Vault.open(home, store)` gains a third parameter: `Vault.open(home, secretStore, credentialStore)`. The store is injected, exactly as `SecretStore` already is — `Vault` keeps knowing nothing about `Db`, and the constructor stays the honest list of what it holds.
+
+That touches 14 call sites: `src/main.ts:46`, `src/cli/secret.ts:167,260`, and eleven test files. Change them in this task's commit; a compile error in a test file is not a separate task.
 
 `Vault` stays the only component that holds plaintext. The header comment at `vault.ts:6-12` makes that claim; adding a second decrypting site elsewhere would make it false.
 
@@ -378,9 +386,12 @@ Expected: the suite passes. If `app.ts:146` no longer type-checks, that is the `
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/secrets/vault.ts src/server/app.ts tests/secrets/vault-credentials.test.ts
+git add src/secrets/vault.ts src/server/app.ts src/main.ts src/cli/secret.ts \
+        tests/secrets/vault-credentials.test.ts tests/
 git commit -m "feat(vault): blocks, and a keystore that fails loudly"
 ```
+
+Name the test files you actually touched rather than `tests/` wholesale — the repository has uncommitted work in that tree.
 
 ---
 
@@ -557,7 +568,9 @@ Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Wire it into the run**
 
-`executeRun` (`src/runner/orchestrate.ts`) has no `try`/`finally` today and returns early in six places. Wrap the body so `cleanup()` runs on every path, and add the `env` to the process environment already being built.
+`executeRun` receives pre-resolved `secrets` and `maskedValues` (`orchestrate.ts:31-34`), not a `Vault` — a deliberate boundary worth keeping. So `materialiseCredentials` is called by `app.ts`, and `ExecuteRunOptions` gains the resulting `{ env, cleanup }` pair rather than a vault.
+
+`executeRun` has no `try`/`finally` today and returns early in six places. Wrap the body so `cleanup()` runs on every path, and merge `env` into the environment already being built.
 
 - [ ] **Step 6: Prove cleanup survives a failure**
 
@@ -583,7 +596,9 @@ At the end of this phase a Flutter release build signs with the real key. This i
 
 **Files:**
 - Modify: `src/heuristics/android-signing.ts:29-42,82`
-- Test: `tests/heuristics/android-signing.test.ts`
+- Modify: `src/heuristics/readiness.ts:731-751` — `checkReleaseSigning` interpolates `conditionalOn` into five user-facing strings. A struct keeps type-checking there and renders `[object Object]`.
+- Modify: `src/server/routes/readiness.ts:87-90`
+- Test: `tests/heuristics/android-signing.test.ts:29`, `tests/heuristics/readiness.test.ts:798,808,817` — all three build facts with `conditionalOn: "key.properties"` and stop compiling.
 
 `PROPERTIES_FILE` runs over the whole source and cannot tell `rootProject.file("key.properties")` (meaning `android/`) from a module-level `file(...)` (meaning `android/app/`). Without the distinction the file lands in the wrong place half the time.
 
@@ -624,7 +639,9 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/heuristics/android-signing.ts src/server/routes/readiness.ts tests/heuristics/android-signing.test.ts
+git add src/heuristics/android-signing.ts src/heuristics/readiness.ts \
+        src/server/routes/readiness.ts \
+        tests/heuristics/android-signing.test.ts tests/heuristics/readiness.test.ts
 git commit -m "fix(android): a properties file has a place, not just a name"
 ```
 
@@ -690,14 +707,24 @@ The property names — `storeFile`, `storePassword`, `keyPassword`, `keyAlias` �
 Run: `npx vitest run tests/runner/gradle-properties.test.ts`
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Wire into the run**
+- [ ] **Step 5: One lookup, shared**
+
+`writeGradleProperties` needs a `parseAndroidSigning` result and the Gradle root. Nothing in `src/runner/` reads the build script today: the four-candidate search and the `appRoot` join exist only in `src/server/routes/readiness.ts:79-90`.
+
+**Do not re-derive it in the runner.** If the two searches ever pick different build files, the properties file lands where readiness is not looking — a build that signs wrongly and reports green, which is the precise failure this phase exists to prevent.
+
+Extract the search into `src/heuristics/android-root.ts`, returning the build file, the Gradle root and the parsed facts, and have both the readiness route and the runner call it. Add a test that both callers resolve the same path for a project with two candidate build files.
+
+- [ ] **Step 6: Wire into the run**
 
 Sweep at preparation, write after materialisation, remove in the same `finally` as the secrets directory.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/runner/gradle-properties.ts src/runner/orchestrate.ts tests/runner/gradle-properties.test.ts
+git add src/runner/gradle-properties.ts src/runner/orchestrate.ts \
+        src/heuristics/android-root.ts src/server/routes/readiness.ts \
+        tests/runner/gradle-properties.test.ts
 git commit -m "feat(runner): supply the file the build already asks for"
 ```
 
@@ -816,10 +843,11 @@ git commit -m "feat(readiness): recommend the block, and stop greening a dead na
 
 - [ ] **Step 1: Write the failing test**
 
+The mapping is the `PATH_TO_CONTENTS` record at `src/cli/secret-import.ts:32`, read at `:107` — there is no function to call yet. Either export one or assert against the record:
+
 ```typescript
 it("does not mint a name fastlane never reads", () => {
-  const mapped = mapImportedKey("ASC_KEY_FILEPATH");
-  expect(mapped).not.toBe("APP_STORE_CONNECT_API_KEY_P8");
+  expect(Object.values(PATH_TO_CONTENTS)).not.toContain("APP_STORE_CONNECT_API_KEY_P8");
 });
 ```
 
@@ -848,20 +876,34 @@ git commit -m "fix(cli): say the same thing as the rest of the product"
 ### Task 12: `laneyard.yml` for popotheque, and the docs
 
 **Files:**
-- Create: `/Users/martin/Projets/popotheque/laneyard.yml`
-- Modify: `README.md`, `CHANGELOG.md`
+- Modify: `/Users/martin/Projets/popotheque/laneyard.yml` — **it already exists**
+- Modify: `README.md`, `CHANGELOG.md`, the landing page
 
-**`/Users/martin/Projets/popotheque` is not yours to change beyond this one file.** Add `laneyard.yml` and nothing else. Do not touch `app/android/app/build.gradle.kts`, and do not commit anything there without being asked.
+**`/Users/martin/Projets/popotheque` is not yours to change beyond that one file.** Do not touch `app/android/app/build.gradle.kts`, and do not commit anything in that repository without being asked. The file is currently untracked there.
 
-- [ ] **Step 1: Write the file**
+- [ ] **Step 1: Reconcile the existing file, do not overwrite it**
+
+It reads today:
 
 ```yaml
 fastlane_dir: app/fastlane
-platforms: [ios, android]
-required_secrets: [APP_VERSION, SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT]
+runtime: system
 artifact_globs:
-  - app/build/app/outputs/bundle/release/*.aab
-  - app/build/ios/ipa/*.ipa
+  - app/**/*.ipa
+  - app/**/*.app.dSYM.zip
+  - app/**/*.apk
+  - app/**/*.aab
+platforms:
+  - ios
+  - android
+```
+
+**Keep `runtime: system`.** The schema default is `bundle` (`src/config/schema.ts:6`), and that project's fastlane comes from Homebrew — its own `flutter()` helper unsets `GEM_HOME`/`GEM_PATH` for exactly that reason. Dropping the line changes how every lane is invoked and would break the verification run two steps below.
+
+Keep the existing globs too; they are broader than needed and that costs nothing. The only addition:
+
+```yaml
+required_secrets: [APP_VERSION, SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT]
 ```
 
 - [ ] **Step 2: Configure its blocks in Laneyard**
