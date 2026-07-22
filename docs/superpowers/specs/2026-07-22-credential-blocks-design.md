@@ -32,10 +32,22 @@ and deleting one leaves a half-dead group that no check can detect.
 
 **Laneyard adapts to the project. The project never adapts to Laneyard.**
 
-It is a complement, not a framework. A repository that builds today must keep
+It is a complement, not a framework: a graphical interface that makes an
+existing fastlane setup easier to use. A repository that builds today must keep
 building, unedited, the moment it is pointed at Laneyard — no Fastfile changed,
 no build script rewritten, no file it did not already have. Anything Laneyard
 needs, Laneyard supplies.
+
+**Anyone using fastlane can use Laneyard, and fastlane is not only for shipping
+to stores.** Lanes take screenshots, run tests, sync certificates, build an
+enterprise `.ipa`, cut a changelog. Signing credential blocks are one feature
+for the projects that sign and upload — never a toll gate the others must pass.
+A project whose lanes never touch a store is not an incomplete Laneyard
+installation; it is a complete one that happens not to need this.
+
+Everything below inherits that. The blocks are optional, the checks that mention
+them speak only when a lane calls for one, and a project that uses none of them
+must see a clean readiness screen rather than a list of things it lacks.
 
 This is not an aspiration to keep in mind. It decides three things in this
 design that would otherwise have gone the other way, and it condemns three
