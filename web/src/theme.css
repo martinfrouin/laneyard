@@ -266,6 +266,25 @@ code { color: var(--text-bright); }
   cursor: pointer;
 }
 
+/* A row a signing block has overtaken, or one that never did anything. The
+   same edge the readiness list draws beside a check that needs reading, in the
+   same colour and at the same width: it is the one row on this page asking for
+   attention, and it is not an error. */
+.rows > li.superseded {
+  border-left: 2px solid var(--running);
+  padding-left: 8px;
+  margin-left: -10px;
+}
+
+/* The sentence sits under the name rather than after it — the only wrapping
+   line in these lists, because an explanation cut at an ellipsis explains
+   nothing. */
+.superseded-note {
+  display: block;
+  color: var(--text-dim);
+  white-space: normal;
+}
+
 /* A value on screen, once someone asked for it. Monospace like everything
    else, and bright rather than coloured: it is text, not a status. */
 .revealed { color: var(--text-bright); word-break: break-all; }

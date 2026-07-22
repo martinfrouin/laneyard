@@ -273,6 +273,11 @@ The file is encrypted at rest like everything else in the vault and never comes 
 browser: a stored block shows its file name and nothing more, so replacing one means giving it again
 in full.
 
+A variable a block has made redundant is said to be so, beside the row and in one sentence:
+`SUPPLY_JSON_KEY_DATA` once a Play block applies — it still works, but the same credential is then
+stored twice — and `APP_STORE_CONNECT_API_KEY_P8`, which no action in fastlane has ever read.
+Neither is removed for you: the row is yours, and the button to drop it is on the same line.
+
 **A block becomes real files, for the length of a run.** Gradle's `storeFile` is a path, and
 `app_store_connect_api_key` wants a path, so a credential that exists only as ciphertext in a
 database cannot be used by anything. Each block that applies is written into
