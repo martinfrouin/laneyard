@@ -5,6 +5,7 @@ import { hashPassword } from "../../src/server/auth.js";
 import { buildApp } from "../../src/server/app.js";
 import { ConfigStore } from "../../src/config/store.js";
 import { openDatabase } from "../../src/db/open.js";
+import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { Vault } from "../../src/secrets/vault.js";
 import type { Check, ReadinessSection } from "../../src/heuristics/readiness.js";
@@ -58,7 +59,7 @@ projects:
     root,
     lanes: async () => [{ name: "beta", platform: "ios", description: "Beta", private: false }],
     uses: uses as never,
-    vault: await Vault.open(root, new SecretStore(db)),
+    vault: await Vault.open(root, new SecretStore(db), new CredentialStore(db)),
   });
 
   return { app, root, uses };

@@ -6,6 +6,7 @@ import { buildApp } from "../../src/server/app.js";
 import { hashPassword } from "../../src/server/auth.js";
 import { ConfigStore } from "../../src/config/store.js";
 import { openDatabase } from "../../src/db/open.js";
+import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { Vault } from "../../src/secrets/vault.js";
 import { tmpDir } from "../fixtures/repos.js";
@@ -41,7 +42,7 @@ async function harness(configContent = TWO_ACCOUNTS) {
     root,
     lanes: async () => [],
     uses: async () => [],
-    vault: await Vault.open(root, new SecretStore(db)),
+    vault: await Vault.open(root, new SecretStore(db), new CredentialStore(db)),
   });
 
   const login = async (name: string, password: string): Promise<string | null> => {

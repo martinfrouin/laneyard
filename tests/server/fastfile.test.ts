@@ -9,6 +9,7 @@ import { ConfigStore } from "../../src/config/store.js";
 import { CacheStore } from "../../src/db/cache.js";
 import { openDatabase } from "../../src/db/open.js";
 import { RunStore } from "../../src/db/runs.js";
+import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { LaneReader } from "../../src/sidecar/lanes.js";
 import type { Invoke } from "../../src/sidecar/bridge.js";
@@ -78,7 +79,7 @@ projects:
     lanes: (slug, workspacePath, fastlaneDir) =>
       new LaneReader(cache, fakeInvoke).read(slug, workspacePath, fastlaneDir),
     uses: async () => [],
-    vault: await Vault.open(root, new SecretStore(db)),
+    vault: await Vault.open(root, new SecretStore(db), new CredentialStore(db)),
   });
 
   return { app, root, db, origin };

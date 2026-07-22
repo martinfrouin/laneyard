@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { runSecretCommand } from "../../src/cli/secret.js";
 import { openDatabase } from "../../src/db/open.js";
+import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { hashPassword } from "../../src/server/auth.js";
 import { Vault } from "../../src/secrets/vault.js";
@@ -42,7 +43,7 @@ async function run(root: string, args: string[], stdin = VALUE): Promise<Result>
 /** Reads back what the command stored, the only way plaintext ever comes out. */
 async function stored(root: string, slug: string): Promise<Record<string, string>> {
   const db = openDatabase(join(root, "laneyard.db"));
-  const vault = await Vault.open(root, new SecretStore(db));
+  const vault = await Vault.open(root, new SecretStore(db), new CredentialStore(db));
   const values = vault.resolve(slug);
   db.close();
   return values;

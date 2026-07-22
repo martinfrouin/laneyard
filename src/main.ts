@@ -14,6 +14,7 @@ import { CacheStore } from "./db/cache.js";
 import { openDatabase } from "./db/open.js";
 import type { Db } from "./db/open.js";
 import { RunStore } from "./db/runs.js";
+import { CredentialStore } from "./db/credentials.js";
 import { SecretStore } from "./db/secrets.js";
 import { buildApp } from "./server/app.js";
 import { Vault } from "./secrets/vault.js";
@@ -42,7 +43,7 @@ export async function createServerFromConfig(root: string): Promise<Started> {
   new RunStore(db).interruptInFlight();
 
   const cache = new CacheStore(db);
-  const vault = await Vault.open(root, new SecretStore(db));
+  const vault = await Vault.open(root, new SecretStore(db), new CredentialStore(db));
   const app = await buildApp({
     config,
     db,

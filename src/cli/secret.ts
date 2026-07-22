@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { ConfigStore } from "../config/store.js";
 import { openDatabase } from "../db/open.js";
+import { CredentialStore } from "../db/credentials.js";
 import { SecretStore } from "../db/secrets.js";
 import { MIN_LENGTH as MIN_REDACTABLE } from "../logs/redact.js";
 import { Vault } from "../secrets/vault.js";
@@ -151,7 +152,7 @@ export async function runSecretCommand(home: string, args: string[], io: SecretC
 
   const db = openDatabase(join(home, "laneyard.db"));
   try {
-    const vault = await Vault.open(home, new SecretStore(db));
+    const vault = await Vault.open(home, new SecretStore(db), new CredentialStore(db));
     await vault.set(parsed.project, parsed.key, value, parsed.masked);
   } finally {
     db.close();

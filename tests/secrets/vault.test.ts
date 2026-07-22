@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/db/open.js";
+import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { Vault } from "../../src/secrets/vault.js";
 import { tmpDir } from "../fixtures/repos.js";
 
 async function vault() {
   const db = openDatabase(":memory:");
-  return { vault: await Vault.open(await tmpDir("laneyard-vault-"), new SecretStore(db)), db };
+  return { vault: await Vault.open(await tmpDir("laneyard-vault-"), new SecretStore(db), new CredentialStore(db)), db };
 }
 
 describe("Vault", () => {

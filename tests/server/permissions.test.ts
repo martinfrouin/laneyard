@@ -6,6 +6,7 @@ import { hashPassword } from "../../src/server/auth.js";
 import { REQUIRES_ADMIN, requiresAdmin } from "../../src/server/permissions.js";
 import { ConfigStore } from "../../src/config/store.js";
 import { openDatabase } from "../../src/db/open.js";
+import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { Vault } from "../../src/secrets/vault.js";
 import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
@@ -39,7 +40,7 @@ projects:
     root,
     lanes: async () => [{ name: "beta", platform: "ios", description: "Beta", private: false }],
     uses: async () => [{ lane: "beta", actions: [] }],
-    vault: await Vault.open(root, new SecretStore(db)),
+    vault: await Vault.open(root, new SecretStore(db), new CredentialStore(db)),
   });
 
   const login = async (name: string, password: string): Promise<string> => {

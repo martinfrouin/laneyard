@@ -7,6 +7,7 @@ import { buildApp } from "../../src/server/app.js";
 import { ConfigStore } from "../../src/config/store.js";
 import { openDatabase } from "../../src/db/open.js";
 import { RunStore } from "../../src/db/runs.js";
+import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { hashPassword } from "../../src/server/auth.js";
 import { Vault } from "../../src/secrets/vault.js";
@@ -42,7 +43,7 @@ async function harness() {
     root,
     lanes: async () => [{ name: "beta", platform: "ios", description: "Beta", private: false }],
     uses: async () => [{ lane: "beta", actions: [] }],
-    vault: await Vault.open(root, new SecretStore(db)),
+    vault: await Vault.open(root, new SecretStore(db), new CredentialStore(db)),
   });
 
   // Nothing may start on its own: these tests decide which runs are in flight.
