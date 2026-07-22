@@ -66,4 +66,25 @@ describe("SecretStore", () => {
     s.remove("app", "TOKEN");
     expect(s.encrypted("app")["TOKEN"]).toBe("global");
   });
+
+  it("lists and removes only what a project owns, never a global row", () => {
+    const s = store();
+    s.set(null, "SHARED", "g", true);
+    s.set("app", "OWN", "p", true);
+
+    expect(s.listOwn("app").map((r) => r.key)).toEqual(["OWN"]);
+    expect(s.removeAllOwn("app")).toBe(1);
+    expect(s.listGlobal().map((r) => r.key)).toEqual(["SHARED"]);
+  });
+
+  it("refuses the empty slug, which is the global scope's own key", () => {
+    // Not a hypothetical: "" is how a global row is stored, so a caller that
+    // passed one through would list — and then delete — every global secret
+    // while believing it was clearing one project.
+    const s = store();
+    s.set(null, "SHARED", "g", true);
+    expect(s.listOwn("")).toEqual([]);
+    expect(s.removeAllOwn("")).toBe(0);
+    expect(s.listGlobal()).toHaveLength(1);
+  });
 });

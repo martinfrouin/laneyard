@@ -10,6 +10,7 @@ import { RunStore } from "../../src/db/runs.js";
 import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { hashPassword } from "../../src/server/auth.js";
+import { requiresAdmin } from "../../src/server/permissions.js";
 import { Vault } from "../../src/secrets/vault.js";
 import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
@@ -37,19 +38,39 @@ async function harness() {
   await config.load();
   const db = openDatabase(":memory:");
 
+  const vault = await Vault.open(root, new SecretStore(db), new CredentialStore(db));
   const app = await buildApp({
     config,
     db,
     root,
     lanes: async () => [{ name: "beta", platform: "ios", description: "Beta", private: false }],
     uses: async () => ({ lanes: [{ lane: "beta", actions: [] }], imports: false }),
-    vault: await Vault.open(root, new SecretStore(db), new CredentialStore(db)),
+    vault,
   });
 
   // Nothing may start on its own: these tests decide which runs are in flight.
   app.queue.close();
 
-  return { app, root, configPath, runs: new RunStore(db) };
+  return { app, root, configPath, vault, runs: new RunStore(db) };
+}
+
+/** A project secret, a global secret, and one signing block of each scope. */
+async function fillVault(vault: Vault): Promise<void> {
+  await vault.set("sample", "SAMPLE_TOKEN", "sample-token-value", true);
+  await vault.set("sample", "SAMPLE_ISSUER", "issuer-value", false);
+  await vault.set(null, "SHARED_TOKEN", "shared-token-value", true);
+  await vault.setCredential("sample", "android_keystore", {
+    fileName: "release.jks",
+    fileBytes: Buffer.from("keystore-bytes"),
+    fields: { store_password: "storepass", key_alias: "release", key_password: "keypass" },
+    varNames: {},
+  });
+  await vault.setCredential(null, "play_service_account", {
+    fileName: "play.json",
+    fileBytes: Buffer.from("{}"),
+    fields: {},
+    varNames: {},
+  });
 }
 
 async function login(app: Awaited<ReturnType<typeof harness>>["app"]): Promise<string> {
@@ -184,5 +205,75 @@ describe("DELETE /api/projects/:slug", () => {
     const cookies = { laneyard_session: await login(app) };
     const res = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
     expect((res.json() as { leftOnDisk: string[] }).leftOnDisk).toEqual([]);
+  });
+
+  it("counts what stays in the vault, and leaves it there", async () => {
+    const { app, vault } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    await fillVault(vault);
+
+    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
+    expect(res.json()).toMatchObject({
+      vaultKept: {
+        secrets: 2,
+        signingBlocks: 1,
+        // Shared by every project, so named apart rather than folded in.
+        globalSecrets: 1,
+        globalSigningBlocks: 1,
+      },
+    });
+
+    // Counted, not deleted: the whole point of counting them is that they are
+    // still there, and still readable by a project set up under the same name.
+    expect(vault.ownedBy("sample").secrets.map((s) => s.key)).toEqual(["SAMPLE_ISSUER", "SAMPLE_TOKEN"]);
+    expect(vault.resolveCredential("sample", "android_keystore")?.fileName).toBe("release.jks");
+  });
+
+  it("reports zero for a project that never had a secret", async () => {
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
+    expect(res.json()).toMatchObject({
+      vaultKept: { secrets: 0, signingBlocks: 0, globalSecrets: 0, globalSigningBlocks: 0 },
+    });
+  });
+});
+
+describe("DELETE /api/projects/:slug/vault", () => {
+  it("removes this project's secrets and blocks, and only those", async () => {
+    const { app, vault } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    await fillVault(vault);
+    await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
+
+    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample/vault", cookies });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ slug: "sample", secretsRemoved: 2, signingBlocksRemoved: 1 });
+
+    expect(vault.ownedBy("sample")).toEqual({ secrets: [], credentials: [] });
+    // The global rows are every project's, and survive one project going away.
+    expect(vault.listGlobal().map((s) => s.key)).toEqual(["SHARED_TOKEN"]);
+    expect(vault.listGlobalCredentials().map((c) => c.kind)).toEqual(["play_service_account"]);
+    // The other project's own rows were never in scope either.
+    expect(vault.list("other").map((s) => s.key)).toEqual(["SHARED_TOKEN"]);
+  });
+
+  it("refuses while the slug is still a project on this machine", async () => {
+    const { app, vault } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    await fillVault(vault);
+
+    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample/vault", cookies });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: string }).error).toMatch(/still a project/i);
+    expect(vault.ownedBy("sample").secrets).toHaveLength(2);
+  });
+
+  it("is an admin's action, like every other route into the vault", () => {
+    // It inherits the restriction rather than declaring its own: the table
+    // matches on a path prefix, and `DELETE /api/projects/:slug` already covers
+    // everything below it. Asserted anyway, because "inherits" is exactly the
+    // kind of thing that stops being true when a table is reordered.
+    expect(requiresAdmin("DELETE", "/api/projects/sample/vault")).toBe(true);
   });
 });

@@ -93,6 +93,31 @@ export class CredentialStore {
     return this.applicable(projectSlug).map(({ fileEnc: _fileEnc, fieldsEnc: _fieldsEnc, ...summary }) => summary);
   }
 
+  /**
+   * The blocks stored under this slug, and no global one.
+   *
+   * Same distinction as `SecretStore.listOwn`, and it matters more here: a
+   * global keystore shadowed by nothing is shared by every project on the
+   * machine, and counting it as one project's would offer to delete the one
+   * credential every other project signs with.
+   */
+  listOwn(projectSlug: string): CredentialSummary[] {
+    if (projectSlug === GLOBAL) return [];
+    const rows = this.db
+      .prepare("SELECT * FROM credential WHERE project_slug = ? ORDER BY kind")
+      .all(projectSlug) as Row[];
+    return rows.map((row) => {
+      const { fileEnc: _fileEnc, fieldsEnc: _fieldsEnc, ...summary } = this.toSummary(row);
+      return summary;
+    });
+  }
+
+  /** Removes every block stored under this slug, and returns how many. */
+  removeAllOwn(projectSlug: string): number {
+    if (projectSlug === GLOBAL) return 0;
+    return this.db.prepare("DELETE FROM credential WHERE project_slug = ?").run(projectSlug).changes;
+  }
+
   listGlobal(): CredentialSummary[] {
     const rows = this.db
       .prepare("SELECT * FROM credential WHERE project_slug = ? ORDER BY kind")

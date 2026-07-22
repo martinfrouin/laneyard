@@ -83,6 +83,25 @@ export interface ProjectRemoval {
   runsKept: number;
   /** Absolute paths — the clone, then one folder per run that produced artifacts. */
   leftOnDisk: string[];
+  /**
+   * What the vault still holds. Counted rather than listed for the same reason
+   * the Secrets tab has no reveal button: a name is all this side ever sees.
+   */
+  vaultKept: {
+    /** Stored under this slug, and found again by a project set up with the same name. */
+    secrets: number;
+    signingBlocks: number;
+    /** Shared by every project, and not this removal's business either way. */
+    globalSecrets: number;
+    globalSigningBlocks: number;
+  };
+}
+
+/** What the second, explicit act removed from the vault. */
+export interface VaultForgotten {
+  slug: string;
+  secretsRemoved: number;
+  signingBlocksRemoved: number;
 }
 
 /** What a listing may expose. There is deliberately no value here. */
@@ -243,6 +262,12 @@ export const api = {
   // saying so is the answer — `json` carries it through to the screen.
   removeProject: (slug: string) =>
     fetch(`/api/projects/${slug}`, { method: "DELETE" }).then(json<ProjectRemoval>),
+
+  // The one thing removing a project does not do, offered afterwards and never
+  // as part of it. The server refuses while the slug is still a project, so
+  // this is only ever reachable as the clean-up after a removal.
+  forgetProjectVault: (slug: string) =>
+    fetch(`/api/projects/${slug}/vault`, { method: "DELETE" }).then(json<VaultForgotten>),
 
   secrets: (slug: string) => fetch(`/api/projects/${slug}/secrets`).then(json<SecretSummary[]>),
 

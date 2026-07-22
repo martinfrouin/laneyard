@@ -42,4 +42,22 @@ describe("CredentialStore", () => {
     expect(s.remove(null, "play_service_account")).toBe(true);
     expect(s.remove(null, "play_service_account")).toBe(false);
   });
+
+  it("lists and removes only what a project owns, never a global block", () => {
+    const s = store();
+    s.set(null, "play_service_account", { fileName: "g.json", fileEnc: "g", fieldsEnc: "g", varNames: {} });
+    s.set("app", "android_keystore", { fileName: "p.jks", fileEnc: "p", fieldsEnc: "p", varNames: {} });
+
+    expect(s.listOwn("app").map((r) => r.fileName)).toEqual(["p.jks"]);
+    expect(s.removeAllOwn("app")).toBe(1);
+    expect(s.listGlobal().map((r) => r.fileName)).toEqual(["g.json"]);
+  });
+
+  it("refuses the empty slug, which is the global scope's own key", () => {
+    const s = store();
+    s.set(null, "play_service_account", { fileName: "g.json", fileEnc: "g", fieldsEnc: "g", varNames: {} });
+    expect(s.listOwn("")).toEqual([]);
+    expect(s.removeAllOwn("")).toBe(0);
+    expect(s.listGlobal()).toHaveLength(1);
+  });
 });

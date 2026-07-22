@@ -26,7 +26,15 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
    *    history of what this machine built is not the project's to take away;
    *  - the clone and the artifacts stay on disk, named in the answer so they
    *    can be removed by hand. Deleting files someone may still want, from a
-   *    web page, on one click, is not a thing to do.
+   *    web page, on one click, is not a thing to do;
+   *  - its secrets and its signing blocks stay in the vault, counted in the
+   *    answer. They are the one thing here that cannot be looked at from the
+   *    interface — no route ever sends a credential back — so if this does not
+   *    say they are there, nothing ever will. They are also scoped by slug: a
+   *    project set up later under the same name would find the old keystore
+   *    waiting for it, and sign with a credential nobody uploaded. Removing
+   *    them is `DELETE /api/projects/:slug/vault`, below, and it is a second
+   *    act on purpose.
    */
   app.delete("/api/projects/:slug", async (req, reply) => {
     const { slug } = req.params as { slug: string };
@@ -57,7 +65,60 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
       ...runs.map((run) => ctx.artifactsDir(run.id)),
     ].filter((path) => existsSync(path));
 
-    return reply.send({ slug, name: entry.name, runsKept: runs.length, leftOnDisk });
+    // Counted after the block is gone, and read from the vault rather than
+    // inferred: the two stores are the only thing that knows, and this is the
+    // last moment anyone is looking.
+    const owned = ctx.vault.ownedBy(slug);
+    return reply.send({
+      slug,
+      name: entry.name,
+      runsKept: runs.length,
+      leftOnDisk,
+      vaultKept: {
+        secrets: owned.secrets.length,
+        signingBlocks: owned.credentials.length,
+        // Named separately because they are not this project's to lose. A
+        // global secret is read by every project on the machine, and an answer
+        // that folded them into one number would invite removing them.
+        globalSecrets: ctx.vault.listGlobal().length,
+        globalSigningBlocks: ctx.vault.listGlobalCredentials().length,
+      },
+    });
+  });
+
+  /**
+   * Removes what the vault still holds under a removed project's name.
+   *
+   * Deliberately not part of removing the project. That route destroys nothing,
+   * and the reason is the one this route has to earn instead: a signing block
+   * cannot be read back out of Laneyard — the `.p8` and the keystore that went
+   * in are the only copies it ever had — so deleting one on the same click that
+   * hides a project from a list would be destroying something unrecoverable as
+   * a side effect of tidying up.
+   *
+   * Refused while the slug is still a project, so this can only ever be the
+   * clean-up after a removal. A live project's secrets and blocks are removed
+   * one at a time, from the tabs that show them, where the user can see what
+   * each one is.
+   *
+   * Only rows carrying this slug go. A global secret and a global signing block
+   * are shared by every project and survive it.
+   */
+  app.delete("/api/projects/:slug/vault", async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+
+    if (ctx.config.project(slug)) {
+      return reply.code(409).send({
+        error: `"${slug}" is still a project on this machine. Remove the project first, or remove its secrets and signing blocks one at a time from its own tabs.`,
+      });
+    }
+
+    const removed = ctx.vault.forget(slug);
+    return reply.send({
+      slug,
+      secretsRemoved: removed.secrets,
+      signingBlocksRemoved: removed.credentials,
+    });
   });
 
   app.get("/api/projects/:slug/lanes", async (req, reply) => {

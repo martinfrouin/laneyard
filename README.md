@@ -451,13 +451,22 @@ What it does *not* do is most of the point, because "delete" elsewhere usually m
   each still at its own address. Removing a project means stop showing it, not destroy its past;
 - **the clone and the artifacts stay on disk.** Their paths are printed when it is done, so you
   can remove them yourself. Nothing is deleted from a web page on one click;
-- **the secrets stay in the vault**, encrypted and unreachable, and come back if you add the
-  project again under the same name;
+- **the secrets and the signing blocks stay in the vault**, encrypted. The screen counts them
+  before you confirm and again once it is done, because they are the one thing on this list you
+  cannot go and look at — no route ever sends a credential back. Their scope is the slug, so a
+  project set up later under the same name finds them and would sign with a keystore nobody
+  uploaded;
 - **the repository is untouched.** Its `laneyard.yml`, its Fastfile and its history are the
   repository's, not Laneyard's.
 
 Removal is refused while a run of that project is in flight — that run is using the workspace. A
 run still waiting in the queue will not start: it ends as failed, saying its project is gone.
+
+Once it is done, the result screen offers the one thing removal deliberately did not do: removing
+what the vault still holds under that name. It is a second action, confirmed by typing the name
+again, and it is never part of removing the project — a `.p8` or a keystore cannot be read back
+out of Laneyard, so the copy it holds is the only one it ever had. Global secrets and global
+signing blocks are shared by every project and are left alone.
 
 ## Security
 

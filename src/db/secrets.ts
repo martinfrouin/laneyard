@@ -89,6 +89,31 @@ export class SecretStore {
     );
   }
 
+  /**
+   * The rows stored under this slug, and no global one.
+   *
+   * `list` answers "what does this project see", which is the right question
+   * everywhere else and the wrong one when a project is going away: a global
+   * secret three other projects also read is not this one's to count, and
+   * certainly not its to remove.
+   *
+   * The empty slug is the global scope's own key, so it is refused here rather
+   * than quietly returning every global row as if one project owned them.
+   */
+  listOwn(projectSlug: string): SecretSummary[] {
+    if (projectSlug === GLOBAL) return [];
+    const rows = this.db
+      .prepare("SELECT * FROM secret WHERE project_slug = ? ORDER BY key")
+      .all(projectSlug) as Row[];
+    return rows.map((row) => ({ key: row.key, masked: row.masked === 1, scope: "project" as const }));
+  }
+
+  /** Removes every row stored under this slug, and returns how many. */
+  removeAllOwn(projectSlug: string): number {
+    if (projectSlug === GLOBAL) return 0;
+    return this.db.prepare("DELETE FROM secret WHERE project_slug = ?").run(projectSlug).changes;
+  }
+
   list(projectSlug: string): SecretSummary[] {
     return this.applicable(projectSlug).map((row) => ({
       key: row.key,

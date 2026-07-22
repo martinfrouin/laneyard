@@ -47,6 +47,39 @@ export class Vault {
   }
 
   /**
+   * What the vault holds under one project's own name — secrets and signing
+   * blocks — and nothing global.
+   *
+   * Its own method rather than a filter over `list`, because the question is a
+   * different one: `list` is "what would a run of this project see", and this is
+   * "what would be left behind if the project went away". A global secret is in
+   * the first answer and must never be in the second.
+   */
+  ownedBy(projectSlug: string): { secrets: SecretSummary[]; credentials: CredentialSummary[] } {
+    return {
+      secrets: this.store.listOwn(projectSlug),
+      credentials: this.credentials.listOwn(projectSlug),
+    };
+  }
+
+  /**
+   * Forgets everything stored under one project's name.
+   *
+   * Never called by removing a project: that route leaves the vault alone on
+   * purpose and says what stayed. This is the separate, deliberate act someone
+   * takes afterwards, once they have read what it is they are about to lose —
+   * a credential is the one thing here that cannot be looked at before it goes.
+   *
+   * Scoped by slug, so a global secret or a global signing block survives it.
+   */
+  forget(projectSlug: string): { secrets: number; credentials: number } {
+    return {
+      secrets: this.store.removeAllOwn(projectSlug),
+      credentials: this.credentials.removeAllOwn(projectSlug),
+    };
+  }
+
+  /**
    * Removes this project's secret values from a piece of text, in one shot.
    *
    * Separate from `Redactor`, which is stateful and belongs to a live stream:
