@@ -9,6 +9,7 @@ import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { Vault } from "../../src/secrets/vault.js";
 import type { Check, ReadinessSection } from "../../src/heuristics/readiness.js";
+import { LANEYARD_MARKER } from "../../src/runner/gradle-properties.js";
 import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
 /**
@@ -22,6 +23,32 @@ const FASTFILE = "lane :beta do\n  match(readonly: false)\nend\n";
 
 const USES = {
   lanes: [{ lane: "beta", actions: [{ name: "match", args: { readonly: false } }] }],
+  imports: false,
+};
+
+/** The Flutter documentation's own snippet: the trap `release-signing` exists to catch. */
+const FLUTTER_KTS = `
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+
+android {
+    signingConfigs {
+        create("release") { }
+    }
+    buildTypes {
+        release {
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
+    }
+}
+`;
+
+const GRADLE_USES = {
+  lanes: [{ lane: "beta", actions: [{ name: "gradle", args: { task: "assemble" } }] }],
   imports: false,
 };
 
@@ -228,5 +255,52 @@ describe("readiness API", () => {
 
     await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
     expect(uses).toHaveBeenCalledTimes(1);
+  }, SLOW);
+
+  it("counts a properties file Laneyard wrote as absent", async () => {
+    // A run killed before cleanup can leave one behind. Counting it would turn
+    // the warning into "present, so the release key is used" — a green verdict
+    // Laneyard manufactured for itself.
+    const { app, root } = await harness({
+      files: { "app/build.gradle.kts": FLUTTER_KTS },
+      uses: async () => GRADLE_USES,
+    });
+    const cookies = { laneyard_session: await login(app) };
+
+    // The first request is what clones the workspace; only after it does a
+    // path inside it exist to write into.
+    await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
+    const workspacePath = join(root, "workspaces", "sample");
+    await writeFile(
+      join(workspacePath, "key.properties"),
+      `${LANEYARD_MARKER}\nstorePassword=whatever\n`,
+      "utf8",
+    );
+
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
+    const signing = byId(allChecks(res.json() as Report), "release-signing");
+    expect(signing.state).toBe("warn");
+    expect(signing.detail).toMatch(/is not in the clone/);
+  }, SLOW);
+
+  it("still counts an unmarked properties file as present", async () => {
+    // The complement matters as much as the case above: a fix that made every
+    // file invisible would pass that test while destroying this check for
+    // every project that legitimately keeps its keystore properties in the
+    // clone.
+    const { app, root } = await harness({
+      files: { "app/build.gradle.kts": FLUTTER_KTS },
+      uses: async () => GRADLE_USES,
+    });
+    const cookies = { laneyard_session: await login(app) };
+
+    await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
+    const workspacePath = join(root, "workspaces", "sample");
+    await writeFile(join(workspacePath, "key.properties"), "storePassword=whatever\n", "utf8");
+
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
+    const signing = byId(allChecks(res.json() as Report), "release-signing");
+    expect(signing.state).toBe("unknown");
+    expect(signing.detail).toMatch(/is present/);
   }, SLOW);
 });

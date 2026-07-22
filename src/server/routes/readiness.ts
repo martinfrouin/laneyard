@@ -15,6 +15,7 @@ import { appRootOf, resolvePlatforms, searchDir } from "../../heuristics/platfor
 import type { FindPaths, Platform } from "../../heuristics/platforms.js";
 import { runChecklist } from "../../heuristics/readiness.js";
 import type { Known, LaneUses, Unread } from "../../heuristics/readiness.js";
+import { LANEYARD_MARKER } from "../../runner/gradle-properties.js";
 import type { AppContext } from "../app.js";
 
 const exec = promisify(execFile);
@@ -60,14 +61,38 @@ const exists = async (path: string): Promise<boolean> =>
   );
 
 /**
- * Is the properties file where the build script would look for it?
+ * Is this the user's own properties file — as opposed to one Laneyard wrote
+ * and failed to clean up?
+ *
+ * `gradle-properties.ts` marks every file it writes with `LANEYARD_MARKER` as
+ * its first line, precisely so this check can tell the two apart. A run killed
+ * between writing the file and reaching its `finally` leaves a marked one
+ * behind in the persistent clone; counting it as the user's own signing
+ * configuration would flip the checklist from "the release build will use the
+ * debug key" to "the release key is used" — a green verdict Laneyard
+ * manufactured for itself out of a cleanup it failed to run.
+ *
+ * Reading fails the same way `exists` does: a missing file, a permission
+ * error, or one this process cannot open are all "not the user's file",
+ * because none of them is evidence of a real signing configuration.
+ */
+async function isUsersOwn(path: string): Promise<boolean> {
+  const text = await readFile(path, "utf8").catch(() => null);
+  if (text === null) return false;
+  return (text.split("\n")[0] ?? "").trimEnd() !== LANEYARD_MARKER;
+}
+
+/**
+ * Is the properties file where the build script would look for it — and is it
+ * the user's, not Laneyard's own leftover?
  *
  * The module directory is the one holding the build script, and the Gradle root
  * is its parent — `android/` for an `android/app/build.gradle`. Which of the two
  * the name is relative to is the script's decision, and the parser reports which
  * one it made. When it could not tell, both are looked in: answering "not in the
  * clone" because the wrong directory was searched would have the checklist
- * inventing the very failure it exists to catch.
+ * inventing the very failure it exists to catch. Both places apply the same
+ * marker rule — a leftover in either one is still Laneyard's, not the user's.
  */
 async function isPresent(build: AndroidBuild, file: PropertiesFile): Promise<boolean> {
   const { moduleDir, gradleRoot } = build;
@@ -78,7 +103,7 @@ async function isPresent(build: AndroidBuild, file: PropertiesFile): Promise<boo
         ? [moduleDir]
         : [gradleRoot, moduleDir];
 
-  const found = await Promise.all(places.map((dir) => exists(join(dir, file.name))));
+  const found = await Promise.all(places.map((dir) => isUsersOwn(join(dir, file.name))));
   return found.some(Boolean);
 }
 
