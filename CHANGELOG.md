@@ -67,7 +67,7 @@ in changed.
 The number is written in the source and had not been moved since. Every published copy of 0.4.0
 reported itself as 0.3.0, on `--version` and in the line the server prints when it starts.
 
-## 0.4.0 — unreleased
+## 0.4.0 — 2026-07-22
 
 Signing credentials stop being strings. Everything below is the difference from 0.3.0.
 
