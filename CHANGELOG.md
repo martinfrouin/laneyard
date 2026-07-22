@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.4.1
+
+Three things a 0.4.0 installation had no way to find out: what removing a project leaves behind,
+how to remove Laneyard itself, and where your own password is changed.
+
+### Removing a project says what stays in the vault
+
+A removed project left its secrets and its signing blocks behind, encrypted in the database under
+its slug, and nothing said so. Nothing could have: a credential is the one thing in Laneyard that
+never comes back out — no route sends one to a browser — so there was no screen on which those rows
+would ever have appeared again.
+
+That silence had a sharper edge than wasted bytes. The scope of a stored credential is the slug, so
+a project set up later under the same name would find the old keystore still there and sign with a
+credential nobody had uploaded.
+
+The removal screen now counts them, the way it already names the clone and the artifacts it is
+about to delete, and counts the rows that belong to no project separately: those are shared by every
+project and are not one project's to lose. Removing them is a second, deliberate act — refused while
+the slug is still a project, and confirmed by typing the name again. Deliberately not a checkbox on
+the first confirmation: removing a project destroys nothing in the vault on purpose, and the `.p8`
+in there is often the only copy anyone has.
+
+### `laneyard uninstall`
+
+`npm uninstall -g laneyard` left the data folder untouched — the configuration, the vault key, the
+database, the workspaces, the artifacts, the logs — and no command removed them. There is still no
+npm lifecycle hook doing it, and there should not be: a package manager must not delete someone's
+signing keys on its own, and a lifecycle script has no way to ask.
+
+So this asks. It reads the whole inventory from disk before touching anything — the projects, how
+many secrets and how many signing blocks, project scope and global scope apart, the real sizes and
+paths — and prints it. Then the one loss that has no undo, said on its own: the vault key exists in
+exactly one place, and without it `laneyard.db` is ciphertext, so a backup of the database alone
+restores nothing.
+
+It is confirmed by typing the folder's path back, not by a `y`. There is no `--yes`, no `--force`
+and no `--keep-runs`: each of those is a way to run this command without reading it, and reading it
+is the point. `--dry-run` prints the inventory and stops, writing nothing at all — the database is
+opened read-only, and the `-wal` and `-shm` files SQLite creates in order to read are removed again
+if they were not there to begin with.
+
+It leaves anything in the folder that Laneyard did not write, names it, and keeps the folder for it.
+It does not remove the npm package either — a process cannot sensibly delete the binary it is
+running from — so it prints the command that does.
+
+### Changing your own password was there, and was not found
+
+The form has been on `/account` since 0.4.0, and the only way in was your own name in the header,
+labelled with a hover title. The reasoning was that whoever wants to change their password looks for
+themselves on screen first. Someone did, and did not find it: a name is a fact about the page, not a
+control, and a label nobody hovers is a label nobody reads.
+
+The words are on screen now. `your account` sits in the header beside `sign out`, and on the accounts
+screen your own row — the one row that cannot carry the ✗ the others do, and which used to dead-end
+in a dash — leads to the same page. An admin has a particular reason to look there: there *is* a
+screen that manages people, and their own account was the one it said nothing useful about.
+
+Changing a password still does not happen in the accounts table. That page is the server's list of
+people; this is one person, and it is the one thing on it nobody else can do for you. Only the way
+in changed.
+
+### `laneyard --version` said 0.3.0
+
+The number is written in the source and had not been moved since. Every published copy of 0.4.0
+reported itself as 0.3.0, on `--version` and in the line the server prints when it starts.
+
 ## 0.4.0 — unreleased
 
 Signing credentials stop being strings. Everything below is the difference from 0.3.0.
