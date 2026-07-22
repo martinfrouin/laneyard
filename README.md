@@ -25,6 +25,11 @@ the Fastfile you already have and asks *your* fastlane what it can do — plugin
 hard-codes no knowledge of fastlane at all, so upgrading fastlane or adding a plugin needs no
 change here.
 
+The adaptation goes one way. A repository that builds today keeps building unedited: signing
+credentials reach your lanes under the variable names your Fastfile already reads, and where
+Laneyard needs to know something no file can tell it, it asks on a form rather than asking you to
+change the file.
+
 ## Where it fits
 
 |                              | Laneyard    | Hosted CI    | Self-hosted runner |
@@ -203,8 +208,9 @@ reported and the last valid configuration stays live — a typo never takes the 
 
 ### Secrets
 
-Credentials do not live in a file. They go into an encrypted vault, from the Secrets tab of a
-project or from the command line:
+The variables your lanes read do not live in a file. They go into an encrypted vault, from the
+Secrets tab of a project or from the command line — the files a project signs with go in the same
+vault, as blocks, and have a section of their own below:
 
 ```bash
 laneyard secret set MATCH_PASSWORD --project cartes-ios   # reads the value from standard input
@@ -235,26 +241,77 @@ laneyard secret import --project cartes-ios --yes    # stores it
 ```
 
 It runs from the CLI because that is where the `.env` is; the server only ever sees a clone. A
-variable naming a `.p8` or a service account JSON has the **file's contents** stored, under the
-name fastlane looks for — `APP_STORE_CONNECT_API_KEY_P8`, `SUPPLY_JSON_KEY_DATA` — because a path
-does not travel to another machine. Everything is masked, and nothing is printed but names.
+variable naming a service account JSON has the **file's contents** stored, under `SUPPLY_JSON_KEY_DATA`
+— a name supply reads on its own — because a path does not travel to another machine. A variable
+naming a `.p8` is reported and left alone: no action in fastlane reads a `.p8` out of an environment
+variable, and that credential belongs in a signing block, described below. Everything stored is
+masked, and nothing is printed but names.
 
-Your lanes will still read the path forms afterwards. Point them at the contents instead:
-`key_content:` rather than `key_filepath:`, and drop `json_key:` so supply reads
-`SUPPLY_JSON_KEY_DATA` itself.
-
-**Two of them are files.** An App Store Connect key arrives as a `.p8` and a Play Store service
-account as a JSON file, and pasting either into a text field is the moment you are most likely to
-paste it somewhere else by accident. The Secrets tab takes the file directly — *app store connect
-key* and *play store service account*, beside the value field. Your browser reads it and sends its
-text to the same route a typed value goes through, under the name fastlane and the readiness
-checklist both look for: `APP_STORE_CONNECT_API_KEY_P8` and `SUPPLY_JSON_KEY_DATA`. Nothing is
-uploaded, nothing is written to disk on the way, and the page only ever shows the file's name.
+Nothing in your lanes has to change afterwards. `key_filepath:` and `json_key:` keep working as
+written — a signing block puts a real file back on disk for the length of a run.
 
 A secret becomes an environment variable for every run of the project it belongs to. Without
 `--project` it applies to every project; a project secret of the same name wins over a global
 one. Secrets are kept out of the logs unless you pass `--no-mask`, and a masked value must be at
 least four characters long — see below.
+
+### Signing credentials
+
+A signing credential is not a string. An Android keystore is bytes that Gradle reads through a path,
+and a `.p8` is useless without the key id and the issuer id that go with it — so these are stored as
+blocks: one file, plus the handful of fields that make it usable, taken whole or refused. A keystore
+stored without its alias is not a partial success; it is a build that fails in a month.
+
+| block | the file | the fields beside it |
+| ------------------------------ | ---------------------- | ------------------------------------------- |
+| *app store connect key*        | `.p8`                  | key id, issuer id                           |
+| *android upload keystore*      | `.jks` or `.keystore`  | key alias, store password, key password     |
+| *play store service account*   | JSON                   | —                                           |
+
+They live in the **signing** part of a project's Secrets tab, beside the variables and the secrets.
+The file is encrypted at rest like everything else in the vault and never comes back out to a
+browser: a stored block shows its file name and nothing more, so replacing one means giving it again
+in full.
+
+**A block becomes real files, for the length of a run.** Gradle's `storeFile` is a path, and
+`app_store_connect_api_key` wants a path, so a credential that exists only as ciphertext in a
+database cannot be used by anything. Each block that applies is written into
+`~/.laneyard/runs/<run id>/secrets/`, mode `600` in a `700` directory, and that directory is removed
+when the run ends — whether it passed, failed, was cancelled or timed out. Every applicable block is
+written, whether or not the lane looks like it needs one: a Fastfile can reach anything through `sh`
+or a plugin, and a guess of "not needed" that is wrong is a debug-signed artifact rather than a
+missing variable.
+
+**It reaches your lanes under the names your project already reads.** Each block's form arrives
+pre-filled with the names fastlane itself declares — `APP_STORE_CONNECT_API_KEY_KEY_FILEPATH`,
+`APP_STORE_CONNECT_API_KEY_KEY_ID`, `APP_STORE_CONNECT_API_KEY_ISSUER_ID` for the key, and
+`SUPPLY_JSON_KEY` for the service account — and every one of them is editable. A Fastfile written
+around `ENV.fetch("ASC_KEY_FILEPATH")` is not a Fastfile doing it wrong: you say so on that form,
+rather than being asked to rename anything in the repository. The name stored with the block is the
+only name exported, and no default is emitted alongside it as a courtesy — that courtesy is what
+would make a typo in the configured name look like it had worked.
+
+Nothing in fastlane reads a keystore by convention, so the keystore's names are Laneyard's own —
+`ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` —
+and the same rule applies to them.
+
+**The keystore block can also supply `key.properties`.** The Flutter documentation's own build
+script signs with the release config when that file exists and with the debug config when it does
+not, and gitignores it — so on a build server it is always absent. Rather than telling you to
+rewrite your build script, Laneyard writes the file the script is already looking for, for the
+length of the run, out of the keystore block. Two things about that file cannot be read out of a
+build script and are asked for on the block instead: where it goes, when the script names it in a
+way that leaves the directory unresolved, and what the keys inside it are called, which start from
+the Flutter documentation's four. Asking at configuration time is allowed; requiring a change to
+your repository is not.
+
+**Only the projects that sign need any of this.** fastlane is not only for shipping to stores —
+lanes take screenshots, run tests, sync certificates — so the three blocks are an offer rather than
+a gate. A project that wants an artifact out of a Gradle build needs the keystore and nothing else,
+and three untouched circles are not three things it is failing.
+
+A block stored on a project belongs to that project. One stored globally applies to every project,
+and a project's own block wins over it. Both are admin-only, like the rest of the vault.
 
 ### Readiness
 
@@ -294,19 +351,25 @@ Always:
 On iOS:
 
 - **App Store Connect** has an API key. The vault is checked first and is the only thing that
-  earns a tick — but a project that configured fastlane long before it met Laneyard keeps its key
-  elsewhere, so the lanes are read for `app_store_connect_api_key` and for a `key_filepath` or
+  earns a tick — a signing block, or the variables a project stored before blocks existed, since
+  fastlane reads those exactly as it did. A project that configured fastlane long before it met
+  Laneyard keeps its key elsewhere, so the lanes are read for `app_store_connect_api_key` and for a `key_filepath` or
   `api_key_path` argument, and the repository for a `.p8`. Any of those is reported as *could not
   tell*, not as a warning: a path in a Fastfile says a key was arranged, not that the file is on
   this machine. An Appfile holding only an `apple_id` is a warning — that is the account
-  two-factor authentication will stop the run to ask about;
+  two-factor authentication will stop the run to ask about. One name is called out rather than
+  accepted: a value stored under `APP_STORE_CONNECT_API_KEY_P8` used to earn a tick here, and no
+  action in fastlane has ever read a variable of that name — the check now says so, because being
+  told to redo the work beats a screen that has quietly gone silent about it;
 - **match** has its `MATCH_PASSWORD` stored and is called `readonly`, so it fetches certificates
   instead of trying to create them.
 
 On Android:
 
 - **the keystore** is reachable without a prompt: a lane handing `gradle` a `storeFile` needs a
-  passphrase, and one that is neither in the call nor in the vault makes gradle stop and ask;
+  passphrase, and one that is neither in the call nor in the vault makes gradle stop and ask. A
+  keystore block settles this before the lanes are read at all — the file and both passphrases
+  reach the run together, so nothing can stop and ask, whichever lane runs;
 - **the release is signed with the release key.** The one check here whose failure is silent:
   the Flutter documentation's own snippet signs with the release config when `key.properties`
   exists and with the *debug* config when it does not — and gitignores `key.properties`, so it is
@@ -318,9 +381,10 @@ On Android:
   it, marked `# written by laneyard, do not commit`, and is removed when fastlane stops. A file of
   your own without that marker is never written over and never deleted;
 - **the Play Store service account** is there when a lane calls `upload_to_play_store`. The vault
-  first, then the `json_key` argument in the call, then the **Appfile** — `json_key_file` and
-  `json_key_data`, which is where a long-standing project almost always keeps it. Only the vault
-  is a tick; the other two are *could not tell*, for the same reason as above.
+  first — a block, or a `SUPPLY_JSON_KEY` variable stored before blocks existed — then the
+  `json_key` argument in the call, then the **Appfile**: `json_key_file` and `json_key_data`, which
+  is where a long-standing project almost always keeps it. Only the vault is a tick; the other two
+  are *could not tell*, for the same reason as above.
 
 Like the iOS ones, the Android checks read **literal arguments only**. `gradle(storePassword:
 ENV["PW"])` is reported as undetermined, never guessed at: a checklist that guesses gets believed.
@@ -338,7 +402,9 @@ growing a second copy of its form.
 green and `match(readonly: false)` is a warning, but `match(readonly: ENV["RO"])` has no value
 until the lane runs, so it is reported as undetermined — `○`, with the reason — rather than
 guessed either way. The same applies to anything a lane computes: a checklist that guesses gets
-believed, and then it is worse than no checklist. Android signing is not covered at all yet.
+believed, and then it is worse than no checklist. Android signing is read out of the Gradle build
+script rather than the Fastfile, since that is where it lives — and read as text, because running
+someone's build script to ask it a question is not something a checklist may do.
 
 ### The Fastfile
 
@@ -402,6 +468,11 @@ Read this before putting Laneyard on a network.
   else can read it. Someone who walks off with `laneyard.db` gets ciphertext. Nothing else in the
   process holds plaintext: the store, the API and the interface deal in names only, and no route
   ever sends a value back — which is why the Secrets tab has no reveal button.
+- **A signing block is on disk only while a run needs it.** A keystore has no string form, so the
+  file is written into `~/.laneyard/runs/<run id>/secrets/`, mode `600` inside a `700` directory,
+  and that directory goes when the run ends. The block's secret fields — the two keystore
+  passphrases — are removed from a run's output the same way a masked secret is, because gradle is
+  perfectly willing to echo one back on failure.
 - **Masked values are removed from output before it is written, not when it is displayed.** The
   substitution happens once, at the point where a run's output fans out, so the log file on disk,
   the live stream to your browser and the stored error summary all contain `••••••` and never the
@@ -421,6 +492,12 @@ What this does *not* cover, stated plainly:
   pretending. Store it unmasked if it genuinely does not matter.
 - **Anything fastlane prints that is not a stored secret is stored in the clear**, under
   `~/.laneyard/logs/`.
+- **`key.properties` is written into the workspace, and it holds passwords.** It is the one
+  credential Laneyard puts in the clone rather than in the run's own directory, because Gradle
+  resolves that path relative to the build. It is mode `600`, carries a marker line as its first
+  line, is removed when the run ends, and is swept for again at the start of the next run in case a
+  server was killed mid-build. A file of yours without that marker is never written over and never
+  removed.
 
 ## Status
 
@@ -433,7 +510,8 @@ What this does *not* cover, stated plainly:
 - `✓` build queue, cancellation, timeouts surfaced in the UI
 - `✓` a checklist that gets a project running unattended
 - `✓` edit the Fastfile in the browser, verified on every save
-- `✓` store a signing credential straight from its `.p8` or JSON file
+- `✓` signing credentials stored whole — the file and the fields beside it — written to disk for
+  the length of a run and exported under the names your project already reads
 - `✓` remove a project from the interface, without touching its history
 - `✓` named accounts, with a builder role that never sees a credential
 - `○` git-triggered and scheduled builds

@@ -5,6 +5,115 @@
 0.2.0 was published with a broken sidecar path: listing a project's lanes failed on any installed
 copy. If you have it, upgrade. Everything below is the difference from 0.1.0.
 
+### A signing credential is a file and the fields that go with it
+
+Until now a credential was a string in a flat list, and two of them did not fit. An Android keystore
+is bytes that Gradle reads through a path, so there was no string to store; a `.p8` is useless
+without the key id and the issuer id that belong with it, and three loose rows in a list say nothing
+about the fact that they are one credential.
+
+They are blocks now — the file, plus the handful of fields that make it usable, stored encrypted and
+taken whole or refused. A keystore stored without its alias is not a partial success; it is a build
+that fails in a month with an artifact nobody can install. Three kinds: an App Store Connect key,
+an Android upload keystore, and a Play Store service account, each in the signing part of a
+project's Secrets tab.
+
+A block becomes real files for the length of one run, written into the run's own directory at mode
+`600` and removed when the run ends, whatever it ended as. Every applicable block is written whether
+or not the lane looks like it needs one: a Fastfile can reach anything through `sh` or a plugin, and
+a detector that decides "not needed" and is wrong does not cost a warning, it costs a debug-signed
+artifact.
+
+None of this is a gate. fastlane is not only for shipping to stores — lanes take screenshots, run
+tests, sync certificates — so a project that signs nothing sees three untouched circles rather than
+three things it is failing.
+
+### The names a block exports are your project's, not Laneyard's
+
+Each block's form arrives pre-filled with the names fastlane itself declares, and every one of them
+is editable. A Fastfile written around `ENV.fetch("ASC_KEY_FILEPATH")` is not a Fastfile doing it
+wrong: that name is said on the form, and nothing in the repository is asked to change. Asking at
+configuration time is allowed; requiring a repository change is not, and that is the line the whole
+of this work is drawn along.
+
+The name stored with the block is the only name exported. Emitting the default alongside it as a
+courtesy was tempting and would have been a trap — it is exactly what makes a typo in the configured
+name look like it worked, until the day the block is renamed.
+
+### The Android release that ships signed with the debug key
+
+The checklist already caught this and could only tell you about it. The Flutter documentation's own
+build script signs with the release config when `key.properties` exists and with the debug config
+when it does not, and the same documentation gitignores `key.properties` — so on a build server it
+is always absent, the build succeeds, and the store rejects the artifact minutes later saying
+nothing about signing.
+
+The obvious fix is to tell the user to rewrite their build script. Laneyard does not do that. It
+writes the file the script is already looking for, out of the keystore block, for the length of the
+run — where the script looks for it, marked `# written by laneyard, do not commit`, and removed
+when fastlane stops. A file of your own without that marker is never written over and never deleted:
+it is probably your real signing configuration, and clobbering it would be worse than anything
+Laneyard could have warned about. A run killed before it could clean up leaves a marked file behind,
+so the next run sweeps for one before it starts.
+
+Two things about that file cannot be read out of a build script, and both are asked on the block
+rather than assumed. Where it goes, when the script names it on a receiver the parser cannot follow
+— and Laneyard writes nothing rather than picking the likelier of two directories, because a file
+sitting in the wrong one looks like the problem has been dealt with. And what the keys inside it are
+called, which the script reads out of a `Properties` object indexed by string, somewhere no parse
+reaches. Those start from the Flutter documentation's four and are corrected in one keystroke.
+
+### `APP_STORE_CONNECT_API_KEY_P8` never worked
+
+This one is ours. An earlier version of the secrets screen asked people to store their `.p8` under
+that name, and no action in fastlane has ever declared it — it appears nowhere in fastlane 2.237.
+The value was stored, encrypted, listed, and no lane could see it. Worse, the readiness check
+prefix-matched `APP_STORE_CONNECT_API_KEY`, so it went green.
+
+The name is gone from the interface and from `secret import`. A value already in the vault under it
+is now reported as doing nothing, rather than ticked or silently ignored: being told to redo five
+minutes of work beats a screen that has quietly stopped mentioning it. The `.p8` belongs in an App
+Store Connect key block, with the key id and the issuer id it needs.
+
+### Readiness says what Laneyard will do, not what you must change
+
+The keystore line used to advise storing the passphrase loose and reading it in the lane with
+`storePassword: ENV["ANDROID_KEYSTORE_PASSWORD"]` — a Fastfile edit, and so not Laneyard's to ask
+for. The checks now recommend a block, and describe what happens next: the file is written for the
+length of a run, the names it exports are the block's, and the properties file the Android build
+wants arrives where the build looks for it, with its keys named on screen rather than left implicit.
+
+Both routes into the vault answer. A project that stored `SUPPLY_JSON_KEY` before blocks existed is
+still ticked, because fastlane reads it exactly as it did.
+
+One thing the checks deliberately do not do is read their own writing. `key.properties` written by
+a run is a file Laneyard put there, and a check that saw it and reported the project ready would be
+reporting on itself.
+
+### The secrets screen is three zones
+
+Variables, secrets, and signing. The first two are the tick box that was already there — `masked`
+means "keep this out of the build log", and a value carrying it is never sent back to a browser —
+made into a line on the screen rather than a flag on each row. The third holds the blocks, and is
+plainly labelled as being for the lanes that sign and upload.
+
+A stored block shows its file name and, for the fields that are not settings, whether each is
+stored. Nothing else: the server never sends a field value back, not a keystore password and not an
+issuer id, so replacing a block means giving it again in full. That is the honest consequence of
+taking it whole.
+
+### `secret import` stops inventing a home for a `.p8`
+
+It mapped `ASC_KEY_FILEPATH` and its two spellings onto the name above, which meant an import
+cheerfully stored a private key somewhere nothing would ever read it. It now finds the file, says
+where it belongs — an App Store Connect key block, with its key id and issuer id — and stores
+nothing for it.
+
+The closing advice was inverted too. It used to say your lanes still read the path forms and should
+be pointed at contents instead. They should not: `key_filepath:` and `json_key:` are the supported
+forms, and a block puts a real file back on disk precisely so that a lane naming a path keeps
+working unedited.
+
 ### Anyone can change their own password
 
 Reached by clicking your name in the header. A builder included: it is about one person, not about
