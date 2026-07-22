@@ -1,3 +1,13 @@
+/**
+ * Reached across into the server's own source rather than copied. `kinds.ts` is
+ * the single table the server, the runner and this interface agree on, and a
+ * second copy of it here would be a copy that drifts — a browser offering a
+ * kind the server would refuse, or a name no lane reads.
+ */
+import type { CredentialKind } from "../../src/credentials/kinds";
+
+export type { CredentialKind };
+
 const json = async <T>(res: Response): Promise<T> => {
   if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? res.statusText);
   return (await res.json()) as T;
@@ -80,6 +90,27 @@ export interface SecretSummary {
   key: string;
   masked: boolean;
   scope: "project" | "global";
+}
+
+/**
+ * What a signing block's listing may expose: the file's name, never a byte of
+ * it, and the names it is exported under. No field value ever comes back — not
+ * an issuer id, not a keystore password — so this page has nothing to uncover.
+ */
+export interface CredentialSummary {
+  kind: CredentialKind;
+  fileName: string;
+  scope: "project" | "global";
+  varNames: Record<string, string>;
+  updatedAt: string;
+}
+
+/** A block as it goes up: taken whole or refused whole, the file included. */
+export interface CredentialBlock {
+  fileName: string;
+  fileBase64: string;
+  fields: Record<string, string>;
+  varNames: Record<string, string>;
 }
 
 /** One line of the readiness checklist. `fix` is a sentence, never a button. */
@@ -228,6 +259,29 @@ export const api = {
 
   deleteSecret: (slug: string, key: string) =>
     fetch(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`, { method: "DELETE" }).then(empty),
+
+  listCredentials: (slug: string) =>
+    fetch(`/api/projects/${slug}/credentials`).then(json<CredentialSummary[]>),
+
+  /**
+   * Stores one block. The file rides along base64 in the JSON body rather than
+   * as a multipart upload: a `.p8` is two kilobytes, and the browser encodes it
+   * in one call, so carrying it that way costs a dependency on both sides for
+   * nothing. The server's refusals are sentences — a missing alias, a name that
+   * is not a variable name — and `empty` carries them to the screen.
+   */
+  putCredential: (slug: string, kind: CredentialKind, block: CredentialBlock) =>
+    fetch(`/api/projects/${slug}/credentials/${kind}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(block),
+    }).then(empty),
+
+  // Removes this project's own block and only that one, so a global block it
+  // was shadowing comes back into view — undoing an override, not deleting
+  // everyone's key from inside one project.
+  deleteCredential: (slug: string, kind: CredentialKind) =>
+    fetch(`/api/projects/${slug}/credentials/${kind}`, { method: "DELETE" }).then(empty),
 
   fastfile: (slug: string) => fetch(`/api/projects/${slug}/fastfile`).then(json<FastfileContent>),
 

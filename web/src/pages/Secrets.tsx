@@ -1,58 +1,33 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../api";
-import type { SecretSummary } from "../api";
+import type { CredentialSummary, SecretSummary } from "../api";
+import { CredentialCard } from "../components/CredentialCard";
+import { CREDENTIAL_KINDS } from "../../../src/credentials/kinds";
 
 /**
- * The two credentials the readiness checklist asks for, and that arrive as a
- * file rather than as a string one could sensibly type.
+ * What one project stores, in three zones: variables, secrets, signing.
  *
- * The names are the ones fastlane itself reads, and the ones the checklist
- * looks for — a suggestion that stored the key under a name nothing recognises
- * would leave the checklist red and the user certain they had done the work.
- */
-const FILE_CREDENTIALS: {
-  key: string;
-  accept: string;
-  what: string;
-  platform: string;
-  extension: string;
-}[] = [
-  {
-    platform: "ios",
-    key: "APP_STORE_CONNECT_API_KEY_P8",
-    accept: ".p8",
-    what: "app store connect key",
-    extension: ".p8",
-  },
-  {
-    platform: "android",
-    key: "SUPPLY_JSON_KEY_DATA",
-    accept: ".json,application/json",
-    what: "play store service account",
-    extension: ".json",
-  },
-];
-
-/**
- * Derived rather than written out again: two lists of the same names are two
- * lists that can disagree, and the one that drifts would quietly put a
- * credential back in both places.
- */
-const FILE_CREDENTIAL_KEYS = new Set(FILE_CREDENTIALS.map((c) => c.key));
-
-/**
- * The secrets of one project.
+ * The line between the first two is not this screen's invention — it is the
+ * user's own tick box. `masked` means "keep this out of the build log", and the
+ * vault answers on that basis alone: a value carrying it is never sent back,
+ * whoever asks, so those rows offer no `show` and never could. A value without
+ * it can be read on request, one named key at a time, which is what makes an
+ * imported name something you can check rather than take on faith.
  *
- * There is no reveal button anywhere on this screen, and no route behind it
- * either: the server never sends a value back, so the interface has nothing to
- * uncover. The `••••••` is the same marker the logs use — what you see here is
- * exactly what a run's output would show.
+ * The `••••••` is the same marker the logs use — what you see beside a secret
+ * here is exactly what a run's output would show.
+ *
+ * The third zone is for the projects that sign and upload. A project whose
+ * lanes take screenshots or run tests needs none of it, and three untouched
+ * circles are an offer, not a checklist it is failing.
  */
 export function Secrets() {
   const { slug = "" } = useParams();
   const [secrets, setSecrets] = useState<SecretSummary[]>([]);
+  const [credentials, setCredentials] = useState<CredentialSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
+  const [blocksError, setBlocksError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [key, setKey] = useState("");
@@ -60,16 +35,6 @@ export function Secrets() {
   const [masked, setMasked] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-
-  // The chosen file, never its contents: it is read at the moment it is sent
-  // and the text is not kept anywhere the page could later show it. The page
-  // knows the file's name and nothing else about it — the same rule as the
-  // list above, where a stored value has no way back to the screen.
-  const [file, setFile] = useState<File | null>(null);
-  // Bumping this remounts the file controls, which is the only way to empty
-  // one: a control still holding a file would not fire again for that same
-  // file, and picking it twice must work.
-  const [fileControls, setFileControls] = useState(0);
 
   const load = () => {
     setLoading(true);
@@ -82,6 +47,14 @@ export function Secrets() {
       .catch((e: Error) => setListError(e.message))
       .finally(() => setLoading(false));
 
+    api
+      .listCredentials(slug)
+      .then((c) => {
+        setCredentials(c);
+        setBlocksError(null);
+      })
+      .catch((e: Error) => setBlocksError(e.message));
+
     // Alongside, not before: a project whose workspace was never cloned still
     // has a secrets page, and this failing must cost the prompt, not the page.
     api
@@ -92,28 +65,16 @@ export function Secrets() {
 
   useEffect(load, [slug]);
 
-  const forgetFile = () => {
-    setFile(null);
-    setFileControls((n) => n + 1);
-  };
-
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setSaving(true);
     setFormError(null);
     try {
-      // A `.p8` and a service account JSON are both text. The browser reads the
-      // file and sends its text to the same route a typed value goes through:
-      // no upload endpoint, no multipart, and the server learns nothing new.
-      // The trailing newline every editor leaves goes, because a credential
-      // with one is a credential fastlane sometimes rejects.
-      const text = file === null ? value : (await file.text()).replace(/\r?\n$/, "");
-      await api.setSecret(slug, key.trim(), text, masked);
+      await api.setSecret(slug, key.trim(), value, masked);
       // The value leaves the field as soon as it is stored: nothing to read over
       // a shoulder, and no chance of storing it twice under another name.
       setKey("");
       setValue("");
-      forgetFile();
       setMasked(true);
       load();
     } catch (e) {
@@ -187,7 +148,8 @@ export function Secrets() {
    *
    * The circle this breaks: reading a value means first declaring it not
    * secret, and declaring that by storing it again would mean typing the value
-   * you were trying to read.
+   * you were trying to read. Flipping it moves the row between the two zones,
+   * which is the whole of what the zones are.
    */
   const toggleMasked = async (secret: SecretSummary) => {
     setFormError(null);
@@ -211,88 +173,122 @@ export function Secrets() {
     }
   };
 
+  /**
+   * One row, written once for both zones. Two copies of this markup would be
+   * two copies that drift, and the difference between the zones is a flag —
+   * not a different way of showing a name.
+   */
+  const row = (s: SecretSummary) => (
+    <li key={s.key}>
+      {/* ✓ kept out of the logs, ○ stored as it is and printed as it is. */}
+      <span className={`mark ${s.masked ? "accent" : "dim"}`}>{s.masked ? "✓" : "○"}</span>
+      <span className="grow">
+        <span className="bright">{s.key}</span>{" "}
+        {s.masked ? (
+          <span className="dim">••••••</span>
+        ) : shown[s.key] !== undefined ? (
+          <span className="revealed">{shown[s.key]}</span>
+        ) : (
+          <span className="dim">stored as it is</span>
+        )}
+        {/* The one sentence that explains why a row has no `show`. The
+            redaction and the reading are the same decision seen from two
+            sides — Laneyard treats a secret as one end to end — and a
+            missing button with no reason reads as a missing feature. */}
+        {s.masked && <span className="dim"> — kept out of the logs, so never shown here either</span>}
+      </span>
+
+      {/* A checkbox, not a verb. This is a property of the secret, and a
+          button beside `show` read as a second way of doing the same
+          thing. The wording is the form's own, word for word, so the
+          thing you tick when storing is the thing you see afterwards. */}
+      {s.scope !== "global" && (
+        <label className="row-flag" title="a secret is removed from build logs, and never shown here">
+          <input type="checkbox" checked={s.masked} onChange={() => void toggleMasked(s)} />
+          keep out of the logs
+        </label>
+      )}
+
+      {/* Offered only where it is allowed, which the line above explains. */}
+      {!s.masked &&
+        s.scope !== "global" &&
+        (shown[s.key] === undefined ? (
+          <button onClick={() => void show(s)} title="show the value">
+            show
+          </button>
+        ) : (
+          <button onClick={() => hide(s.key)} title="hide it again">
+            hide
+          </button>
+        ))}
+      {s.scope === "global" ? (
+        // A global secret belongs to every project. Editing it from inside
+        // one would hide that, so from here it is only ever reported.
+        <span className="dim" title="set for every project — laneyard secret set">
+          global
+        </span>
+      ) : (
+        <button onClick={() => void remove(s)} title="remove">
+          ✗
+        </button>
+      )}
+    </li>
+  );
+
+  const variables = secrets.filter((s) => !s.masked);
+  const kept = secrets.filter((s) => s.masked);
+
   return (
     <>
-      <h2 className="section">secrets</h2>
+      <h2 className="section">variables</h2>
       <p className="dim">
-        environment variables for every run of this project. values are encrypted at rest and never
-        sent back — not even to this page.
+        names every run of this project reads, stored as they are. encrypted at rest, printed in the
+        logs, and readable here on request.
       </p>
 
       {listError && <p className="status-failed">unreadable secrets — {listError}</p>}
       {loading && <p className="dim">reading vault…</p>}
-      {!loading && !listError && secrets.every((s) => FILE_CREDENTIAL_KEYS.has(s.key)) && (
-        <p className="dim">
-          {secrets.length === 0 ? "no secrets yet." : "nothing here beyond the two files below."}
-        </p>
+      {!loading && !listError && variables.length === 0 && (
+        <p className="dim">nothing stored in the clear.</p>
       )}
+      <ul className="rows">{variables.map(row)}</ul>
 
-      {/* The two file credentials are left out here on purpose: they have a row
-          of their own below, carrying their name, whether they are stored and
-          the controls for both. Listing them twice was noise, and the two lines
-          disagreed about what they offered. */}
-      <ul className="rows">
-        {secrets.filter((s) => !FILE_CREDENTIAL_KEYS.has(s.key)).map((s) => (
-          <li key={s.key}>
-            {/* ✓ kept out of the logs, ○ stored as it is and printed as it is. */}
-            <span className={`mark ${s.masked ? "accent" : "dim"}`}>{s.masked ? "✓" : "○"}</span>
-            <span className="grow">
-              <span className="bright">{s.key}</span>{" "}
-              {s.masked ? (
-                <span className="dim">••••••</span>
-              ) : shown[s.key] !== undefined ? (
-                <span className="revealed">{shown[s.key]}</span>
-              ) : (
-                <span className="dim">not a secret</span>
-              )}
-              {/* The one sentence that explains why a row has no `show`. The
-                  redaction and the reading are the same decision seen from two
-                  sides — Laneyard treats a secret as one end to end — and a
-                  missing button with no reason reads as a missing feature. */}
-              {s.masked && (
-                <span className="dim"> — kept out of the logs, so never shown here either</span>
-              )}
-            </span>
+      <h2 className="section" style={{ marginTop: 20 }}>
+        secrets
+      </h2>
+      <p className="dim">
+        the same variables, kept out of the build logs — and never sent back, not even to this page.
+      </p>
+      {!loading && !listError && kept.length === 0 && <p className="dim">no secrets yet.</p>}
+      <ul className="rows">{kept.map(row)}</ul>
 
-            {/* A checkbox, not a verb. This is a property of the secret, and a
-                button beside `show` read as a second way of doing the same
-                thing. The wording is the form's own, word for word, so the
-                thing you tick when storing is the thing you see afterwards. */}
-            {s.scope !== "global" && (
-              <label className="row-flag" title="a secret is removed from build logs, and never shown here">
-                <input
-                  type="checkbox"
-                  checked={s.masked}
-                  onChange={() => void toggleMasked(s)}
-                />
-                keep out of the logs
-              </label>
-            )}
+      {/* A credential is a file plus the handful of fields that make it usable,
+          and it is worth nothing in pieces: a keystore without its alias is not
+          a partial success, it is an artifact rejected by a store days later.
+          So one block, taken whole.
 
-            {/* Offered only where it is allowed, which the line above explains. */}
-            {!s.masked &&
-              s.scope !== "global" &&
-              (shown[s.key] === undefined ? (
-                <button onClick={() => void show(s)} title="show the value">
-                  show
-                </button>
-              ) : (
-                <button onClick={() => hide(s.key)} title="hide it again">
-                  hide
-                </button>
-              ))}
-            {s.scope === "global" ? (
-              // A global secret belongs to every project. Editing it from inside
-              // one would hide that, so from here it is only ever reported.
-              <span className="dim" title="set for every project — laneyard secret set">
-                global
-              </span>
-            ) : (
-              <button onClick={() => void remove(s)} title="remove">
-                ✗
-              </button>
-            )}
-          </li>
+          Every kind is offered whether or not this project has any use for it.
+          fastlane is not only for shipping — lanes take screenshots, run tests,
+          sync certificates — and a project that signs nothing should read three
+          quiet circles, not three things it is missing. */}
+      <h2 className="section" style={{ marginTop: 20 }}>
+        signing
+      </h2>
+      <p className="dim">
+        only for the lanes that sign and upload. the file stays here, encrypted, and reaches a run as
+        a path plus the names below.
+      </p>
+      {blocksError && <p className="status-failed">unreadable signing blocks — {blocksError}</p>}
+      <ul className="rows credentials">
+        {CREDENTIAL_KINDS.map((spec) => (
+          <CredentialCard
+            key={spec.kind}
+            slug={slug}
+            spec={spec}
+            stored={credentials.find((c) => c.kind === spec.kind)}
+            onChanged={load}
+            onError={setFormError}
+          />
         ))}
       </ul>
 
@@ -352,102 +348,22 @@ export function Secrets() {
           autoComplete="off"
           aria-label="name"
         />
-        {file === null ? (
-          <input
-            type="password"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="value"
-            autoComplete="new-password"
-            aria-label="value"
-          />
-        ) : (
-          // The file's name, never a preview of what is in it. Same line
-          // grammar as a stored secret: marker, name, dim note, ✗ to undo.
-          <span className="file-chosen">
-            <span className="mark accent">✓</span> <span className="bright">{file.name}</span>{" "}
-            <span className="dim">read when you store it</span>{" "}
-            <button type="button" onClick={forgetFile} title="choose another value">
-              ✗
-            </button>
-          </span>
-        )}
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="value"
+          autoComplete="new-password"
+          aria-label="value"
+        />
         <label>
           <input type="checkbox" checked={masked} onChange={(e) => setMasked(e.target.checked)} />
           keep this out of the logs
         </label>
-        <button type="submit" disabled={saving || key.trim() === "" || (file === null && value === "")}>
+        <button type="submit" disabled={saving || key.trim() === "" || value === ""}>
           store
         </button>
       </form>
-
-      {/* A credential is a file. Pasting a `.p8` into a text field is the moment
-          someone is most likely to paste it somewhere else by accident, and the
-          file is right there.
-
-          These were one sentence — "or from a file — app store connect key,
-          play store service account" — which ran the two platforms together in
-          a line you had to finish reading to find out that half of it was not
-          about you. They are two different credentials, for two different
-          stores, and only one of them is usually yours. So: one row each, in
-          the same grammar as every other list here, under a heading of its own.
-
-          The name each is stored under is on screen rather than implied. It is
-          the name fastlane reads and the name the checklist looks for — storing
-          the right file under a name nothing recognises leaves the checklist
-          warning and the user certain they had done the work. */}
-      <h2 className="section" style={{ marginTop: 20 }}>
-        from a file
-      </h2>
-      <ul className="rows credentials">
-        {FILE_CREDENTIALS.map((c) => {
-          const storedSecret = secrets.find((s) => s.key === c.key);
-          const stored = storedSecret !== undefined;
-          return (
-            <li key={`${c.key}-${fileControls}`}>
-              {/* The same three characters as the readiness checklist: a tick
-                  is a thing settled, a circle a thing not done yet. */}
-              <span className={`mark ${stored ? "status-success" : "dim"}`}>{stored ? "✓" : "○"}</span>
-              <span className="platform">{c.platform}</span>
-              <span className="grow">
-                <span className="bright">{c.what}</span> <span className="dim">{c.extension}</span>
-                <div className="dim">
-                  stored as <code>{c.key}</code>
-                  {stored && " — choosing another file replaces it"}
-                </div>
-              </span>
-              <label className="file-pick">
-                <input
-                  type="file"
-                  accept={c.accept}
-                  onChange={(e) => {
-                    const chosen = e.target.files?.[0] ?? null;
-                    if (chosen === null) return;
-                    setKey(c.key);
-                    setValue("");
-                    setFile(chosen);
-                    setFormError(null);
-                  }}
-                />
-                <span className="accent">{stored ? "replace" : "choose"} →</span>
-              </label>
-              {/* Removal lives here now, because the listing above no longer
-                  shows these — and a credential you cannot delete from the
-                  interface is one you have to go to the command line for. */}
-              {stored &&
-                (storedSecret?.scope === "global" ? (
-                  <span className="dim" title="set for every project — laneyard secret set">
-                    global
-                  </span>
-                ) : (
-                  <button onClick={() => void remove({ key: c.key } as SecretSummary)} title="remove">
-                    ✗
-                  </button>
-                ))}
-            </li>
-          );
-        })}
-      </ul>
       <p className="dim">an existing name is replaced.</p>
 
       {formError && <p className="status-failed">refused — {formError}</p>}
