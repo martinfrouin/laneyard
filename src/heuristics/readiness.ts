@@ -59,7 +59,7 @@ export interface Check {
   /** What to do about it, as a sentence. Never an action Laneyard takes itself. */
   fix?: string;
   /** Set only when the fix genuinely is one action the interface can lead to. */
-  fixIn?: "secrets";
+  fixIn?: "secrets" | "signing";
 }
 
 /**
@@ -120,11 +120,11 @@ interface Outcome {
   state: CheckState;
   detail: string;
   fix?: string;
-  fixIn?: "secrets";
+  fixIn?: "secrets" | "signing";
 }
 
 const ok = (detail: string): Outcome => ({ state: "ok", detail });
-const warn = (detail: string, fix?: string, fixIn?: "secrets"): Outcome => ({
+const warn = (detail: string, fix?: string, fixIn?: "secrets" | "signing"): Outcome => ({
   state: "warn",
   detail,
   ...(fix === undefined ? {} : { fix }),
@@ -133,7 +133,7 @@ const warn = (detail: string, fix?: string, fixIn?: "secrets"): Outcome => ({
 // `fixIn` belongs here as much as on a warning: "could not tell" and "here is
 // the one setting that would settle it" are not in tension, and a link is worth
 // more on the line nobody knows what to do with than on the one that says so.
-const undetermined = (detail: string, fix?: string, fixIn?: "secrets"): Outcome => ({
+const undetermined = (detail: string, fix?: string, fixIn?: "secrets" | "signing"): Outcome => ({
   state: "unknown",
   detail,
   ...(fix === undefined ? {} : { fix }),
@@ -253,7 +253,7 @@ const API_KEY = /^APP_STORE_CONNECT_API_KEY/;
 const DEAD_API_KEY = /^APP_STORE_CONNECT_API_KEY_P8$/;
 
 const STORE_API_KEY =
-  "Upload the `.p8` as an App Store Connect key block from the secrets tab, with its key id and " +
+  "Upload the `.p8` as an App Store Connect key block from the signing tab, with its key id and " +
   "issuer id. Laneyard writes the file for the length of a run and exports the three of them under " +
   "the names the block carries, so nothing in the project has to change. " +
   "An API key does not expire on its own.";
@@ -361,7 +361,7 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
           "of that name: the value is stored, and no lane can see it. An earlier version of this " +
           "interface asked for it.",
         STORE_API_KEY,
-        "secrets",
+        "signing",
       ),
     };
   }
@@ -434,7 +434,7 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
         "only a FASTLANE_SESSION: Apple sessions expire, and the run that finds it expired " +
           "stops and asks for a verification code.",
         STORE_API_KEY,
-        "secrets",
+        "signing",
       ),
     };
   }
@@ -449,7 +449,7 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
         "the Appfile names an Apple ID and nothing else: a lane that uploads signs in as that " +
           "account, and two-factor authentication stops the run to ask for a code.",
         STORE_API_KEY,
-        "secrets",
+        "signing",
       ),
     };
   }
@@ -474,7 +474,7 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
       "no App Store Connect credential in the vault, in the lanes, or in the repository: " +
         "a lane that uploads will ask for an Apple ID.",
       STORE_API_KEY,
-      "secrets",
+      "signing",
     ),
   };
 }
@@ -604,7 +604,7 @@ const KEYSTORE_PASSWORD = /(^|_)(KEYSTORE|STORE)_PASSWORD$/;
  * together, and a run gets both without the project knowing anything about it.
  */
 const STORE_KEYSTORE =
-  "Upload the keystore as an android keystore block from the secrets tab, with its alias and its " +
+  "Upload the keystore as an android keystore block from the signing tab, with its alias and its " +
   "two passphrases. Laneyard writes the file for the length of a run and exports the names the " +
   "block carries, so no lane has to be changed to find it.";
 
@@ -695,7 +695,7 @@ export function checkAndroidKeystore(
       `${nameList(withoutPassphrase.map((c) => c.lane))} hands gradle a keystore, but no keystore ` +
         "passphrase is in the vault: gradle asks for it and waits.",
       STORE_KEYSTORE,
-      "secrets",
+      "signing",
     ),
   };
 }
@@ -716,7 +716,7 @@ const DECLARE_SECRETS =
   "`required_secrets` in laneyard.yml and they are checked like the rest.";
 
 const STORE_PLAY_KEY =
-  "Upload the service account JSON as a Play Store service account block from the secrets tab. " +
+  "Upload the service account JSON as a Play Store service account block from the signing tab. " +
   "Laneyard writes the file for the length of a run and exports its path under the name the block " +
   "carries — `SUPPLY_JSON_KEY`, which supply reads by itself, unless the block says otherwise. " +
   "A service account does not expire on its own.";
@@ -834,7 +834,7 @@ export function checkPlayStore(
       `${nameList(calls.map((c) => c.lane))} uploads to the Play Store, but no service account is in ` +
         "the vault: supply stops and asks which credentials to use.",
       STORE_PLAY_KEY,
-      "secrets",
+      "signing",
     ),
   };
 }
@@ -1013,7 +1013,7 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
             `names ${name} without saying which directory it resolves against, so Laneyard will ` +
             "not guess where to write it.",
           SET_PROPERTIES_PATH,
-          "secrets",
+          "signing",
         ),
       };
     }
@@ -1029,10 +1029,10 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
             ". The build will not fail: it will produce an artifact signed with the debug key, and " +
             "the store will reject it.",
           `${name} is gitignored by the same documentation that recommends it, so it never reaches ` +
-            "a clone. Upload the keystore as an android keystore block from the secrets tab: " +
+            "a clone. Upload the keystore as an android keystore block from the signing tab: " +
             `Laneyard then writes ${name} itself for the length of a run, and removes it ` +
             "afterwards. Nothing in the build script changes.",
-          "secrets",
+          "signing",
         ),
       };
     }

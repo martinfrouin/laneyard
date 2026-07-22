@@ -135,11 +135,11 @@ export function Readiness() {
                   {check.fix && (
                     <div className="dim">
                       {check.fix}
-                      {check.fixIn === "secrets" && (
+                      {check.fixIn && (
                         <>
                           {" "}
-                          <Link to={`/p/${slug}/secrets`} className="accent">
-                            secrets →
+                          <Link to={`/p/${slug}/${check.fixIn}`} className="accent">
+                            {check.fixIn} →
                           </Link>
                         </>
                       )}

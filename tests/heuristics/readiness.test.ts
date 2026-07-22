@@ -158,7 +158,7 @@ describe("checkAppStoreConnect", () => {
     const check = asc(["FASTLANE_SESSION"]);
     expect(check.state).toBe("warn");
     expect(check.detail).toMatch(/expire/);
-    expect(check.fixIn).toBe("secrets");
+    expect(check.fixIn).toBe("signing");
   });
 
   it("prefers the API key when both are stored", () => {
@@ -166,10 +166,10 @@ describe("checkAppStoreConnect", () => {
     expect(check.state).toBe("ok");
   });
 
-  it("warns when nothing anywhere holds a key, and points at the secrets tab", () => {
+  it("warns when nothing anywhere holds a key, and points at the signing tab", () => {
     const check = asc([]);
     expect(check.state).toBe("warn");
-    expect(check.fixIn).toBe("secrets");
+    expect(check.fixIn).toBe("signing");
   });
 
   // The whole point of looking past the vault: a project that arranged its key
@@ -235,7 +235,7 @@ describe("checkAppStoreConnect", () => {
     expect(check.state).toBe("warn");
     expect(check.detail).toMatch(/no lane can see it/);
     expect(check.fix).toMatch(/block/);
-    expect(check.fixIn).toBe("secrets");
+    expect(check.fixIn).toBe("signing");
   });
 
   it("still greens the names fastlane really does read", () => {
@@ -430,7 +430,7 @@ describe("checkAndroidKeystore", () => {
     );
     expect(check.state).toBe("warn");
     expect(check.detail).toMatch(/beta/);
-    expect(check.fixIn).toBe("secrets");
+    expect(check.fixIn).toBe("signing");
   });
 
   it("is ok once a keystore password is in the vault", () => {
@@ -547,7 +547,7 @@ describe("checkPlayStore", () => {
     );
     expect(check.state).toBe("warn");
     expect(check.detail).toMatch(/release/);
-    expect(check.fixIn).toBe("secrets");
+    expect(check.fixIn).toBe("signing");
   });
 
   it("sees supply as upload_to_play_store", () => {
@@ -1120,7 +1120,7 @@ describe("checkReleaseSigning", () => {
     expect(check.state).toBe("unknown");
     expect(check.detail).toMatch(/will not guess/);
     expect(check.fix).toMatch(/properties file path on the keystore block/);
-    expect(check.fixIn).toBe("secrets");
+    expect(check.fixIn).toBe("signing");
   });
 
   it("leaves the project's own properties file alone, and says so", () => {
