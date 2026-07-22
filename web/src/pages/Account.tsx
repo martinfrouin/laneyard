@@ -48,10 +48,12 @@ export function Account() {
 
   return (
     <>
-      <h2 className="section">your account</h2>
+      <h2 className="section">your account — change your password</h2>
       <p className="dim">
         signed in as <span className="bright">{me?.name}</span>{" "}
-        <span className="dim">{me?.role}</span>. the name is fixed — an admin makes another one.
+        <span className="dim">{me?.role}</span>. your password is the one thing this page changes,
+        and the one thing nobody else can change for you. the name is fixed — an admin makes another
+        one.
       </p>
 
       <h2 className="section" style={{ marginTop: 20 }}>

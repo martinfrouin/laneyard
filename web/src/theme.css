@@ -135,6 +135,15 @@ code { color: var(--text-bright); }
    line of the accounts screen carries, so the two read as one fact. */
 .who { display: flex; align-items: baseline; gap: 8px; }
 
+/* The way in to your own account, in words. A one-pixel rule under it, the same
+   rule everything else in the interface is separated by, is enough to say it
+   answers to a click — it sits beside a button in the header, and a second
+   button there would make reading a page and ending a session look like the
+   same kind of act. The accounts screen borrows it for your own row, so the two
+   ways in are recognisably the same thing. */
+.account-link { border-bottom: 1px solid var(--border); }
+.account-link:hover { border-bottom-color: var(--text-dim); }
+
 .shell > nav {
   border-right: 1px solid var(--border);
   background: var(--bg-raised);

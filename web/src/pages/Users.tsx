@@ -1,4 +1,5 @@
 import { useContext, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import type { Identity, Role } from "../api";
 import { Session } from "../App";
@@ -94,11 +95,16 @@ export function Users() {
             <span className="dim">{u.role}</span>
             {u.name === me?.name ? (
               // Removing the account you are reading this page with would log
-              // you out mid-sentence. Signing out is the control for leaving,
-              // and another admin is the one who removes you.
-              <span className="dim" title="sign out to leave; another admin removes an account">
-                —
-              </span>
+              // you out mid-sentence, so this row cannot carry the ✗ the others
+              // do — it used to carry a dash instead, and dead-ended there. An
+              // admin looking for their own password looks at the list of
+              // people first, because there is one; the row now leads where it
+              // was always going to lead. Changing a password is still not done
+              // from this table: this page is the server's list of people, and
+              // that is one person.
+              <Link to="/account" className="account-link">
+                your account
+              </Link>
             ) : (
               <button onClick={() => void remove(u)} title="remove">
                 ✗
@@ -143,7 +149,9 @@ export function Users() {
       </p>
       <p className="dim">
         removing an account ends its sessions at once. the last admin can be neither removed nor
-        demoted: a server nobody can administer cannot be repaired from here.
+        demoted: a server nobody can administer cannot be repaired from here. your own row leads to
+        your account, where you change your password — nobody's password is changed from this page,
+        and another admin is the one who removes you.
       </p>
 
       {formError && <p className="status-failed">refused — {formError}</p>}

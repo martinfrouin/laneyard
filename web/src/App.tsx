@@ -74,13 +74,19 @@ export function App() {
                 marker for the role, the name, then the controls. */}
             <span className="who">
               <span className={`mark ${admin ? "accent" : "dim"}`}>{admin ? "●" : "○"}</span>
-              {/* The name is the way in to your own account: whoever wants to
-                  change their password looks for themselves on screen first,
-                  and there is exactly one place they are named. */}
-              <Link to="/account" className="bright" title="your account">
+              {/* The name used to be the only way in, on the assumption that
+                  whoever wants to change their password looks for themselves on
+                  screen first. Usage said otherwise: a name is a fact, not a
+                  control, and the label that said so was a hover title nobody
+                  hovers. It stays a link — someone who did click it was not
+                  wrong — but the words are on screen beside it now. */}
+              <Link to="/account" className="bright">
                 {identity.name}
               </Link>
               <span className="dim">{identity.role}</span>
+              <Link to="/account" className="account-link">
+                your account
+              </Link>
               <button onClick={signOut}>sign out</button>
               <ThemeToggle />
             </span>

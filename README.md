@@ -155,9 +155,9 @@ shell history. Without `--role`, the account is a builder.
 Two things are refused, in the API and on the command line alike: removing the last admin, and
 demoting the last admin. A server nobody can administer cannot be repaired from the interface.
 
-Anyone changes their own password from **your account**, reached by clicking your name in the
-header — a builder included, since that page is about one person rather than about the server's
-list of people. It asks for the current password even though you are already signed in: a session
+Anyone changes their own password from **your account**, which is said in those words in the header
+and again on your own row of the accounts screen — a builder included, since that page is about one
+person rather than about the server's list of people. It asks for the current password even though you are already signed in: a session
 is a cookie in a browser that may have been left open on a desk. Doing it ends every other session
 that account has, and leaves the page you did it on signed in. That is how the random password
 `laneyard setup` printed once stops being a string on a sticky note.
