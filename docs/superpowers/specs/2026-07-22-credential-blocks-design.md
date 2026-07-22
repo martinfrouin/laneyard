@@ -94,6 +94,37 @@ keys inside it. The Flutter documentation's four — `storeFile`, `storePassword
 The rule for every such field: **detected by default, corrected by the user,
 never demanded of the repository.**
 
+### Building is not deploying
+
+A run may exist only to produce an artifact. Someone who wants an `.aab` to hand
+to a tester needs the keystore that signs it and nothing else — no `.p8`, no
+service account, because nothing is being uploaded anywhere.
+
+So a block is **required by a lane, never by a platform**. Laneyard already
+introspects a lane's actions; that is what feeds `ASC_KEY_ACTIONS` and
+`PLAY_KEY_ARGS` in the readiness checks today. The same knowledge decides what a
+run actually needs:
+
+| a lane calling | needs |
+|---|---|
+| `upload_to_testflight`, `deliver`, `pilot` | `apple_asc` |
+| `upload_to_play_store`, `supply` | `play_service_account` |
+| a release Android build | `android_keystore` |
+| none of the above | nothing |
+
+A missing block whose kind no lane uses is reported as *not needed here*, not as
+a warning. Demanding a service account from someone who only builds is the same
+mistake as demanding App Store Connect credentials from a repository that
+carries an Xcode project it never builds — a mistake `platforms`
+(`config/schema.ts:12-14`) already exists to prevent, applied one level deeper.
+
+**Materialisation does not follow the same rule.** Every applicable block is
+written for every run, whether or not the lane appears to need it. Narrowing it
+would shrink the window a credential spends on disk, which is worth something —
+but a detection that guesses "not needed" and guesses wrong breaks a build that
+worked, and under the governing constraint that is the one failure Laneyard may
+not cause. Detection decides what to *ask for*, never what to *withhold*.
+
 ## Design
 
 ### Credentials are their own entity

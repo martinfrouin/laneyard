@@ -827,7 +827,23 @@ Pass applicable block kinds into the checks. Then:
 - `checkReleaseSigning` (`:735-742`): today it tells the user to supply the keystore through the environment and make a missing key an error — that is, to rewrite their `build.gradle.kts`. Under the governing constraint that is not Laneyard's to ask. With a keystore block present it states what Laneyard will do: supply the properties file, naming the four assumed keys. Without one, it says a block is missing — never that the build script is wrong.
 - Where a properties file will be supplied, say so, and name the four assumed keys. The assumption is stated, not hidden.
 
-Add a test that no readiness recommendation asks the user to edit a Fastfile or a build script. The constraint is easy to honour once and lose later.
+- **A block is required by a lane, never by a platform.** A run that only builds an artifact needs the keystore and nothing else. Derive each check's requirement from the lane's actions — the introspection that already feeds `ASC_KEY_ACTIONS` and `PLAY_KEY_ARGS` — and report a missing block that no lane uses as *not needed here* rather than as a warning.
+
+Two tests worth writing, because both constraints are easy to honour once and lose later:
+
+```typescript
+it("does not ask a build-only project for a service account", () => {
+  // Nothing is uploaded anywhere, so nothing needs uploading credentials.
+  const checks = readiness({ ...facts, lanes: [buildOnlyLane], blocks: [] });
+  expect(byId(checks, "playStore").status).not.toBe("warn");
+});
+
+it("never tells the user to edit their own project", () => {
+  for (const check of every(checks)) {
+    expect(check.recommendation ?? "").not.toMatch(/rather than|edit|change your|in the lane with/i);
+  }
+});
+```
 
 Existing installations keep working: every check accepts either route, and recommends a block only when neither is present. The single exception is `_P8`, which never worked.
 
