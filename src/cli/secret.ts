@@ -23,8 +23,10 @@ The value is read from standard input, never from an argument:
   echo "$TOKEN" | laneyard secret set GITHUB_TOKEN
 
 \`import\` reads this project's fastlane/.env and stores what it finds. A
-variable naming a .p8 or a service account JSON has the *file* stored, under the
-name fastlane looks for — a path does not travel to a build machine.
+variable naming a service account JSON has the *file* stored, under the name
+fastlane looks for — a path does not travel to a build machine. A variable
+naming a .p8 is left alone and reported instead: that credential belongs in a
+signing block from the secrets tab, not in a loose variable.
 `;
 
 export interface SecretCommandIo {
@@ -276,6 +278,12 @@ async function runSecretImport(home: string, args: string[], io: SecretCommandIo
     for (const item of plan.planned) {
       if (item.kind === "unresolved-path") {
         io.out(`  ✗ ${item.key} — names ${item.path}, which is not there. Skipped.\n`);
+      } else if (item.kind === "suggest-block") {
+        io.out(
+          `  ▸ ${item.key} names ${item.path} — no action in fastlane reads that variable. ` +
+            "Upload the `.p8` as an App Store Connect key block from the secrets tab instead, with " +
+            "its key id and issuer id. Not imported here.\n",
+        );
       } else if (item.kind === "file-contents") {
         io.out(`  ● ${item.key}${item.from ? ` (the contents of ${item.from})` : ""}\n`);
       } else {
@@ -298,12 +306,15 @@ async function runSecretImport(home: string, args: string[], io: SecretCommandIo
 
     const stored = await applyImport(vault, project, plan);
     io.out(`\n✓ Stored ${stored} ${stored === 1 ? "secret" : "secrets"}, all kept out of the logs.\n`);
-    // Said here because the import alone does not finish the job: the lanes
-    // still ask for a path, and the vault now holds the contents.
+    // Said here because it is easy to assume an import leaves lanes with
+    // homework. It does not: `key_filepath:` and `json_key:` are the supported
+    // forms, not a stopgap. A signing credential block writes its file to disk
+    // for the length of a run, so a lane that names a path keeps reading a
+    // real one, unedited.
     io.out(
-      "\nYour lanes still read the path forms. Point them at the contents instead — " +
-        "`key_content:` rather than `key_filepath:`, and drop `json_key:` so supply reads " +
-        "SUPPLY_JSON_KEY_DATA itself.\n",
+      "\nNothing in your lanes needs to change. `key_filepath:` and `json_key:` keep working as " +
+        "written. From here, a `.p8` or a service account JSON belongs in a signing credential block " +
+        "from the secrets tab, not as a loose variable in this file.\n",
     );
     return 0;
   } finally {

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { parseEnvExample } from "../heuristics/env-example.js";
 import type { Vault } from "../secrets/vault.js";
@@ -23,19 +23,39 @@ import type { Vault } from "../secrets/vault.js";
  * The variables whose value is a *path*, and the name their *contents* belong
  * under.
  *
- * This is the translation that makes an import worth doing. `ASC_KEY_FILEPATH`
- * points at a `.p8` on this laptop; copied verbatim into the vault it would
- * point at nothing on the build machine, and the run would fail exactly as it
- * does today. What has to travel is the file, so the file is read and stored
- * under the name fastlane itself looks for.
+ * This is the translation that makes an import worth doing. `SUPPLY_JSON_KEY`
+ * points at a service account JSON on this laptop; copied verbatim into the
+ * vault it would point at nothing on the build machine, and the run would fail
+ * exactly as it does today. What has to travel is the file, so the file is
+ * read and stored under `SUPPLY_JSON_KEY_DATA` — a name supply reads on its
+ * own, verified against fastlane 2.237.
+ *
+ * There is no such entry for a `.p8`. `APP_STORE_CONNECT_API_KEY_P8` was one —
+ * an earlier version of this interface invented it, no action in fastlane has
+ * ever declared it, and the interface has since dropped it. See `P8_PATH_NAMES`
+ * for what a `.p8` path becomes instead.
  */
-const PATH_TO_CONTENTS: Record<string, string> = {
-  ASC_KEY_FILEPATH: "APP_STORE_CONNECT_API_KEY_P8",
-  APP_STORE_CONNECT_API_KEY_PATH: "APP_STORE_CONNECT_API_KEY_P8",
-  APP_STORE_CONNECT_API_KEY_FILEPATH: "APP_STORE_CONNECT_API_KEY_P8",
+export const PATH_TO_CONTENTS: Record<string, string> = {
   SUPPLY_JSON_KEY: "SUPPLY_JSON_KEY_DATA",
   GOOGLE_APPLICATION_CREDENTIALS: "SUPPLY_JSON_KEY_DATA",
 };
+
+/**
+ * Variables that name a `.p8` the way projects and this interface's own
+ * earlier version did.
+ *
+ * None of them is a name fastlane reads: the App Store Connect action takes
+ * its key from `key_id`, `issuer_id` and a file, not from an environment
+ * variable an import could invent on its own. What this command can do
+ * honestly is find the file and say where it belongs — an App Store Connect
+ * key block, uploaded from the secrets tab with the two fields the file alone
+ * cannot supply.
+ */
+export const P8_PATH_NAMES = new Set([
+  "ASC_KEY_FILEPATH",
+  "APP_STORE_CONNECT_API_KEY_PATH",
+  "APP_STORE_CONNECT_API_KEY_FILEPATH",
+]);
 
 /** What an import proposes to do to one variable, before anything is written. */
 export interface Planned {
@@ -43,8 +63,12 @@ export interface Planned {
   key: string;
   /** The name in the `.env`, when the two differ. */
   from?: string;
-  /** How it was resolved, which is the whole of what the user needs to check. */
-  kind: "value" | "file-contents" | "unresolved-path";
+  /**
+   * How it was resolved, which is the whole of what the user needs to check.
+   * `suggest-block` is the one kind nothing is stored for: the `.p8` it names
+   * is real, but the destination is a credential block, not a vault entry.
+   */
+  kind: "value" | "file-contents" | "unresolved-path" | "suggest-block";
   /** The path a file was read from, for the ones that came from a file. */
   path?: string;
   value: string;
@@ -104,6 +128,26 @@ export async function planImport(
   for (const [name, value] of env) {
     if (value === "") continue;
 
+    if (P8_PATH_NAMES.has(name)) {
+      const path = isAbsolute(value) ? value : resolve(cwd, value);
+      const found = await access(path)
+        .then(() => true)
+        .catch(() => false);
+
+      if (!found) {
+        // Same handling as any other missing file: reported, not skipped in
+        // silence, because it is the credential the project most needs.
+        planned.push({ key: name, kind: "unresolved-path", path, value });
+        continue;
+      }
+
+      // The file is real, but nothing is stored under `name` — there is
+      // nowhere fastlane would read it from. Left to the caller to say what
+      // to do instead, in the same voice as the rest of the plan.
+      planned.push({ key: name, kind: "suggest-block", path, value });
+      continue;
+    }
+
     const contentsKey = PATH_TO_CONTENTS[name];
     if (contentsKey) {
       const path = isAbsolute(value) ? value : resolve(cwd, value);
@@ -132,7 +176,9 @@ export async function planImport(
 
   return {
     planned,
-    replacing: planned.filter((p) => p.kind !== "unresolved-path" && already.has(p.key)).map((p) => p.key),
+    replacing: planned
+      .filter((p) => p.kind !== "unresolved-path" && p.kind !== "suggest-block" && already.has(p.key))
+      .map((p) => p.key),
   };
 }
 
@@ -150,7 +196,7 @@ export async function applyImport(
 ): Promise<number> {
   let stored = 0;
   for (const item of plan.planned) {
-    if (item.kind === "unresolved-path") continue;
+    if (item.kind === "unresolved-path" || item.kind === "suggest-block") continue;
     await vault.set(slug, item.key, item.value, true);
     stored += 1;
   }

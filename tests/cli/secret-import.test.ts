@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseEnvFile, planImport } from "../../src/cli/secret-import.js";
+import { PATH_TO_CONTENTS, parseEnvFile, planImport } from "../../src/cli/secret-import.js";
 import { tmpDir } from "../fixtures/repos.js";
 
 describe("parseEnvFile", () => {
@@ -44,22 +44,31 @@ describe("planImport", () => {
     expect(plan.planned).toEqual([{ key: "APP_VERSION", kind: "value", value: "1.4.0" }]);
   });
 
+  // The mapping is the whole surface an import can invent a destination
+  // through. `APP_STORE_CONNECT_API_KEY_P8` is a name Laneyard's own earlier
+  // interface made up: no action in fastlane 2.237 declares it, so no lane
+  // can read a secret stored under it. Nothing may map onto it again.
+  it("does not mint a name fastlane never reads", () => {
+    expect(Object.values(PATH_TO_CONTENTS)).not.toContain("APP_STORE_CONNECT_API_KEY_P8");
+  });
+
   /**
-   * The translation that makes the whole command worth running. A path points
-   * at a file on one laptop; copied verbatim it points at nothing on the build
-   * machine, and the run fails exactly as it did before the import.
+   * A `.p8` path is real and worth reporting, but there is nowhere in fastlane
+   * to store it under: the App Store Connect action takes its key from a
+   * credential block's `key_id`, `issuer_id` and file, not from an
+   * environment variable an import could invent. The plan says so instead of
+   * storing anything.
    */
-  it("stores the contents of a .p8, under the name fastlane looks for", async () => {
+  it("turns a .p8 path into a suggestion to create the Apple block, not a stored secret", async () => {
     const dir = await project();
     const plan = await planImport(new Map([["ASC_KEY_FILEPATH", "secrets/AuthKey.p8"]]), dir, []);
 
     expect(plan.planned).toHaveLength(1);
     expect(plan.planned[0]).toMatchObject({
-      key: "APP_STORE_CONNECT_API_KEY_P8",
-      from: "ASC_KEY_FILEPATH",
-      kind: "file-contents",
+      key: "ASC_KEY_FILEPATH",
+      kind: "suggest-block",
     });
-    expect(plan.planned[0]!.value).toContain("BEGIN PRIVATE KEY");
+    expect(plan.planned[0]!.path).toBe(join(dir, "secrets/AuthKey.p8"));
   });
 
   it("does the same for a Play Store service account", async () => {
@@ -76,7 +85,7 @@ describe("planImport", () => {
   it("takes an absolute path as readily as a relative one", async () => {
     const dir = await project();
     const plan = await planImport(
-      new Map([["ASC_KEY_FILEPATH", join(dir, "secrets", "AuthKey.p8")]]),
+      new Map([["SUPPLY_JSON_KEY", join(dir, "secrets", "play.json")]]),
       "/somewhere/else",
       [],
     );
@@ -97,12 +106,25 @@ describe("planImport", () => {
     const plan = await planImport(
       new Map([
         ["APP_VERSION", "1.4.0"],
-        ["ASC_KEY_FILEPATH", "secrets/AuthKey.p8"],
+        ["SUPPLY_JSON_KEY", "secrets/play.json"],
       ]),
       dir,
-      ["APP_VERSION", "APP_STORE_CONNECT_API_KEY_P8"],
+      ["APP_VERSION", "SUPPLY_JSON_KEY_DATA"],
     );
-    expect(plan.replacing.sort()).toEqual(["APP_STORE_CONNECT_API_KEY_P8", "APP_VERSION"]);
+    expect(plan.replacing.sort()).toEqual(["APP_VERSION", "SUPPLY_JSON_KEY_DATA"]);
+  });
+
+  // A suggestion is not a write: nothing is stored under `ASC_KEY_FILEPATH`
+  // or under any other name, so it never counts as replacing something
+  // already in the vault, even when that exact name happens to be there.
+  it("does not offer to replace anything for a suggestion", async () => {
+    const dir = await project();
+    const plan = await planImport(
+      new Map([["ASC_KEY_FILEPATH", "secrets/AuthKey.p8"]]),
+      dir,
+      ["ASC_KEY_FILEPATH"],
+    );
+    expect(plan.replacing).toEqual([]);
   });
 
   it("passes over a variable with no value rather than storing an empty secret", async () => {
