@@ -9,6 +9,7 @@ import type { FastifyInstance } from "fastify";
 import { PromptAborted } from "./cli/prompt.js";
 import { runSetupCommand } from "./cli/setup.js";
 import { runSecretCommand } from "./cli/secret.js";
+import { runUninstallCommand } from "./cli/uninstall.js";
 import { runUserCommand } from "./cli/user.js";
 import { ConfigStore } from "./config/store.js";
 import { CacheStore } from "./db/cache.js";
@@ -133,6 +134,8 @@ const USAGE = `laneyard — a self-hosted web UI for fastlane
                       store a secret, its value read from standard input
   laneyard user add NAME [--role admin|builder]
                       create an account, its password read from standard input
+  laneyard uninstall  remove Laneyard's data folder, after showing what is in it
+                      --dry-run shows the inventory and stops
   laneyard            start the server
   laneyard --version  print the version
 
@@ -216,6 +219,18 @@ if (invokedDirectly()) {
       await runUserCommand(home, rest, {
         stdin: process.stdin,
         interactive: process.stdin.isTTY === true,
+        out: (text) => process.stdout.write(text),
+        err: (text) => process.stderr.write(text),
+      }),
+    );
+  }
+
+  // No `mkdir` here, unlike the commands above: this one asks what is there
+  // and would look ridiculous creating the folder it is about to report on.
+  if (command === "uninstall") {
+    process.exit(
+      await runUninstallCommand(homeDir(), rest, {
+        stdin: process.stdin,
         out: (text) => process.stdout.write(text),
         err: (text) => process.stderr.write(text),
       }),

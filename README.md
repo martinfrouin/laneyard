@@ -468,6 +468,35 @@ again, and it is never part of removing the project — a `.p8` or a keystore ca
 out of Laneyard, so the copy it holds is the only one it ever had. Global secrets and global
 signing blocks are shared by every project and are left alone.
 
+### Uninstalling
+
+```bash
+laneyard uninstall --dry-run   # list what is there, and stop
+laneyard uninstall             # remove it, after a typed confirmation
+npm uninstall -g laneyard      # remove the package itself
+```
+
+`laneyard uninstall` removes the data folder: `config.yml`, the vault key, the database, the
+workspaces, the artifacts and the logs. It reads the whole inventory from disk first — the
+projects, the number of secrets and signing blocks, the real sizes and paths — and prints it
+before asking anything.
+
+The vault key is the one loss that cannot be undone. Every secret and every signing block is
+encrypted under `~/.laneyard/key`; once it is gone the database is ciphertext nobody can read, and
+restoring a backup of `laneyard.db` alone brings nothing back. The originals are yours and are
+untouched — the `.p8` in your downloads, the keystore in your safe — so what you are agreeing to
+is uploading them again. Global secrets and global signing blocks are shared by every project and
+go too; the inventory says so on its own line.
+
+It is confirmed by typing the folder's path, not `y`: this is the one command in Laneyard that
+destroys credentials, and `$LANEYARD_HOME` is exactly the case where a reflex is wrong. Anything
+in the folder that Laneyard did not put there is named, left alone, and the folder is kept for it.
+
+It does not remove the npm package — a command cannot sensibly delete the binary it is running
+from — and it prints the command that does. There is no npm lifecycle hook doing any of this on
+`npm uninstall`, on purpose: a package manager must not delete someone's signing keys on its own,
+and a lifecycle script cannot ask.
+
 ## Security
 
 Read this before putting Laneyard on a network.
@@ -532,6 +561,7 @@ What this does *not* cover, stated plainly:
 - `✓` signing credentials stored whole — the file and the fields beside it — written to disk for
   the length of a run and exported under the names your project already reads
 - `✓` remove a project from the interface, without touching its history
+- `✓` `laneyard uninstall`: the whole inventory first, then a typed confirmation, then the folder
 - `✓` named accounts, with a builder role that never sees a credential
 - `○` git-triggered and scheduled builds
 
