@@ -12,6 +12,8 @@ import { RunStore } from "../db/runs.js";
 import { SessionRecords } from "../db/sessions.js";
 import { Workspace } from "../git/workspace.js";
 import { LogStore } from "../logs/store.js";
+import { materialiseCredentials } from "../runner/materialise.js";
+import type { MaterialisedCredentials } from "../runner/materialise.js";
 import { executeRun } from "../runner/orchestrate.js";
 import { RunQueue } from "../runner/queue.js";
 import type { Lane } from "../sidecar/lanes.js";
@@ -51,6 +53,15 @@ export interface AppContext extends AppDeps {
   sockets?: RunSockets;
   workspacePath: (slug: string) => string;
   artifactsDir: (runId: number) => string;
+  /**
+   * Where a run's signing blocks are written, and deleted from when it ends.
+   *
+   * Next to `artifacts/<run id>` rather than inside the clone: the workspace is
+   * kept between runs and lanes commit and push from it, so a keystore dropped
+   * in there would both dirty a tree the project owns and stay on disk long
+   * after the run that needed it.
+   */
+  runSecretsDir: (runId: number) => string;
   /** Clones the repository if it isn't cloned yet. Throws if the clone fails. */
   ensureWorkspace: (slug: string) => Promise<void>;
   /** The single worker. Routes ring its bell; they never run anything themselves. */
@@ -100,6 +111,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     sessions: new SessionStore(new SessionRecords(deps.db)),
     workspacePath,
     artifactsDir: (runId) => join(deps.root, "artifacts", String(runId)),
+    runSecretsDir: (runId) => join(deps.root, "runs", String(runId), "secrets"),
     ensureWorkspace: async (slug) => {
       const entry = deps.config.project(slug);
       if (!entry) throw new Error(`Unknown project: ${slug}`);
@@ -128,6 +140,23 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return;
     }
 
+    // Before the run, and outside it: `executeRun` is handed plaintext and
+    // never the vault, a boundary worth more than the convenience of moving
+    // this one call inside. A block that will not decrypt stops the run here,
+    // with the reason, rather than producing an artifact signed by nothing.
+    let credentials: MaterialisedCredentials;
+    try {
+      credentials = await materialiseCredentials(ctx.vault, slug, ctx.runSecretsDir(runId));
+    } catch (cause) {
+      ctx.runs.finish(runId, {
+        status: "failed",
+        exitCode: null,
+        errorSummary: ctx.vault.scrub(slug, (cause as Error).message),
+      });
+      ctx.sockets?.finish(runId, "failed");
+      return;
+    }
+
     await executeRun({
       runId,
       runs: ctx.runs,
@@ -144,6 +173,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       },
       env: process.env,
       secrets: ctx.vault.resolve(slug),
+      credentialEnv: credentials.env,
+      cleanup: credentials.cleanup,
       maskedValues: ctx.vault.maskedValues(slug),
       signal,
       onChunk: (chunk, offset) => app.broadcastRunChunk?.(runId, chunk, offset),

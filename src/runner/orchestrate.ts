@@ -30,6 +30,18 @@ export interface ExecuteRunOptions {
   env: NodeJS.ProcessEnv;
   /** Resolved secrets, added to the run's environment. */
   secrets?: Record<string, string>;
+  /**
+   * Variables pointing at the signing blocks already written to disk for this
+   * run — see `materialise.ts`. Passed in rather than derived here for the same
+   * reason `secrets` is: this function is handed plaintext, never the vault.
+   */
+  credentialEnv?: Record<string, string>;
+  /**
+   * Removes whatever was written for this run, called on every way out.
+   * Its owner is the caller, but its timing is not: only this function knows
+   * when the child process has stopped reading those files.
+   */
+  cleanup?: () => Promise<void>;
   /** The values that must not appear in the log or in the browser. */
   maskedValues?: string[];
   /** Called for each output fragment, with its position in the log. */
@@ -49,8 +61,27 @@ export interface ExecuteRunResult {
  * Never throws: every error is converted into a documented `failed` run,
  * because a run that disappears without a trace is the worst possible
  * behaviour for a build server.
+ *
+ * The whole of it is wrapped so the signing blocks written for this run are
+ * removed on every way out — the successful return, the four early exits, the
+ * cancellations, and the exception this function promises not to raise but
+ * cannot rule out. A private key left on disk because a clone failed is a leak
+ * with no expiry date, and the only moment at which it is certainly safe to
+ * delete is the moment fastlane has stopped running.
  */
 export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
+  try {
+    return await execute(opts);
+  } finally {
+    // Deliberately swallowed: by now the log writer is closed and the run's
+    // verdict is recorded, so there is nowhere left to report this without
+    // rewriting a finished run's outcome as a failure it did not have. A
+    // directory that resists `rm -rf` is a broken disk, not a broken build.
+    if (opts.cleanup) await opts.cleanup().catch(() => {});
+  }
+}
+
+async function execute(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
   const { runId, runs, logs } = opts;
   const writer = await logs.open(runId);
   const tracker = new LiveStepTracker();
@@ -163,6 +194,11 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
     env: {
       ...opts.env,
       ...(opts.secrets ?? {}),
+      // After the secrets: a block is the more deliberate of the two, and it is
+      // the only one whose path variable points at a file that actually exists
+      // right now. A stray secret of the same name would otherwise send gradle
+      // looking for a keystore at a path from a previous machine.
+      ...(opts.credentialEnv ?? {}),
       // Order matters: secrets come after opts.env so a stored secret wins over
       // a variable that happens to exist in the server's own environment, and
       // before these fixed variables so no secret can override CI.
