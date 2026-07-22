@@ -2,6 +2,7 @@
 # Fake fastlane for the tests: replays a recorded output without building anything.
 #
 #   FAKE_FASTLANE_SCENARIO=success|failure|slow
+#   FAKE_FASTLANE_CAT=<file the "build" reads, printed into the log>
 #   FAKE_FASTLANE_REPORT_DIR=<folder to write report.xml to, default $PWD/fastlane>
 #
 # It mimics the real behaviour: step separators, a JUnit report written
@@ -23,6 +24,13 @@ echo "[09:41:05]: Compiling sources"
 if [ -n "${FAKE_FASTLANE_ECHO:-}" ]; then
   eval "value=\${$FAKE_FASTLANE_ECHO:-}"
   echo "[09:41:06]: $FAKE_FASTLANE_ECHO=$value"
+fi
+
+# Stands in for a build reading a file it depends on — gradle and its
+# key.properties. Prints what was there, or says nothing was.
+if [ -n "${FAKE_FASTLANE_CAT:-}" ]; then
+  echo "[09:41:07]: reading $FAKE_FASTLANE_CAT"
+  cat "$FAKE_FASTLANE_CAT" 2>/dev/null || echo "[09:41:07]: absent"
 fi
 
 if [ "$scenario" = "slow" ]; then

@@ -174,6 +174,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       env: process.env,
       secrets: ctx.vault.resolve(slug),
       credentialEnv: credentials.env,
+      androidKeystore: credentials.keystore,
       cleanup: credentials.cleanup,
       maskedValues: ctx.vault.maskedValues(slug),
       signal,

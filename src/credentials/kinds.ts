@@ -7,6 +7,17 @@ export interface FieldSpec {
   /** Kept out of the logs and never sent back to a browser. */
   secret: boolean;
   label: string;
+  /**
+   * A field the block is usable without, so an empty one does not refuse the
+   * block. It exists for the two settings below: a question Laneyard is allowed
+   * to ask, never a thing it may require an answer to before it will sign.
+   */
+  optional?: boolean;
+  /**
+   * What the form starts out holding. A proposal to correct rather than a blank
+   * to fill in — the difference between an answer and homework.
+   */
+  suggested?: string;
 }
 
 export interface KindSpec {
@@ -57,6 +68,26 @@ export const CREDENTIAL_KINDS: KindSpec[] = [
       { name: "key_alias", secret: false, label: "Key alias" },
       { name: "store_password", secret: true, label: "Store password" },
       { name: "key_password", secret: true, label: "Key password" },
+      // The two things about a gradle properties file that cannot be deduced.
+      // `runner/gradle-properties.ts` writes that file where a build script
+      // falls back to the debug key; the script names the file, and says
+      // nothing about where the name is resolved when the receiver is a
+      // variable, nor about the keys read out of it afterwards. Both are asked
+      // here, pre-filled from what detection could tell, and left empty rather
+      // than guessed when it could tell nothing.
+      {
+        name: "properties_path",
+        secret: false,
+        optional: true,
+        label: "Properties file, relative to the app",
+      },
+      {
+        name: "property_names",
+        secret: false,
+        optional: true,
+        suggested: "storeFile,storePassword,keyPassword,keyAlias",
+        label: "Names your build reads inside it",
+      },
     ],
     defaults: {
       path: "ANDROID_KEYSTORE_PATH",

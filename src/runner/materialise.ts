@@ -2,10 +2,21 @@ import { chmod, mkdir, rm, rmdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { defaultVarNames } from "../credentials/kinds.js";
 import type { Vault } from "../secrets/vault.js";
+import type { KeystoreBlock } from "./gradle-properties.js";
 
 export interface MaterialisedCredentials {
   /** Variables to merge into the run's environment. */
   env: Record<string, string>;
+  /**
+   * The android keystore, if one applies: where it was written, and the fields
+   * stored beside it.
+   *
+   * Handed out separately from `env` because one consumer needs more than a
+   * variable name. `runner/gradle-properties.ts` writes a file gradle reads
+   * directly, so it needs the path *and* the alias, the passwords and the two
+   * settings that say where that file goes and what its keys are called.
+   */
+  keystore?: KeystoreBlock;
   /** Removes everything that was written. Safe to call more than once. */
   cleanup: () => Promise<void>;
 }
@@ -47,6 +58,7 @@ export async function materialiseCredentials(
   runSecretsDir: string,
 ): Promise<MaterialisedCredentials> {
   const env: Record<string, string> = {};
+  let keystore: KeystoreBlock | undefined;
   const cleanup = async (): Promise<void> => {
     await rm(runSecretsDir, { recursive: true, force: true });
     // And the `runs/<run id>` folder that held it, so a server does not
@@ -86,6 +98,8 @@ export async function materialiseCredentials(
       await writeFile(path, block.fileBytes, { mode: 0o600 });
       await chmod(path, 0o600);
 
+      if (summary.kind === "android_keystore") keystore = { storeFile: path, fields: block.fields };
+
       env[names["path"] ?? defaults["path"]!] = path;
       for (const [field, value] of Object.entries(block.fields)) {
         const name = names[field];
@@ -102,5 +116,5 @@ export async function materialiseCredentials(
     throw cause;
   }
 
-  return { env, cleanup };
+  return { env, keystore, cleanup };
 }

@@ -6,8 +6,15 @@ import { gitEnvFor, Workspace } from "../git/workspace.js";
 import type { GitAuth } from "../git/workspace.js";
 import type { LogStore } from "../logs/store.js";
 import { summarizeFailure } from "../heuristics/error-summary.js";
+import { appRootOf, searchDir } from "../heuristics/platforms.js";
 import { Redactor, scrub } from "../logs/redact.js";
 import { collectArtifacts } from "./artifacts.js";
+import {
+  removeGradleProperties,
+  sweepGradleProperties,
+  writeGradleProperties,
+} from "./gradle-properties.js";
+import type { KeystoreBlock } from "./gradle-properties.js";
 import { LiveStepTracker } from "./live-steps.js";
 import { startPty } from "./pty.js";
 import { readReport } from "./report.js";
@@ -36,6 +43,15 @@ export interface ExecuteRunOptions {
    * reason `secrets` is: this function is handed plaintext, never the vault.
    */
   credentialEnv?: Record<string, string>;
+  /**
+   * The keystore materialised for this run, when one applies.
+   *
+   * Only reason it is here and not folded into `credentialEnv`: gradle may read
+   * a properties file rather than the environment, and the file has to be
+   * written into the clone — which does not exist until this function has
+   * prepared it. See `gradle-properties.ts` for why that is worth doing at all.
+   */
+  androidKeystore?: KeystoreBlock;
   /**
    * Removes whatever was written for this run, called on every way out.
    * Its owner is the caller, but its timing is not: only this function knows
@@ -68,11 +84,20 @@ export interface ExecuteRunResult {
  * cannot rule out. A private key left on disk because a clone failed is a leak
  * with no expiry date, and the only moment at which it is certainly safe to
  * delete is the moment fastlane has stopped running.
+ *
+ * The gradle properties file is removed here too, and it is the one written
+ * somewhere this run does not own: the clone is kept between runs, so passwords
+ * left in it would sit in a working tree until someone noticed. The path is
+ * carried out through a holder rather than returned, because it is decided deep
+ * inside the run and has to be visible to a `finally` wrapped around all of it.
  */
 export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
+  const wrote: { properties: string | null } = { properties: null };
   try {
-    return await execute(opts);
+    return await execute(opts, wrote);
   } finally {
+    // Guarded by the marker, so a file the user replaced mid-run survives.
+    await removeGradleProperties(wrote.properties).catch(() => {});
     // Deliberately swallowed: by now the log writer is closed and the run's
     // verdict is recorded, so there is nowhere left to report this without
     // rewriting a finished run's outcome as a failure it did not have. A
@@ -81,7 +106,10 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   }
 }
 
-async function execute(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
+async function execute(
+  opts: ExecuteRunOptions,
+  wrote: { properties: string | null },
+): Promise<ExecuteRunResult> {
   const { runId, runs, logs } = opts;
   const writer = await logs.open(runId);
   const tracker = new LiveStepTracker();
@@ -157,6 +185,29 @@ async function execute(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
     return fail(`Unreadable project settings: ${(cause as Error).message}`);
   }
 
+  // The properties file gradle may be waiting for, in the clone rather than in
+  // this run's own directory — `gradle-properties.ts` says why, and why it is
+  // hedged about with a marker. It happens here, after the settings, because
+  // the app root it is written under is derived from `fastlane_dir`, and before
+  // the cancellation checkpoint, so that a run cancelled in this exact instant
+  // still leaves the workspace as it found it.
+  //
+  // The sweep first, and whether or not this project still has a keystore: a
+  // run killed mid-build leaves a file nothing was left running to remove, and
+  // the next run is the first moment anything can. Its failure is not reported
+  // — a leftover that resists removal is a broken disk, not a broken build, and
+  // saying so here would fail a run for a file it has not needed yet.
+  const androidRoot = searchDir(opts.workspacePath, appRootOf(settings.fastlane_dir));
+  await sweepGradleProperties(androidRoot, opts.androidKeystore).catch(() => {});
+  try {
+    wrote.properties = await writeGradleProperties(androidRoot, opts.androidKeystore);
+  } catch (cause) {
+    // Failing the run rather than carrying on. Carrying on is what produces the
+    // artifact this whole module exists to prevent: a release build that
+    // succeeds, signed with the debug key, rejected by the store days later.
+    return fail(`Could not write the signing properties file: ${(cause as Error).message}`);
+  }
+
   // Cancelled during preparation: fastlane never gets to start.
   if (opts.signal?.aborted) {
     return finishAs("cancelled", "Cancelled");
@@ -223,6 +274,14 @@ async function execute(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
 
   const outcome = await done;
   await emitRest();
+
+  // The moment gradle has certainly stopped reading it, which is earlier than
+  // the `finally` and worth taking: the artifact collection below globs the
+  // workspace, and a project whose globs are broad enough would otherwise be
+  // offered its own signing passwords as a downloadable artifact. The `finally`
+  // still runs — this is a narrowing, not a replacement, and removing a file
+  // that is already gone costs nothing.
+  await removeGradleProperties(wrote.properties).catch(() => {});
 
   // --- Timeline -------------------------------------------------------------
   // Everything that follows is after-sales service: the timeline and the

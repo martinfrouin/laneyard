@@ -65,7 +65,17 @@ export function CredentialCard({
   const varNames = { ...spec.defaults, ...(stored?.varNames ?? {}), ...renamed };
 
   const composing = stored === undefined || replacing;
-  const complete = spec.fields.every((f) => (fields[f.name] ?? "").trim() !== "");
+  // Optional fields are the ones Laneyard asks about and does not insist on —
+  // where a gradle properties file goes, and what its keys are called. Leaving
+  // one empty is an answer, not an omission.
+  const complete = spec.fields.every((f) => f.optional || (fields[f.name] ?? "").trim() !== "");
+
+  /**
+   * What a field holds: what Laneyard proposes, then what is being typed. The
+   * same layering as the variable names above, and for the same reason — a
+   * suggestion is an answer to correct, not a blank to fill in.
+   */
+  const valueOf = (f: (typeof spec.fields)[number]): string => fields[f.name] ?? f.suggested ?? "";
 
   const forgetFile = () => {
     setFile(null);
@@ -80,7 +90,9 @@ export function CredentialCard({
       await api.putCredential(slug, spec.kind, {
         fileName: file.name,
         fileBase64: base64(new Uint8Array(await file.arrayBuffer())),
-        fields,
+        // Read back through `valueOf` so a suggestion left as it stands is
+        // stored as the answer it was shown as, rather than as nothing.
+        fields: Object.fromEntries(spec.fields.map((f) => [f.name, valueOf(f)])),
         varNames,
       });
       // The values leave the fields as soon as the block is stored: nothing to
@@ -124,13 +136,19 @@ export function CredentialCard({
 
         {stored && !composing && (
           <>
-            {spec.fields.length > 0 && (
+            {/* The block's own fields, not the settings beside them: an
+                optional one may never have been answered, and "stored" would be
+                claiming something about a field nobody filled in. */}
+            {spec.fields.some((f) => !f.optional) && (
               <div className="dim">
                 {/* `••••••` is the marker the logs use, and it means the same
                     thing here: this value left the browser and does not come
                     back. A field that is not secret is no more readable — the
                     block is stored as one, encrypted whole. */}
-                {spec.fields.map((f) => `${f.label} ${f.secret ? "••••••" : "stored"}`).join(" · ")}
+                {spec.fields
+                  .filter((f) => !f.optional)
+                  .map((f) => `${f.label} ${f.secret ? "••••••" : "stored"}`)
+                  .join(" · ")}
               </div>
             )}
             <div className="dim">
@@ -179,7 +197,7 @@ export function CredentialCard({
                 <input
                   key={f.name}
                   type={f.secret ? "password" : "text"}
-                  value={fields[f.name] ?? ""}
+                  value={valueOf(f)}
                   onChange={(e) => setFields((prev) => ({ ...prev, [f.name]: e.target.value }))}
                   placeholder={f.label}
                   aria-label={f.label}

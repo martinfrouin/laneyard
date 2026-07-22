@@ -312,7 +312,11 @@ On Android:
   exists and with the *debug* config when it does not — and gitignores `key.properties`, so it is
   absent from every clone. The build then succeeds, produces an artifact signed with the debug key,
   and the rejection arrives from the store minutes later saying nothing about signing. This reads
-  the Gradle file as text and says so before the build, not after;
+  the Gradle file as text and says so before the build, not after — and then, for a project whose
+  keystore is stored here, writes the `key.properties` that build is already asking for, for the
+  length of the run. Your build script is not asked to change: the file arrives where it looks for
+  it, marked `# written by laneyard, do not commit`, and is removed when fastlane stops. A file of
+  your own without that marker is never written over and never deleted;
 - **the Play Store service account** is there when a lane calls `upload_to_play_store`. The vault
   first, then the `json_key` argument in the call, then the **Appfile** — `json_key_file` and
   `json_key_data`, which is where a long-standing project almost always keeps it. Only the vault

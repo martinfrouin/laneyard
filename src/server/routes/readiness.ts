@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import type { FastifyInstance } from "fastify";
 import { glob } from "tinyglobby";
 import { Workspace } from "../../git/workspace.js";
 import { NO_APPFILE, parseAppfile } from "../../heuristics/appfile.js";
-import { parseAndroidSigning } from "../../heuristics/android-signing.js";
+import { findAndroidBuild } from "../../heuristics/android-root.js";
+import type { AndroidBuild } from "../../heuristics/android-root.js";
 import type { PropertiesFile, SigningFacts } from "../../heuristics/android-signing.js";
 import { envExampleNames } from "../required-secrets.js";
 import type { AppfileFacts } from "../../heuristics/appfile.js";
@@ -68,9 +69,8 @@ const exists = async (path: string): Promise<boolean> =>
  * clone" because the wrong directory was searched would have the checklist
  * inventing the very failure it exists to catch.
  */
-async function isPresent(scriptPath: string, file: PropertiesFile): Promise<boolean> {
-  const moduleDir = dirname(scriptPath);
-  const gradleRoot = dirname(moduleDir);
+async function isPresent(build: AndroidBuild, file: PropertiesFile): Promise<boolean> {
+  const { moduleDir, gradleRoot } = build;
   const places =
     file.scope === "root"
       ? [gradleRoot]
@@ -87,9 +87,10 @@ async function isPresent(scriptPath: string, file: PropertiesFile): Promise<bool
  * file it depends on is in the clone.
  *
  * The listing is the caller's half of the answer, as everywhere else here: the
- * check reads text and reaches for nothing. Both conventional locations are
- * tried — `android/app/` for a Flutter or React Native project, and `app/` for a
- * repository that is an Android project outright.
+ * check reads text and reaches for nothing. Which script speaks for the android
+ * side is `heuristics/android-root.ts`'s decision rather than this file's,
+ * because the runner writes the properties file against that same decision — see
+ * that module for why the two must not be able to disagree.
  */
 async function androidSigning(
   workspacePath: string,
@@ -100,24 +101,18 @@ async function androidSigning(
     return { androidSigning: { ok: false, reason: unreachable }, signingFilePresent: false };
   }
 
-  const root = join(workspacePath, appRoot);
-  for (const candidate of ["android/app/build.gradle.kts", "android/app/build.gradle", "app/build.gradle.kts", "app/build.gradle"]) {
-    const text = await readFile(join(root, candidate), "utf8").catch(() => null);
-    if (text === null) continue;
-
-    const facts = parseAndroidSigning(text);
-    const present =
-      facts.conditionalOn === null
-        ? false
-        : await isPresent(join(root, candidate), facts.conditionalOn);
-
-    return { androidSigning: { ok: true, value: facts }, signingFilePresent: present };
+  const build = await findAndroidBuild(join(workspacePath, appRoot));
+  if (build === null) {
+    return {
+      androidSigning: { ok: false, reason: "no android build.gradle found in the clone" },
+      signingFilePresent: false,
+    };
   }
 
-  return {
-    androidSigning: { ok: false, reason: "no android build.gradle found in the clone" },
-    signingFilePresent: false,
-  };
+  const present =
+    build.facts.conditionalOn === null ? false : await isPresent(build, build.facts.conditionalOn);
+
+  return { androidSigning: { ok: true, value: build.facts }, signingFilePresent: present };
 }
 
 export async function registerReadinessRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {

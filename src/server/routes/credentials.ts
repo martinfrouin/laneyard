@@ -56,8 +56,11 @@ export async function registerCredentialRoutes(app: FastifyInstance, ctx: AppCon
       return reply.code(400).send({ error: "`fields` is an object of name to value." });
     }
 
+    // Optional fields are the settings a block may leave unanswered — where a
+    // gradle properties file goes, what it is read under. Laneyard is allowed to
+    // ask; refusing the whole block over an unanswered one would be requiring.
     const missing = fieldsOf(spec.kind)
-      .filter((f) => typeof given[f.name] !== "string" || given[f.name] === "")
+      .filter((f) => !f.optional && (typeof given[f.name] !== "string" || given[f.name] === ""))
       .map((f) => f.name);
     if (missing.length > 0) {
       return reply.code(400).send({
@@ -68,7 +71,13 @@ export async function registerCredentialRoutes(app: FastifyInstance, ctx: AppCon
     // Only the fields the kind declares are kept. An extra one would be stored,
     // never read, and quietly disagree with what the block claims to be.
     const kept: Record<string, string> = {};
-    for (const field of fieldsOf(spec.kind)) kept[field.name] = given[field.name] as string;
+    for (const field of fieldsOf(spec.kind)) {
+      const value = given[field.name];
+      // An unanswered optional field is absent from the block rather than
+      // stored empty: the reader then falls back to what it would have used
+      // anyway, instead of taking "" for an answer someone gave.
+      if (typeof value === "string" && value !== "") kept[field.name] = value;
+    }
 
     const names = { ...defaultVarNames(spec.kind), ...((varNames ?? {}) as Record<string, string>) };
     for (const [slot, name] of Object.entries(names)) {
