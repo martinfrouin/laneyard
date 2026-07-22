@@ -26,11 +26,33 @@
  * verdict from a file it half understood.
  */
 
+/**
+ * Which directory Gradle resolves the name against.
+ *
+ * `rootProject.file("key.properties")` starts from the Gradle root — `android/`
+ * in a Flutter project — and a bare `file("signing.properties")` starts from the
+ * module the script belongs to, `android/app/`. Same name, two directories, and
+ * a reader who only knows the name gets it right about half the time.
+ *
+ * `unknown` is the third answer, and it is a real one: the receiver may be a
+ * variable this cannot follow. Saying so leaves the question open for someone
+ * who can answer it, which is the whole point — a guess here would write a file
+ * where nothing reads it, and the build would go on shipping the debug key.
+ */
+export type PropertiesScope = "root" | "module" | "unknown";
+
+export interface PropertiesFile {
+  /** The name as it appears in the script, `key.properties` and its like. */
+  name: string;
+  /** The directory that name is relative to. */
+  scope: PropertiesScope;
+}
+
 export interface SigningFacts {
   /** A release build type that can take the debug signing config. */
   releaseCanUseDebugKey: boolean;
   /** The properties file the configuration is conditional on, if there is one. */
-  conditionalOn: string | null;
+  conditionalOn: PropertiesFile | null;
 }
 
 export const NO_SIGNING_FACTS: SigningFacts = {
@@ -38,8 +60,29 @@ export const NO_SIGNING_FACTS: SigningFacts = {
   conditionalOn: null,
 };
 
-/** `rootProject.file("key.properties")`, `file('signing.properties')` — the name only. */
-const PROPERTIES_FILE = /file\s*\(\s*["']([^"']+\.properties)["']\s*\)/;
+/**
+ * `rootProject.file("key.properties")`, `file('signing.properties')` — the name,
+ * and whatever the call was made on.
+ *
+ * The receiver is optional and captured separately because it is the whole
+ * difference between two directories. It is matched as a dotted chain so that
+ * the match starts at the receiver rather than at `file(` in the middle of it:
+ * a pattern that ignored the receiver would read `keystoreDir.file(…)` as a bare
+ * call and confidently name the wrong place.
+ */
+const PROPERTIES_FILE =
+  /(?:([A-Za-z_][\w.]*)\s*\.\s*)?\bfile\s*\(\s*["']([^"']+\.properties)["']\s*\)/;
+
+/**
+ * `project.file` is the bare call spelled out — Gradle defines one as the other
+ * — so both mean the module. Only `rootProject` climbs, and anything else is a
+ * receiver whose directory this has no way to know.
+ */
+function scopeOf(receiver: string | undefined): PropertiesScope {
+  if (receiver === undefined || receiver === "project") return "module";
+  if (receiver === "rootProject") return "root";
+  return "unknown";
+}
 
 /**
  * The `release { … }` block of `buildTypes`, as text.
@@ -83,6 +126,9 @@ export function parseAndroidSigning(source: string): SigningFacts {
 
   return {
     releaseCanUseDebugKey: usesDebug,
-    conditionalOn: usesDebug && conditional ? conditional[1]! : null,
+    conditionalOn:
+      usesDebug && conditional
+        ? { name: conditional[2]!, scope: scopeOf(conditional[1]) }
+        : null,
   };
 }

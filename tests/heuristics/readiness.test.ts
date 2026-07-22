@@ -795,7 +795,10 @@ describe("checkReleaseSigning", () => {
   // clone — and the build succeeds anyway, with the debug key.
   it("warns when the fallback is live because the file is not in the clone", () => {
     const check = checkReleaseSigning({
-      gradle: facts({ releaseCanUseDebugKey: true, conditionalOn: "key.properties" }),
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "root" },
+      }),
       conditionalFilePresent: false,
     });
     expect(check.state).toBe("warn");
@@ -805,7 +808,10 @@ describe("checkReleaseSigning", () => {
 
   it("still says so when the file is there, because it is one deletion away", () => {
     const check = checkReleaseSigning({
-      gradle: facts({ releaseCanUseDebugKey: true, conditionalOn: "key.properties" }),
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "root" },
+      }),
       conditionalFilePresent: true,
     });
     expect(check.state).toBe("unknown");

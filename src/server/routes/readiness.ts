@@ -1,13 +1,13 @@
 import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { FastifyInstance } from "fastify";
 import { glob } from "tinyglobby";
 import { Workspace } from "../../git/workspace.js";
 import { NO_APPFILE, parseAppfile } from "../../heuristics/appfile.js";
 import { parseAndroidSigning } from "../../heuristics/android-signing.js";
-import type { SigningFacts } from "../../heuristics/android-signing.js";
+import type { PropertiesFile, SigningFacts } from "../../heuristics/android-signing.js";
 import { envExampleNames } from "../required-secrets.js";
 import type { AppfileFacts } from "../../heuristics/appfile.js";
 import { appRootOf, resolvePlatforms, searchDir } from "../../heuristics/platforms.js";
@@ -59,6 +59,30 @@ const exists = async (path: string): Promise<boolean> =>
   );
 
 /**
+ * Is the properties file where the build script would look for it?
+ *
+ * The module directory is the one holding the build script, and the Gradle root
+ * is its parent — `android/` for an `android/app/build.gradle`. Which of the two
+ * the name is relative to is the script's decision, and the parser reports which
+ * one it made. When it could not tell, both are looked in: answering "not in the
+ * clone" because the wrong directory was searched would have the checklist
+ * inventing the very failure it exists to catch.
+ */
+async function isPresent(scriptPath: string, file: PropertiesFile): Promise<boolean> {
+  const moduleDir = dirname(scriptPath);
+  const gradleRoot = dirname(moduleDir);
+  const places =
+    file.scope === "root"
+      ? [gradleRoot]
+      : file.scope === "module"
+        ? [moduleDir]
+        : [gradleRoot, moduleDir];
+
+  const found = await Promise.all(places.map((dir) => exists(join(dir, file.name))));
+  return found.some(Boolean);
+}
+
+/**
  * What the android build script says about release signing, and whether the
  * file it depends on is in the clone.
  *
@@ -82,12 +106,10 @@ async function androidSigning(
     if (text === null) continue;
 
     const facts = parseAndroidSigning(text);
-    // Resolved from the android directory, which is where `rootProject` points
-    // for a Gradle build — two levels up from `android/app/build.gradle`.
     const present =
       facts.conditionalOn === null
         ? false
-        : await exists(join(root, candidate, "..", "..", facts.conditionalOn));
+        : await isPresent(join(root, candidate), facts.conditionalOn);
 
     return { androidSigning: { ok: true, value: facts }, signingFilePresent: present };
   }

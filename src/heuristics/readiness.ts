@@ -1,4 +1,4 @@
-import type { SigningFacts } from "./android-signing.js";
+import type { PropertiesFile, SigningFacts } from "./android-signing.js";
 import type { AppfileFacts } from "./appfile.js";
 import { argsGiven, findBlockingActions } from "./blocking-actions.js";
 import type { UsedAction } from "./blocking-actions.js";
@@ -699,6 +699,21 @@ export interface ReleaseSigningInput {
 }
 
 /**
+ * Where the build resolves the properties file, as a clause a sentence can take.
+ *
+ * A directory rather than a path: `android/` for one project and the repository
+ * root for another, and the parser deliberately reports the scope Gradle uses
+ * rather than a path it would have had to invent. An unresolved scope adds
+ * nothing to the sentence — naming the wrong directory sends someone to look in
+ * a place the build never reads, which is worse than leaving them to look.
+ */
+function where(file: PropertiesFile): string {
+  if (file.scope === "root") return " in the Gradle root directory";
+  if (file.scope === "module") return " in the app module directory";
+  return "";
+}
+
+/**
  * Will a release build actually be signed with the release key?
  *
  * The one check here whose failure is silent. Everything else fails loudly — a
@@ -731,13 +746,17 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
   const { conditionalOn } = gradle.value;
 
   if (conditionalOn && !conditionalFilePresent) {
+    const { name } = conditionalOn;
+    const looksIn = where(conditionalOn);
     return {
       ...META.releaseSigning,
       ...warn(
-        `the release build falls back to the debug signing config when ${conditionalOn} is ` +
-          `missing — and ${conditionalOn} is not in the clone. The build will not fail: it will ` +
-          "produce an artifact signed with the debug key, and the store will reject it.",
-        `${conditionalOn} is gitignored, so it never reaches a clone. Supply the keystore through ` +
+        `the release build falls back to the debug signing config when ${name} is missing, and ` +
+          `${name} is not in the clone` +
+          (looksIn === "" ? "" : ` — the build looks for it${looksIn}`) +
+          ". The build will not fail: it will produce an artifact signed with the debug key, and " +
+          "the store will reject it.",
+        `${name} is gitignored, so it never reaches a clone. Supply the keystore through ` +
           "the environment instead, and make a release build without one an error rather than a " +
           "fallback — a build that cannot sign should stop, not succeed quietly.",
       ),
@@ -748,8 +767,9 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
     return {
       ...META.releaseSigning,
       ...undetermined(
-        `${conditionalOn} is present, so the release key is used — but the build falls back to ` +
-          "the debug signing config if it ever goes missing, and does so without failing.",
+        `${conditionalOn.name} is present${where(conditionalOn)}, so the release key is ` +
+          "used — but the build falls back to the debug signing config if it ever goes missing, " +
+          "and does so without failing.",
       ),
     };
   }
