@@ -14,6 +14,28 @@ export interface GitAuth {
  * A clone managed by Laneyard, kept between runs.
  * All git commands go through here to share the authentication environment.
  */
+/**
+ * The environment git needs to work without a person at the keyboard.
+ *
+ * Lifted out of `Workspace` because it is not only Workspace's problem. A lane
+ * may run git itself — pushing a bumped build number is a common and reasonable
+ * thing for a Fastfile to do — and that `sh("git push")` inherited none of
+ * this. The result was the worst possible failure: a push that needed a
+ * credential did not fail, it *waited*, and the run sat there until it hit its
+ * timeout with nothing in the log to say what it was waiting for.
+ *
+ * `GIT_TERMINAL_PROMPT=0` is what turns that wait into an error. The SSH
+ * command is what makes the push succeed instead — the key configured for
+ * cloning is by definition the right one for pushing to the same remote.
+ */
+export function gitEnvFor(auth: GitAuth): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: "0" };
+  if (auth.kind === "ssh_key" && auth.ref) {
+    env["GIT_SSH_COMMAND"] = `ssh -i ${auth.ref} -o IdentitiesOnly=yes -o BatchMode=yes`;
+  }
+  return env;
+}
+
 export class Workspace {
   constructor(
     readonly path: string,
@@ -22,12 +44,18 @@ export class Workspace {
   ) {}
 
   private env(): NodeJS.ProcessEnv {
-    // Without this, git can block on a credentials prompt and freeze the run.
-    const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
-    if (this.auth.kind === "ssh_key" && this.auth.ref) {
-      env["GIT_SSH_COMMAND"] = `ssh -i ${this.auth.ref} -o IdentitiesOnly=yes -o BatchMode=yes`;
-    }
-    return env;
+    return { ...process.env, ...gitEnvFor(this.auth) };
+  }
+
+  /**
+   * The git identity this workspace would commit under, or null.
+   *
+   * Exposed because a lane that runs `git commit` itself needs the same answer,
+   * and a clone Laneyard made has no identity of its own — so the question is
+   * whether the *server* has one.
+   */
+  async identity(): Promise<string | null> {
+    return this.gitIdentity();
   }
 
   /**

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -28,6 +29,27 @@ export function resolveSidecarScript(moduleDir: string): string {
 }
 
 const SCRIPT = resolveSidecarScript(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * A digest of the sidecar script, for whoever caches what it produced.
+ *
+ * Caching introspection on the fastlane folder's contents alone is wrong in one
+ * direction that is easy to miss: the answer depends on the *reader* as much as
+ * on what is read. Teaching the parser to follow a lane into the methods it
+ * calls changed what a Fastfile means without changing the Fastfile, so every
+ * existing install went on being served the answer from before — a Play Store
+ * check reporting "no lane uploads", permanently, on a project that uploads.
+ *
+ * Hashing the script rather than bumping a constant is what keeps that from
+ * happening again: there is nothing to remember. Read once, because the file
+ * cannot change under a running process that already loaded it.
+ */
+let scriptDigest: string | null = null;
+
+export function sidecarVersion(): string {
+  scriptDigest ??= createHash("sha256").update(readFileSync(SCRIPT)).digest("hex").slice(0, 16);
+  return scriptDigest;
+}
 
 export type Invoke = (
   command: string,

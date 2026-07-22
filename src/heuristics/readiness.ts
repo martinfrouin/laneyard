@@ -1,4 +1,6 @@
-import { findBlockingActions } from "./blocking-actions.js";
+import type { SigningFacts } from "./android-signing.js";
+import type { AppfileFacts } from "./appfile.js";
+import { argsGiven, findBlockingActions } from "./blocking-actions.js";
 import type { UsedAction } from "./blocking-actions.js";
 import type { Platform } from "./platforms.js";
 
@@ -52,6 +54,45 @@ export type Known<T> = { ok: true; value: T } | { ok: false; reason: string };
 export interface LaneUses {
   lane: string;
   actions: UsedAction[];
+  /** Environment variables the lane reads, by name. Absent on an older cache. */
+  env?: string[];
+}
+
+/**
+ * Why reading the Fastfile might not have been the whole story.
+ *
+ * The parser follows a lane into the methods this Fastfile defines, which is
+ * how a well-factored Fastfile is read at all. Two things stay out of reach,
+ * and both are ordinary: `import`/`import_from_git` bring in lanes written in
+ * another file, and `fastlane/actions/` holds actions whose names mean nothing
+ * to a parser that has only seen the Fastfile.
+ *
+ * This exists because of what a check used to do with that. Finding no upload
+ * action, it answered "no lane uploads to the Play Store" — a tick, stated
+ * plainly, for a project that uploads on every run. A warning that is wrong
+ * gets argued with; a tick that is wrong gets believed. So a check that would
+ * conclude something from *absence* asks this first, and answers "could not
+ * tell" when the absence might be its own blindness.
+ */
+export interface Unread {
+  /** The Fastfile pulls lanes in from elsewhere. */
+  imports: boolean;
+  /** The project defines its own actions, under names this parse cannot know. */
+  customActions: boolean;
+}
+
+export const READ_EVERYTHING: Unread = { imports: false, customActions: false };
+
+/** The sentence, once, so four checks cannot drift apart on how they say it. */
+function unreadReason(unread: Known<Unread>): string | null {
+  if (!unread.ok) return null;
+  const { imports, customActions } = unread.value;
+  if (imports && customActions) {
+    return "this Fastfile imports lanes from elsewhere and the project defines its own actions";
+  }
+  if (imports) return "this Fastfile imports lanes from elsewhere";
+  if (customActions) return "the project defines its own actions in fastlane/actions";
+  return null;
 }
 
 /** What each check body produces; `id` and `title` come from the table. */
@@ -89,6 +130,8 @@ const META = {
   androidKeystore: { id: "android-keystore", title: "keystore reachable without a prompt" },
   playStore: { id: "play-store", title: "Play Store service account" },
   platforms: { id: "platforms", title: "what this project builds for" },
+  environment: { id: "environment", title: "the variables the lanes read" },
+  releaseSigning: { id: "release-signing", title: "release signed with the release key" },
 } as const;
 
 /**
@@ -176,9 +219,81 @@ const STORE_API_KEY =
   "`APP_STORE_CONNECT_API_KEY_ISSUER_ID` and the `.p8` contents — from the secrets tab. " +
   "An API key does not expire on its own.";
 
-export function checkAppStoreConnect(secretKeys: string[]): Check {
+/** The action whose whole job is to load a `.p8`, under both of its names. */
+const ASC_KEY_ACTIONS = new Set(["app_store_connect_api_key", "asc_api_key"]);
+
+/**
+ * Arguments that name the key somewhere other than the vault.
+ *
+ * `key_filepath` and `api_key_path` are paths to a `.p8`; `key_content` and
+ * `api_key` are the thing itself, or a hash built earlier in the lane.
+ */
+const ASC_KEY_ARGS = ["key_filepath", "key_content", "api_key_path", "api_key", "key_id"];
+
+export interface AppStoreConnectInput {
+  secretKeys: string[];
+  uses: Known<LaneUses[]>;
+  /** `.p8` files the repository carries, or why the repository could not be listed. */
+  keyFilesInRepo: Known<string[]>;
+  appfile: Known<AppfileFacts>;
+  unread?: Known<Unread>;
+}
+
+/**
+ * Is there an App Store Connect credential, wherever it lives?
+ *
+ * Four places, and the vault is only the first. A project that configured
+ * fastlane years before it met Laneyard has its key in the Fastfile or beside
+ * it, and telling that project it has "no App Store Connect credential" is
+ * false — the run works. So the Fastfile, the repository and the Appfile are
+ * all read before anything is claimed.
+ *
+ * Only the vault earns a tick. Everything else earns `unknown`, and the reason
+ * is the same every time: a path in a Fastfile, or a `.p8` in a repository, says
+ * a credential was arranged — it does not say the file is on *this* machine,
+ * with the passphrase and permissions a run needs. A green tick that means "it
+ * looks arranged" is the tick nobody can trust afterwards.
+ */
+export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
+  const { secretKeys, uses, keyFilesInRepo, appfile } = input;
+
   if (secretKeys.some((key) => API_KEY.test(key))) {
     return { ...META.appStoreConnect, ...ok("an App Store Connect API key is in the vault.") };
+  }
+
+  // Named in a lane: the commonest way a pre-existing project holds its key,
+  // and the one the vault-only check used to report as nothing at all.
+  const inLanes = uses.ok
+    ? uses.value.filter((lane) =>
+        lane.actions.some(
+          (a) =>
+            ASC_KEY_ACTIONS.has(a.name) ||
+            ASC_KEY_ARGS.some((arg) => argsGiven(a).includes(arg)),
+        ),
+      )
+    : [];
+
+  if (inLanes.length > 0) {
+    return {
+      ...META.appStoreConnect,
+      ...undetermined(
+        `${nameList(inLanes.map((l) => l.lane))} supplies its own API key: whether the \`.p8\` it ` +
+          "names is on this machine is not something a Fastfile says.",
+        STORE_API_KEY,
+      ),
+    };
+  }
+
+  const p8 = keyFilesInRepo.ok ? keyFilesInRepo.value : [];
+  if (p8.length > 0) {
+    return {
+      ...META.appStoreConnect,
+      ...undetermined(
+        `the repository carries ${nameList(p8)}: a key is arranged, but nothing here says a lane ` +
+          "loads it, or that it is the one App Store Connect expects.",
+        STORE_API_KEY,
+      ),
+    };
   }
 
   if (secretKeys.includes("FASTLANE_SESSION")) {
@@ -193,10 +308,41 @@ export function checkAppStoreConnect(secretKeys: string[]): Check {
     };
   }
 
+  // An Apple ID in the Appfile is not a credential — it is the thing that makes
+  // a run stop and ask for a verification code — but saying so is more use than
+  // "no credential", which reads as though the Appfile had not been looked at.
+  if (appfile.ok && appfile.value.appleId.kind !== "absent") {
+    return {
+      ...META.appStoreConnect,
+      ...warn(
+        "the Appfile names an Apple ID and nothing else: a lane that uploads signs in as that " +
+          "account, and two-factor authentication stops the run to ask for a code.",
+        STORE_API_KEY,
+        "secrets",
+      ),
+    };
+  }
+
+  // This one is a warning rather than a tick, so being wrong costs less — but
+  // "in the lanes" is a claim about lanes that were read, and saying it about
+  // lanes that could not be is still saying something untrue.
+  const blind = unreadReason(input.unread ?? { ok: true, value: READ_EVERYTHING });
+  if (blind) {
+    return {
+      ...META.appStoreConnect,
+      ...undetermined(
+        `no App Store Connect credential in the vault or in the repository, and none seen in the ` +
+          `lanes — but ${blind}.`,
+        STORE_API_KEY,
+      ),
+    };
+  }
+
   return {
     ...META.appStoreConnect,
     ...warn(
-      "no App Store Connect credential in the vault: a lane that uploads will ask for an Apple ID.",
+      "no App Store Connect credential in the vault, in the lanes, or in the repository: " +
+        "a lane that uploads will ask for an Apple ID.",
       STORE_API_KEY,
       "secrets",
     ),
@@ -268,7 +414,10 @@ export function checkMatch(uses: Known<LaneUses[]>, secretKeys: string[]): Check
   return { ...META.match, ...ok("MATCH_PASSWORD is stored, and every match call is readonly.") };
 }
 
-export function checkBlockingActions(uses: Known<LaneUses[]>): Check {
+export function checkBlockingActions(
+  uses: Known<LaneUses[]>,
+  unread: Known<Unread> = { ok: true, value: READ_EVERYTHING },
+): Check {
   if (!uses.ok) {
     return { ...META.blockingActions, ...undetermined(`could not read the lanes: ${uses.reason}`) };
   }
@@ -278,6 +427,16 @@ export function checkBlockingActions(uses: Known<LaneUses[]>): Check {
   );
 
   if (findings.length === 0) {
+    const blind = unreadReason(unread);
+    if (blind) {
+      return {
+        ...META.blockingActions,
+        ...undetermined(
+          `no lane seen to call an action known to stop and ask — but ${blind}, so a lane that ` +
+            "waits could be out of sight from here.",
+        ),
+      };
+    }
     return { ...META.blockingActions, ...ok("no lane calls an action known to stop and ask.") };
   }
 
@@ -310,7 +469,11 @@ const STORE_KEYSTORE_PASSWORD =
   "Store the keystore passphrase as `ANDROID_KEYSTORE_PASSWORD` from the secrets tab, " +
   "and read it in the lane with `storePassword: ENV[\"ANDROID_KEYSTORE_PASSWORD\"]`.";
 
-export function checkAndroidKeystore(uses: Known<LaneUses[]>, secretKeys: string[]): Check {
+export function checkAndroidKeystore(
+  uses: Known<LaneUses[]>,
+  secretKeys: string[],
+  unread: Known<Unread> = { ok: true, value: READ_EVERYTHING },
+): Check {
   if (!uses.ok) {
     return { ...META.androidKeystore, ...undetermined(`could not read the lanes: ${uses.reason}`) };
   }
@@ -320,10 +483,33 @@ export function checkAndroidKeystore(uses: Known<LaneUses[]>, secretKeys: string
   );
 
   if (calls.length === 0) {
-    return { ...META.androidKeystore, ...ok("no lane builds with gradle.") };
+    // This check only runs in the Android section, so reaching here means the
+    // project builds for Android and no lane was seen calling gradle. That is
+    // not "nothing needs a keystore" — it is a build driven by something else.
+    // `flutter build appbundle` and `react-native build-android` both run
+    // gradle underneath, and the signing configuration then lives in
+    // `build.gradle` or `key.properties`, where no reading of a Fastfile
+    // reaches it. Ticking that was the same mistake as the Play Store one: a
+    // confident green for a question nobody answered.
+    const blind = unreadReason(unread);
+    return {
+      ...META.androidKeystore,
+      ...undetermined(
+        "no lane seen handing gradle a keystore" +
+          (blind ? ` — and ${blind}` : "") +
+          ". This project builds for Android, so signing is configured somewhere a Fastfile does " +
+          "not show: `build.gradle`, `key.properties`, or a build driven through flutter or " +
+          "react-native.",
+      ),
+    };
   }
 
-  const signing = calls.filter((c) => KEYSTORE_ARGS.some((arg) => arg in c.action.args));
+  // `given`, not `args`, for the same reason as the two credential checks:
+  // `storePassword: ENV["KS_PASS"]` is a keystore that needs unlocking just as
+  // much as a literal one, and it leaves no literal behind.
+  const signing = calls.filter((c) =>
+    KEYSTORE_ARGS.some((arg) => argsGiven(c.action).includes(arg)),
+  );
   if (signing.length === 0) {
     // Deliberately a statement about what was read, not about the build: a
     // keystore configured in `build.gradle` or through the environment is
@@ -369,11 +555,22 @@ const PLAY_JSON_KEY = /^SUPPLY_JSON_KEY/;
 /** The same credential, named in the call instead of in the vault. */
 const PLAY_KEY_ARGS = ["json_key", "json_key_data"];
 
+/** Named once: three outcomes of the environment check point at the same thing. */
+const DECLARE_SECRETS =
+  "A variable read by a tool the lane shells out to — `sentry-cli` and its " +
+  "`SENTRY_AUTH_TOKEN`, say — is not something a Fastfile mentions. List those under " +
+  "`required_secrets` in laneyard.yml and they are checked like the rest.";
+
 const STORE_PLAY_KEY =
   "Store the service account JSON as `SUPPLY_JSON_KEY_DATA` from the secrets tab. " +
   "A service account does not expire on its own.";
 
-export function checkPlayStore(uses: Known<LaneUses[]>, secretKeys: string[]): Check {
+export function checkPlayStore(
+  uses: Known<LaneUses[]>,
+  secretKeys: string[],
+  appfile: Known<AppfileFacts>,
+  unread: Known<Unread> = { ok: true, value: READ_EVERYTHING },
+): Check {
   if (!uses.ok) {
     return { ...META.playStore, ...undetermined(`could not read the lanes: ${uses.reason}`) };
   }
@@ -385,6 +582,19 @@ export function checkPlayStore(uses: Known<LaneUses[]>, secretKeys: string[]): C
   );
 
   if (calls.length === 0) {
+    // The one conclusion drawn purely from absence, and the one that was wrong
+    // for every project whose upload sits behind an import or a custom action.
+    const blind = unreadReason(unread);
+    if (blind) {
+      return {
+        ...META.playStore,
+        ...undetermined(
+          `no lane seen to upload to the Play Store — but ${blind}, so this is not the same ` +
+            "as no lane uploading.",
+          STORE_PLAY_KEY,
+        ),
+      };
+    }
     return { ...META.playStore, ...ok("no lane uploads to the Play Store.") };
   }
 
@@ -392,18 +602,61 @@ export function checkPlayStore(uses: Known<LaneUses[]>, secretKeys: string[]): C
     return { ...META.playStore, ...ok("a Play Store service account is in the vault.") };
   }
 
-  const named = calls.filter((c) => PLAY_KEY_ARGS.some((arg) => arg in c.action.args));
+  // Named in the call, whether or not the value could be read. `json_key:
+  // ENV.fetch("…")` is a credential the lane supplies itself just as much as a
+  // literal path is — and reading only literals is what used to make this check
+  // and the App Store Connect one disagree about the same situation.
+  const named = calls.filter((c) =>
+    PLAY_KEY_ARGS.some((arg) => argsGiven(c.action).includes(arg)),
+  );
   if (named.length > 0) {
     // A path in a Fastfile says nothing about whether that file exists on this
     // machine. Neither a tick nor a warning would be honest.
     return {
       ...META.playStore,
       ...undetermined(
-        `${nameList(named.map((c) => c.lane))} passes \`json_key\` in the call: whether that file is ` +
-          "on this machine is not something a Fastfile says.",
+        `${nameList(named.map((c) => c.lane))} supplies its own service account: whether the file ` +
+          "it names is on this machine is not something a Fastfile says.",
         STORE_PLAY_KEY,
       ),
     };
+  }
+
+  // The Appfile, which is where a project that predates Laneyard almost always
+  // keeps this — and which the check used to be blind to, so a project with a
+  // working service account was told it had none.
+  if (appfile.ok) {
+    const { jsonKeyFile, jsonKeyData } = appfile.value;
+    if (jsonKeyData.kind !== "absent") {
+      return {
+        ...META.playStore,
+        ...undetermined(
+          "the Appfile sets `json_key_data`: the credential travels with the repository, and " +
+            "whether it is still valid is not something a file says.",
+          STORE_PLAY_KEY,
+        ),
+      };
+    }
+    if (jsonKeyFile.kind === "literal") {
+      return {
+        ...META.playStore,
+        ...undetermined(
+          `the Appfile points \`json_key_file\` at ${jsonKeyFile.value}: whether that file is on ` +
+            "this machine is not something an Appfile says.",
+          STORE_PLAY_KEY,
+        ),
+      };
+    }
+    if (jsonKeyFile.kind === "computed") {
+      return {
+        ...META.playStore,
+        ...undetermined(
+          "the Appfile sets `json_key_file` to something it computes — an environment variable, " +
+            "most likely — which a run only resolves once it is running.",
+          STORE_PLAY_KEY,
+        ),
+      };
+    }
   }
 
   return {
@@ -438,6 +691,172 @@ function platformNote(platforms: Known<Platform[]>): Check {
   };
 }
 
+export interface ReleaseSigningInput {
+  /** The android build script, or why it could not be read. */
+  gradle: Known<SigningFacts>;
+  /** Whether the properties file it is conditional on is present in the clone. */
+  conditionalFilePresent: boolean;
+}
+
+/**
+ * Will a release build actually be signed with the release key?
+ *
+ * The one check here whose failure is silent. Everything else fails loudly — a
+ * run stops, a credential is missing, a lane waits. This one *succeeds*: the
+ * build finishes, produces an artifact signed with the debug key, and the error
+ * arrives from the store minutes later saying nothing about signing.
+ *
+ * The pattern is in the Flutter documentation, so it is everywhere: sign with
+ * the release config when `key.properties` exists, and with the debug config
+ * when it does not. The same documentation gitignores `key.properties` — so it
+ * is absent from every clone, including the one a build server works from.
+ */
+export function checkReleaseSigning(input: ReleaseSigningInput): Check {
+  const { gradle, conditionalFilePresent } = input;
+
+  if (!gradle.ok) {
+    return {
+      ...META.releaseSigning,
+      ...undetermined(`could not read the android build script: ${gradle.reason}`),
+    };
+  }
+
+  if (!gradle.value.releaseCanUseDebugKey) {
+    return {
+      ...META.releaseSigning,
+      ...ok("the release build type never takes the debug signing config."),
+    };
+  }
+
+  const { conditionalOn } = gradle.value;
+
+  if (conditionalOn && !conditionalFilePresent) {
+    return {
+      ...META.releaseSigning,
+      ...warn(
+        `the release build falls back to the debug signing config when ${conditionalOn} is ` +
+          `missing — and ${conditionalOn} is not in the clone. The build will not fail: it will ` +
+          "produce an artifact signed with the debug key, and the store will reject it.",
+        `${conditionalOn} is gitignored, so it never reaches a clone. Supply the keystore through ` +
+          "the environment instead, and make a release build without one an error rather than a " +
+          "fallback — a build that cannot sign should stop, not succeed quietly.",
+      ),
+    };
+  }
+
+  if (conditionalOn) {
+    return {
+      ...META.releaseSigning,
+      ...undetermined(
+        `${conditionalOn} is present, so the release key is used — but the build falls back to ` +
+          "the debug signing config if it ever goes missing, and does so without failing.",
+      ),
+    };
+  }
+
+  return {
+    ...META.releaseSigning,
+    ...undetermined(
+      "the release build type can take the debug signing config; whether it does is decided by " +
+        "something this cannot read.",
+    ),
+  };
+}
+
+export interface EnvironmentInput {
+  uses: Known<LaneUses[]>;
+  /** Names in this project's vault — where a variable ought to come from. */
+  secretKeys: string[];
+  /** Names in the server's own environment, which a run inherits. */
+  serverEnv: string[];
+  /** `required_secrets` from laneyard.yml: what the Fastfile cannot say for itself. */
+  declared: string[];
+  unread: Known<Unread>;
+}
+
+/**
+ * Does the project have the variables its lanes need?
+ *
+ * This is the one credential question a Fastfile can actually answer. The other
+ * checks ask "is there a key somewhere" and end up reasoning about absence;
+ * this one reads `ENV.fetch("ASC_KEY_ID")` out of the lane and asks whether that
+ * name exists — which has a real answer.
+ *
+ * It matters most for a project that keeps its variables in `fastlane/.env`.
+ * That file is almost always gitignored, so it never reaches the clone a build
+ * runs from: everything works on the machine it was written on, nothing works
+ * on the build server, and nothing on screen says why. Naming the variables is
+ * saying why.
+ *
+ * Two things it cannot see, and one answer to both. A variable read by a tool
+ * the lane shells out to — `sentry-cli` wants `SENTRY_AUTH_TOKEN`, and the
+ * Fastfile never mentions it — is invisible to any amount of parsing. So is one
+ * fastlane reads for itself. `required_secrets` in laneyard.yml is where those
+ * are declared, and they are treated exactly like the ones that were found.
+ *
+ * A variable present only in the server's own environment is reported rather
+ * than quietly ticked: it works, but it works because of how this particular
+ * server happened to be started, which is not something the project carries.
+ */
+export function checkEnvironment(input: EnvironmentInput): Check {
+  const { uses, secretKeys, serverEnv, declared, unread } = input;
+  if (!uses.ok) {
+    return { ...META.environment, ...undetermined(`could not read the lanes: ${uses.reason}`) };
+  }
+
+  const read = uses.value.flatMap((lane) => lane.env ?? []);
+  const required = [...new Set([...read, ...declared])].sort();
+
+  if (required.length === 0) {
+    const blind = unreadReason(unread);
+    if (blind) {
+      return {
+        ...META.environment,
+        ...undetermined(
+          `no lane seen to read an environment variable — but ${blind}.`,
+          DECLARE_SECRETS,
+        ),
+      };
+    }
+    return { ...META.environment, ...ok("no lane reads an environment variable.") };
+  }
+
+  const inVault = new Set(secretKeys);
+  const inServer = new Set(serverEnv);
+  const missing = required.filter((name) => !inVault.has(name) && !inServer.has(name));
+
+  if (missing.length > 0) {
+    return {
+      ...META.environment,
+      ...warn(
+        `${nameList(missing)} ${missing.length === 1 ? "is" : "are"} needed by a lane and in ` +
+          "neither the vault nor this server's environment: a run stops at the first one, or " +
+          "builds with it empty.",
+        "Store them from the secrets tab. A `fastlane/.env` does not travel — it is almost " +
+          "always gitignored, so it never reaches the clone a build runs from.",
+        "secrets",
+      ),
+    };
+  }
+
+  const borrowed = required.filter((name) => !inVault.has(name));
+  if (borrowed.length > 0) {
+    return {
+      ...META.environment,
+      ...ok(
+        `every variable the lanes need is available — though ${nameList(borrowed)} ` +
+          `${borrowed.length === 1 ? "comes" : "come"} from this server's own environment rather ` +
+          `than the vault, so another machine would not find ${borrowed.length === 1 ? "it" : "them"}.`,
+      ),
+    };
+  }
+
+  return {
+    ...META.environment,
+    ...ok(`every variable the lanes need is in the vault: ${nameList(required)}.`),
+  };
+}
+
 export interface ReadinessInput {
   probeRepository: () => Promise<unknown>;
   dependencies: DependenciesInput;
@@ -450,6 +869,24 @@ export interface ReadinessInput {
    * to say "could not tell", not to claim the repository holds nothing.
    */
   platforms: Known<Platform[]>;
+  /**
+   * The Appfile, which is the other half of a fastlane setup and where a
+   * project older than Laneyard keeps its Play Store service account. Read by
+   * the caller, like everything else here: no check touches the disk.
+   */
+  appfile: Known<AppfileFacts>;
+  /** `.p8` files the repository carries, from the same listing as `platforms`. */
+  keyFilesInRepo: Known<string[]>;
+  /** What reading the Fastfile could not account for. See `Unread`. */
+  unread: Known<Unread>;
+  /** Names in the server's own environment, which a run inherits. */
+  serverEnv: string[];
+  /** `required_secrets` from laneyard.yml. */
+  declaredSecrets: string[];
+  /** What the android build script says about release signing. */
+  androidSigning: Known<SigningFacts>;
+  /** Whether the properties file signing is conditional on is in the clone. */
+  signingFilePresent: boolean;
 }
 
 /** "all" is everyone's; the other two are shown only when they apply. */
@@ -478,21 +915,50 @@ export const SECTIONS: { platform: SectionPlatform; checks: CheckRow[] }[] = [
     checks: [
       { ...META.repository, run: (i) => checkRepository(i.probeRepository) },
       { ...META.dependencies, run: (i) => checkDependencies(i.dependencies) },
-      { ...META.blockingActions, run: (i) => checkBlockingActions(i.uses) },
+      { ...META.blockingActions, run: (i) => checkBlockingActions(i.uses, i.unread) },
+      {
+        ...META.environment,
+        run: (i) =>
+          checkEnvironment({
+            uses: i.uses,
+            secretKeys: i.secretKeys,
+            serverEnv: i.serverEnv,
+            declared: i.declaredSecrets,
+            unread: i.unread,
+          }),
+      },
     ],
   },
   {
     platform: "ios",
     checks: [
-      { ...META.appStoreConnect, run: (i) => checkAppStoreConnect(i.secretKeys) },
+      {
+        ...META.appStoreConnect,
+        run: (i) =>
+          checkAppStoreConnect({
+            secretKeys: i.secretKeys,
+            uses: i.uses,
+            keyFilesInRepo: i.keyFilesInRepo,
+            appfile: i.appfile,
+            unread: i.unread,
+          }),
+      },
       { ...META.match, run: (i) => checkMatch(i.uses, i.secretKeys) },
     ],
   },
   {
     platform: "android",
     checks: [
-      { ...META.androidKeystore, run: (i) => checkAndroidKeystore(i.uses, i.secretKeys) },
-      { ...META.playStore, run: (i) => checkPlayStore(i.uses, i.secretKeys) },
+      { ...META.androidKeystore, run: (i) => checkAndroidKeystore(i.uses, i.secretKeys, i.unread) },
+      { ...META.playStore, run: (i) => checkPlayStore(i.uses, i.secretKeys, i.appfile, i.unread) },
+      {
+        ...META.releaseSigning,
+        run: (i) =>
+          checkReleaseSigning({
+            gradle: i.androidSigning,
+            conditionalFilePresent: i.signingFilePresent,
+          }),
+      },
     ],
   },
 ];

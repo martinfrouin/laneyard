@@ -243,6 +243,33 @@ code { color: var(--text-bright); }
 /* The browser's own file button is a rounded grey lozenge with a label in the
    system's language — the one control that could not obey the grammar. It is
    hidden, and its label is the control. */
+/* The two file credentials, one row each. The platform sits in its own column
+   so the eye can skip the half that is not its project — a fixed width, because
+   a column that moves between two rows is not a column. */
+.credentials .grow { white-space: normal; overflow: visible; }
+.credentials .platform { width: 7ch; color: var(--text-dim); flex: none; }
+
+/* A name waiting for its value: the name holds a column of its own so the
+   fields line up, and the field takes the rest of the row. */
+.needed .needed-name { flex: none; min-width: 26ch; }
+.needed input { min-width: 0; }
+
+/* The per-row flag: a checkbox and its words, kept from wrapping so a row still
+   reads as one line. Dim, because it is state rather than an invitation. */
+.row-flag {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  flex: none;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* A value on screen, once someone asked for it. Monospace like everything
+   else, and bright rather than coloured: it is text, not a status. */
+.revealed { color: var(--text-bright); word-break: break-all; }
+
 .file-pick { cursor: pointer; }
 .file-pick input[type="file"] { display: none; }
 .file-pick:hover .accent { color: var(--text-bright); }
@@ -257,6 +284,41 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
    The grammar is unchanged — marker, title, dim detail. */
 .checks .grow { white-space: normal; overflow: visible; }
 
+/* Every line used to weigh the same, and a single character in the margin was
+   the only thing telling a settled check from one that needs reading. On a
+   checklist of eight that is not enough: the eye has to parse all eight to find
+   the two that matter.
+
+   So the unsettled lines are given an edge — a two-pixel rule in the state's
+   own colour, the same rule the rest of the interface draws at one pixel — and
+   the settled ones give up their bright title. Nothing moves and nothing is
+   reordered: the table's order is what makes the screen stable between runs.
+   The difference is entirely in contrast, which is what "at a glance" means. */
+.checks > li {
+  border-left: 2px solid transparent;
+  padding-left: 8px;
+  margin-left: -10px;
+}
+
+.checks > li.check-warn { border-left-color: var(--running); }
+.checks > li.check-unknown { border-left-color: var(--text-dim); }
+
+/* A settled check keeps its green tick and loses its emphasis: it is a line you
+   do not have to read, and it should look like one. */
+.checks > li.check-ok .check-title { color: var(--text-dim); }
+
+/* The count, above the list. One line that answers "how much of this needs me?"
+   before any of it is read. Each figure carries the mark it counts, so it reads
+   in the same three characters as the rows below. */
+.tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 10px 0 2px;
+}
+
+.tally .none { color: var(--text-dim); }
+
 /* --- Settings ------------------------------------------------------------- */
 
 /* The consequences of removing a project, and the paths it leaves behind. Both
@@ -264,6 +326,39 @@ td, th { text-align: left; font-weight: normal; padding: 2px 12px 2px 0; }
    cut at an ellipsis: a path you cannot read cannot be typed into a shell. */
 .consequences .grow { white-space: normal; overflow: visible; }
 .consequences .path { color: var(--text-bright); word-break: break-all; }
+
+/* Removal is the one act in the product that cannot be undone from the
+   interface — and it used to be announced the way every other section is, in
+   small grey capitals, indistinguishable from "artifacts" or "lanes". A heading
+   cannot carry that on its own: by the time you read a heading you are already
+   reading the paragraph under it.
+
+   So the region is enclosed instead. A one-pixel rule in the error colour says
+   "different rules apply inside here" before a single word is read, and it says
+   it in the vocabulary the rest of the interface already uses: right angles, a
+   token colour, no shadow and no gradient. The wash is derived from the same
+   token rather than being a new colour, which is what keeps it honest in both
+   themes — 4% of the error colour over the page's own background.
+
+   Deliberately not applied to anything else. A second danger zone would make
+   this one ordinary. */
+.danger {
+  border: 1px solid var(--error);
+  background: color-mix(in srgb, var(--error) 4%, var(--bg));
+  padding: 14px 16px;
+  margin-top: 4px;
+}
+
+/* The heading keeps the grammar of every other section — small spaced-out
+   capitals, never bold — and changes only its colour. Shouting in a larger or
+   heavier type would be the one place in the interface that does. */
+.danger .section { color: var(--error); }
+.danger .section:first-child { margin-top: 0; }
+
+/* Said once, at the top, in the page's brightest text: the single sentence
+   somebody who is about to press the button needs to have read. */
+.danger .irreversible { color: var(--text-bright); margin-top: 6px; }
+.danger .irreversible .mark { color: var(--error); }
 
 /* Typing a name is the confirmation. It sits on its own line, apart from the
    list above it, because it is the moment the reading stops and the act begins. */

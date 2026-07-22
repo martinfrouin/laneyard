@@ -20,7 +20,7 @@ export function Projects() {
         <h2 className="section">projects</h2>
         {/* An empty state is an instruction, not a mood: it gives the command. */}
         <p className="dim">
-          no projects. run <code>laneyard add</code> from a project's folder to
+          no projects. run <code>laneyard setup</code> from a project's folder to
           declare it.
         </p>
       </>

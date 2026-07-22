@@ -36,7 +36,7 @@ projects:
     db,
     root,
     lanes: async () => [{ name: "beta", platform: "ios", description: "Beta", private: false }],
-    uses: async () => [{ lane: "beta", actions: [] }],
+    uses: async () => ({ lanes: [{ lane: "beta", actions: [] }], imports: false }),
     vault: await Vault.open(root, new SecretStore(db), new CredentialStore(db)),
   });
 

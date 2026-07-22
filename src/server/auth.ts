@@ -1,5 +1,6 @@
 import { randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
 import type { UserEntry, UserRole } from "../config/schema.js";
+import type { SessionRecords } from "../db/sessions.js";
 
 /**
  * scrypt from the standard library: no extra native dependency, and enough
@@ -81,19 +82,40 @@ export async function authenticate(
   return { name: user.name, role: user.role };
 }
 
-/** In-memory sessions: they don't survive a restart, and that's just fine. */
-export class SessionStore {
-  private readonly tokens = new Map<string, Identity>();
+/**
+ * How long a session lasts, and how long the cookie is kept for.
+ *
+ * Thirty days, not forever: a browser left on a desk is the reason the password
+ * change asks for the current password, and a session that never ended would
+ * make that precaution pointless. The cookie carries the same figure, so the
+ * browser stops presenting a token the server would refuse anyway.
+ */
+export const SESSION_TTL_DAYS = 30;
+export const SESSION_TTL_MS = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
 
-  issue(identity: Identity): string {
+/**
+ * Sessions, kept in the database so they outlive a restart.
+ *
+ * They used to be a Map, with a comment saying they did not survive a restart
+ * "and that's just fine". It was not: restarting the server to pick up an edit
+ * to config.yml signed everybody out, which on a machine still being set up is
+ * several times an hour. The API is unchanged — every caller still issues, gets
+ * and revokes — only the shelf underneath is different.
+ */
+export class SessionStore {
+  constructor(private readonly records: SessionRecords) {}
+
+  issue(identity: Identity, now = new Date()): string {
     const token = randomBytes(32).toString("hex");
-    this.tokens.set(token, identity);
+    this.records.insert(token, identity, new Date(now.getTime() + SESSION_TTL_MS));
     return token;
   }
 
   /** Who the token belongs to, or undefined if it belongs to nobody. */
   get(token: string | undefined): Identity | undefined {
-    return token === undefined ? undefined : this.tokens.get(token);
+    if (token === undefined) return undefined;
+    const owner = this.records.find(token);
+    return owner ? { name: owner.name, role: owner.role as UserRole } : undefined;
   }
 
   valid(token: string | undefined): boolean {
@@ -101,7 +123,7 @@ export class SessionStore {
   }
 
   revoke(token: string): void {
-    this.tokens.delete(token);
+    this.records.remove(token);
   }
 
   /**
@@ -114,13 +136,31 @@ export class SessionStore {
    * every interface that offers the first implies the second.
    */
   revokeAllFor(name: string): void {
-    for (const [token, identity] of this.tokens) {
-      if (identity.name === name) this.tokens.delete(token);
-    }
+    this.records.removeAllFor(name);
   }
 }
 
 export const SESSION_COOKIE = "laneyard_session";
+
+/**
+ * How the session cookie is written, in one place so the two routes that issue
+ * one cannot disagree.
+ *
+ * `maxAge` is the half that was missing: without it the browser treats this as
+ * a session cookie and forgets it the moment the window closes, so signing in
+ * again was the price of quitting Chrome. It matches the server's own TTL, so
+ * the browser stops presenting a token the server would refuse anyway.
+ *
+ * Not `secure`: Laneyard is commonly reached over plain HTTP on a local
+ * network, and a cookie the browser refuses to send is a login page that never
+ * goes away.
+ */
+export const COOKIE_OPTIONS = {
+  path: "/",
+  httpOnly: true,
+  sameSite: "lax",
+  maxAge: SESSION_TTL_MS / 1000,
+} as const;
 
 /** Past this many tracked names, the entries that no longer delay anyone go. */
 const THROTTLE_PRUNE_ABOVE = 1_000;

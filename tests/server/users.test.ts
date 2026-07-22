@@ -41,7 +41,7 @@ async function harness(configContent = TWO_ACCOUNTS) {
     db,
     root,
     lanes: async () => [],
-    uses: async () => [],
+    uses: async () => ({ lanes: [], imports: false }),
     vault: await Vault.open(root, new SecretStore(db), new CredentialStore(db)),
   });
 

@@ -51,14 +51,27 @@ export async function addProjectToConfig(path: string, entry: NewProjectEntry): 
   const seq = projects instanceof YAMLSeq ? projects : new YAMLSeq();
   if (!(projects instanceof YAMLSeq)) doc.setIn(["projects"], seq);
 
-  for (const item of seq.items) {
-    const slug = (item as { get?: (k: string) => unknown }).get?.("slug");
-    if (slug === entry.slug) {
-      throw new Error(`A project already uses the slug "${entry.slug}" in ${path}`);
-    }
+  // An entry of the same name is updated, not refused.
+  //
+  // Setup prints "Continuing replaces its entry" before asking anything, and
+  // then this threw — so the one way to correct a stale entry, running setup
+  // again, was the one thing that could not be done. A project written by an
+  // older version and missing a field it now needs was unfixable except by hand.
+  //
+  // Field by field rather than wholesale, though the warning says "replaces":
+  // an entry may carry things setup knows nothing about — a `git_auth` pointing
+  // at an SSH key, a raised `timeout_minutes` — and losing those silently, on a
+  // command someone ran to fix something else, would be its own bug.
+  const existing = seq.items.find(
+    (item) => (item as { get?: (k: string) => unknown }).get?.("slug") === entry.slug,
+  ) as { set?: (k: string, v: unknown) => void } | undefined;
+
+  if (existing?.set) {
+    for (const [key, value] of Object.entries(entry)) existing.set(key, value);
+  } else {
+    seq.add(doc.createNode(entry));
   }
 
-  seq.add(doc.createNode(entry));
   await writeFile(path, serialize(doc), "utf8");
 }
 
@@ -152,7 +165,8 @@ export async function runSetupCommand(
       process.stdout.write(
         "\n" +
           warn(`This machine already knows a project called ${bold(existing)}.\n`) +
-          dim("  Continuing replaces its entry. Give it another name to keep both.\n"),
+          dim("  Continuing updates its entry, keeping anything you added by hand.\n") +
+          dim("  Give it another name to keep both.\n"),
       );
     }
 
@@ -240,6 +254,30 @@ export async function runSetupCommand(
       name: slug,
       git_url: gitUrl,
       default_branch: branch,
+      // Written on this machine too, and only when it is not the default,
+      // because of the gap between the two files. Laneyard builds from a clone
+      // of the remote, so nothing written into the working copy reaches it
+      // until `laneyard.yml` is committed and pushed — and until then
+      // `fastlane_dir` falls back to `fastlane`, which in a monorepo is not
+      // where anything is. The project was unreadable from the moment setup
+      // finished until a git push, with an ENOENT for an explanation.
+      //
+      // This is not a second source of truth: the repository file wins the
+      // moment it lands, which is the precedence `config.yml` already
+      // documents and the schema already allows. It is the value setup just
+      // proposed and the user just accepted, kept where it is useful until the
+      // authoritative copy arrives.
+      //
+      // Omitted when it *is* the default, so an ordinary project's block stays
+      // about how the project is reached and nothing else.
+      // Both of the fields the sidecar needs before it can read anything, and
+      // only when they are not already the default. `runtime` belongs here for
+      // exactly the same reason as `fastlane_dir`: without it the sidecar is
+      // launched under `bundle exec` and a project that uses a system fastlane
+      // fails with "Could not locate Gemfile" — the same bootstrap gap, one
+      // field along.
+      ...(fastlaneDir === "fastlane" ? {} : { fastlane_dir: fastlaneDir }),
+      ...(runtime === "bundle" ? {} : { runtime }),
     });
 
     // The repository half: how it builds. This is the part that was going into

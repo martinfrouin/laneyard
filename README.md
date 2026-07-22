@@ -150,6 +150,13 @@ shell history. Without `--role`, the account is a builder.
 Two things are refused, in the API and on the command line alike: removing the last admin, and
 demoting the last admin. A server nobody can administer cannot be repaired from the interface.
 
+Anyone changes their own password from **your account**, reached by clicking your name in the
+header — a builder included, since that page is about one person rather than about the server's
+list of people. It asks for the current password even though you are already signed in: a session
+is a cookie in a browser that may have been left open on a desk. Doing it ends every other session
+that account has, and leaves the page you did it on signed in. That is how the random password
+`laneyard setup` printed once stops being a string on a sticky note.
+
 Removing an account ends its sessions immediately — "remove the account" and "revoke access" are
 the same act. So does editing `config.yml` by hand: every request looks the account up again, so
 a demotion takes effect at once rather than at the next restart.
@@ -180,6 +187,13 @@ platforms: [ios]                 # or `[android]`, or both
 asked for an App Store Connect key. Left out, Laneyard looks at the repository — an Xcode project
 means iOS, a Gradle build means Android — and reports what it found rather than assuming.
 
+It looks **beside the Fastfile**, not at the repository root, because that is where an app keeps
+its platform folders: `ios/` and `fastlane/` are siblings, and both move together when the app is
+one directory of a monorepo. So `app/fastlane/Fastfile` alongside `app/ios/Runner.xcodeproj` is
+found, and a project configured with `ios/fastlane` reports iOS alone rather than being shown the
+Android section on the strength of a sibling folder its lanes never touch. When that guess is
+wrong, `platforms` is read first and settles it.
+
 Field by field, the repository file wins over the server block, which wins over the defaults. Any
 field of `laneyard.yml` may also be written in the server block, so a repository you would rather
 not touch can be configured entirely from `config.yml`.
@@ -201,6 +215,34 @@ The value is never an argument: a command line ends up in `~/.zsh_history` and i
 `ps`. Typing the command alone leaves you at a blank line — type or paste the value, then
 `Ctrl-D`.
 
+**Reading one back.** The vault is write-only for anything you called a secret: the server never
+sends a masked value back, so the interface has nothing to uncover and no browser ever holds one.
+
+Not everything stored here is a secret, though — `APP_VERSION`, `SENTRY_ORG`, an issuer id are
+identifiers, and being unable to check what an import stored makes the import something you take on
+faith. So the line is the one you drew yourself: a value kept out of the logs is never returned; a
+value you stored without that is shown on request, one named key at a time. `mask` and `unmask`
+change which it is without touching the value — otherwise revealing something would mean first
+retyping the value you were trying to read.
+
+**Bring the ones you already have.** A project that builds today has its variables in
+`fastlane/.env` — gitignored, on one laptop, and therefore absent from the clone a build runs
+from. From that working copy:
+
+```bash
+laneyard secret import --project cartes-ios          # shows what it would store
+laneyard secret import --project cartes-ios --yes    # stores it
+```
+
+It runs from the CLI because that is where the `.env` is; the server only ever sees a clone. A
+variable naming a `.p8` or a service account JSON has the **file's contents** stored, under the
+name fastlane looks for — `APP_STORE_CONNECT_API_KEY_P8`, `SUPPLY_JSON_KEY_DATA` — because a path
+does not travel to another machine. Everything is masked, and nothing is printed but names.
+
+Your lanes will still read the path forms afterwards. Point them at the contents instead:
+`key_content:` rather than `key_filepath:`, and drop `json_key:` so supply reads
+`SUPPLY_JSON_KEY_DATA` itself.
+
 **Two of them are files.** An App Store Connect key arrives as a `.p8` and a Play Store service
 account as a JSON file, and pasting either into a text field is the moment you are most likely to
 paste it somewhere else by accident. The Secrets tab takes the file directly — *app store connect
@@ -220,6 +262,14 @@ Every project has a Readiness tab: what stands between it and a build that runs 
 watches. Only the checks that apply to the project are shown — an Android project is never asked
 for an App Store Connect key, because one irrelevant warning teaches you to ignore the screen.
 
+**What a tick means.** The checks read your Fastfile, following a lane into the methods that
+Fastfile defines — factoring your lanes into `def deploy_ios` is good practice, not something that
+should make Laneyard blind. Two things stay out of reach and always will: `import`/`import_from_git`
+brings in lanes written elsewhere, and `fastlane/actions/` holds actions whose names mean nothing to
+a reader that has only seen the Fastfile. Where either applies, a check that found nothing says
+*could not tell* rather than ticking. A green tick here means "looked, and it is fine" — never
+"looked, and saw nothing".
+
 Always:
 
 - **the repository** answers `git ls-remote` without asking for credentials — a run that meets a
@@ -227,12 +277,29 @@ Always:
 - **dependencies** are installable: `bundle check` against your Gemfile, or the `fastlane` a run
   would otherwise find on the PATH;
 - **no lane calls an action known to stop and ask** — `prompt`, `sigh`, `cert`, a writable
-  `match`, an upload waiting for its summary to be confirmed.
+  `match`, an upload waiting for its summary to be confirmed;
+- **the variables the lanes read** are in the vault. Every `ENV.fetch("…")` a lane reaches is
+  collected and looked up. This is the check for the commonest way a project that works on your
+  laptop fails on a build server: the variables live in `fastlane/.env`, that file is gitignored,
+  and it never reaches the clone a build runs from — so the run stops at the first one with
+  nothing on screen to say why.
+
+  Two things a Fastfile cannot tell you, and two places to say them. A variable read by a tool the
+  lane shells out to — `sentry-cli` and its `SENTRY_AUTH_TOKEN` — is named nowhere in the lanes. A
+  committed `fastlane/.env.example` is read for exactly this, since that is what the file is for,
+  and `required_secrets` in `laneyard.yml` covers whatever it does not. A variable found only in
+  the server's own environment is reported rather than ticked over: it works, but it works because
+  of how this server was started.
 
 On iOS:
 
-- **App Store Connect** has an API key in the vault rather than a `FASTLANE_SESSION`, which
-  expires and takes the next night's build with it;
+- **App Store Connect** has an API key. The vault is checked first and is the only thing that
+  earns a tick — but a project that configured fastlane long before it met Laneyard keeps its key
+  elsewhere, so the lanes are read for `app_store_connect_api_key` and for a `key_filepath` or
+  `api_key_path` argument, and the repository for a `.p8`. Any of those is reported as *could not
+  tell*, not as a warning: a path in a Fastfile says a key was arranged, not that the file is on
+  this machine. An Appfile holding only an `apple_id` is a warning — that is the account
+  two-factor authentication will stop the run to ask about;
 - **match** has its `MATCH_PASSWORD` stored and is called `readonly`, so it fetches certificates
   instead of trying to create them.
 
@@ -240,7 +307,16 @@ On Android:
 
 - **the keystore** is reachable without a prompt: a lane handing `gradle` a `storeFile` needs a
   passphrase, and one that is neither in the call nor in the vault makes gradle stop and ask;
-- **the Play Store service account** is in the vault when a lane calls `upload_to_play_store`.
+- **the release is signed with the release key.** The one check here whose failure is silent:
+  the Flutter documentation's own snippet signs with the release config when `key.properties`
+  exists and with the *debug* config when it does not — and gitignores `key.properties`, so it is
+  absent from every clone. The build then succeeds, produces an artifact signed with the debug key,
+  and the rejection arrives from the store minutes later saying nothing about signing. This reads
+  the Gradle file as text and says so before the build, not after;
+- **the Play Store service account** is there when a lane calls `upload_to_play_store`. The vault
+  first, then the `json_key` argument in the call, then the **Appfile** — `json_key_file` and
+  `json_key_data`, which is where a long-standing project almost always keeps it. Only the vault
+  is a tick; the other two are *could not tell*, for the same reason as above.
 
 Like the iOS ones, the Android checks read **literal arguments only**. `gradle(storePassword:
 ENV["PW"])` is reported as undetermined, never guessed at: a checklist that guesses gets believed.

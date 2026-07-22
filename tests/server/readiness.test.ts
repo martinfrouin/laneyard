@@ -20,7 +20,10 @@ const SLOW = 60_000;
 
 const FASTFILE = "lane :beta do\n  match(readonly: false)\nend\n";
 
-const USES = [{ lane: "beta", actions: [{ name: "match", args: { readonly: false } }] }];
+const USES = {
+  lanes: [{ lane: "beta", actions: [{ name: "match", args: { readonly: false } }] }],
+  imports: false,
+};
 
 async function harness(
   options: { gitUrl?: string; uses?: () => Promise<unknown>; files?: Record<string, string> } = {},
@@ -102,7 +105,8 @@ describe("readiness API", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as Report;
     expect(body.sections.map((s) => s.platform)).toEqual(["all", "ios"]);
-    expect(allChecks(body)).toHaveLength(5);
+    // Three shared, one of them the variables the lanes read, plus the two iOS.
+    expect(allChecks(body)).toHaveLength(6);
     expect(Number.isNaN(Date.parse(body.checkedAt))).toBe(false);
     // The repository is a real local clone source: it answers without a password.
     expect(byId(allChecks(body), "repository").state).toBe("ok");
@@ -183,7 +187,7 @@ describe("readiness API", () => {
     // to ignore the entire screen.
     const { app } = await harness({
       files: { "app/build.gradle": "" },
-      uses: async () => [{ lane: "beta", actions: [{ name: "gradle", args: { task: "assemble" } }] }],
+      uses: async () => ({ lanes: [{ lane: "beta", actions: [{ name: "gradle", args: { task: "assemble" } }] }], imports: false }),
     });
     const cookies = { laneyard_session: await login(app) };
     const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
@@ -202,7 +206,7 @@ describe("readiness API", () => {
     // an Android build. The file wins: it was written on purpose.
     const { app } = await harness({
       files: { "Sample.xcodeproj/project.pbxproj": "", "laneyard.yml": "platforms: [android]\n" },
-      uses: async () => [{ lane: "beta", actions: [{ name: "gradle", args: {} }] }],
+      uses: async () => ({ lanes: [{ lane: "beta", actions: [{ name: "gradle", args: {} }] }], imports: false }),
     });
     const cookies = { laneyard_session: await login(app) };
     const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });

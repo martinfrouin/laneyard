@@ -9,18 +9,20 @@ import { LEGACY_ADMIN_NAME } from "../config/load.js";
 import type { ConfigStore } from "../config/store.js";
 import type { Db } from "../db/open.js";
 import { RunStore } from "../db/runs.js";
+import { SessionRecords } from "../db/sessions.js";
 import { Workspace } from "../git/workspace.js";
 import { LogStore } from "../logs/store.js";
 import { executeRun } from "../runner/orchestrate.js";
 import { RunQueue } from "../runner/queue.js";
 import type { Lane } from "../sidecar/lanes.js";
-import type { LaneUses } from "../sidecar/uses.js";
+import type { FastfileUses } from "../sidecar/uses.js";
 import type { Vault } from "../secrets/vault.js";
-import { authenticate, LoginThrottle, SESSION_COOKIE, SessionStore } from "./auth.js";
+import { authenticate, LoginThrottle, COOKIE_OPTIONS, SESSION_COOKIE, SessionStore } from "./auth.js";
 import type { Identity } from "./auth.js";
 import { requiresAdmin } from "./permissions.js";
 import { registerFastfileRoutes } from "./routes/fastfile.js";
 import { registerProjectRoutes } from "./routes/projects.js";
+import { registerAccountRoutes } from "./routes/account.js";
 import { registerReadinessRoutes } from "./routes/readiness.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerSecretRoutes } from "./routes/secrets.js";
@@ -36,7 +38,7 @@ export interface AppDeps {
   /** Injected so tests don't need Ruby or fastlane. */
   lanes: (slug: string, workspacePath: string, fastlaneDir: string) => Promise<Lane[]>;
   /** What each lane calls, for the readiness checklist. Injected for the same reason. */
-  uses: (slug: string, workspacePath: string, fastlaneDir: string) => Promise<LaneUses[]>;
+  uses: (slug: string, workspacePath: string, fastlaneDir: string) => Promise<FastfileUses>;
   /** The sole holder of plaintext secrets. Built async, so it's assembled outside `buildApp`. */
   vault: Vault;
 }
@@ -94,7 +96,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     ...deps,
     runs: new RunStore(deps.db),
     logs: new LogStore(join(deps.root, "logs")),
-    sessions: new SessionStore(),
+    sessions: new SessionStore(new SessionRecords(deps.db)),
     workspacePath,
     artifactsDir: (runId) => join(deps.root, "artifacts", String(runId)),
     ensureWorkspace: async (slug) => {
@@ -201,7 +203,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     throttle.recordSuccess(account);
     const token = ctx.sessions.issue(identity);
     return reply
-      .setCookie(SESSION_COOKIE, token, { path: "/", httpOnly: true, sameSite: "lax" })
+      .setCookie(SESSION_COOKIE, token, COOKIE_OPTIONS)
       .send({ ok: true, name: identity.name, role: identity.role });
   });
 
@@ -259,6 +261,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerReadinessRoutes(app, ctx);
   await registerFastfileRoutes(app, ctx);
   await registerUserRoutes(app, ctx);
+  await registerAccountRoutes(app, ctx);
 
   // Resolved from the module's location, not from the data folder:
   // `deps.root` is ~/.laneyard, the built SPA lives in the repository. Two

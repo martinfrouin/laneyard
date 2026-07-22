@@ -16,6 +16,28 @@ const SECTION_LABEL: Record<ReadinessSection["platform"], string> = {
   android: "android",
 };
 
+/**
+ * How many checks are in each state, across every section that applies.
+ *
+ * Counted rather than shown as a bar or a ring: the answer someone wants from
+ * the top of this screen is "how many of these need me", and a number answers it
+ * exactly. A proportion would round two warnings out of eight into a shape.
+ */
+function tally(report: ReadinessReport | null): Record<string, number> {
+  const counts: Record<string, number> = { ok: 0, warn: 0, unknown: 0 };
+  for (const section of report?.sections ?? []) {
+    for (const check of section.checks) counts[check.state] = (counts[check.state] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** The wording each figure gets, in the order the eye should meet them. */
+const TALLY_LABELS: { state: string; one: string; many: string }[] = [
+  { state: "warn", one: "needs a look", many: "need a look" },
+  { state: "unknown", one: "could not be told", many: "could not be told" },
+  { state: "ok", one: "settled", many: "settled" },
+];
+
 /** The time of day is what matters here; the date is noise on a checklist run minutes ago. */
 const at = (iso: string): string =>
   new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
@@ -53,6 +75,8 @@ export function Readiness() {
 
   useEffect(load, [slug]);
 
+  const counts = tally(report);
+
   return (
     <>
       <h2 className="section">readiness</h2>
@@ -70,6 +94,25 @@ export function Readiness() {
 
       {error && <p className="status-failed">checklist unavailable — {error}</p>}
 
+      {/* Before the list, because it is what decides whether the list gets read
+          at all. A state nobody is in is still shown, dimmed: "0 need a look" is
+          the reassurance, and a figure that disappears when it reaches zero is a
+          figure you cannot trust when it is absent. */}
+      {report && (
+        <p className="tally">
+          {TALLY_LABELS.map(({ state, one, many }) => {
+            const n = counts[state] ?? 0;
+            return (
+              <span key={state} className={n === 0 ? "none" : undefined}>
+                <span className={`mark ${n === 0 ? "" : checkClass(state)}`}>{checkMark(state)}</span>{" "}
+                <span className={n === 0 ? undefined : "bright"}>{n}</span>{" "}
+                <span className="dim">{n === 1 ? one : many}</span>
+              </span>
+            );
+          })}
+        </p>
+      )}
+
       {/* A section only appears when it applies, so an Android project is
           never told off for having no App Store Connect key. The heading is the
           same small-caps rule the rest of the interface uses — a card here
@@ -81,10 +124,10 @@ export function Readiness() {
           </h2>
           <ul className="rows checks">
             {section.checks.map((check) => (
-              <li key={check.id}>
+              <li key={check.id} className={`check-${check.state}`}>
                 <span className={`mark ${checkClass(check.state)}`}>{checkMark(check.state)}</span>
                 <span className="grow">
-                  <span className="bright">{check.title}</span>{" "}
+                  <span className="bright check-title">{check.title}</span>{" "}
                   <span className="dim">{check.detail}</span>
                   {/* The fix is a sentence on its own line, not a control: most
                       of these are fixed by editing a Fastfile, and a button

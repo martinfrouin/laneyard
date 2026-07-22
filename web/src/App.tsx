@@ -1,7 +1,8 @@
 import { createContext, useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { Login } from "./components/Login";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { Account } from "./pages/Account";
 import { Fastfile } from "./pages/Fastfile";
 import { Project } from "./pages/Project";
 import { Projects } from "./pages/Projects";
@@ -72,7 +73,12 @@ export function App() {
                 marker for the role, the name, then the controls. */}
             <span className="who">
               <span className={`mark ${admin ? "accent" : "dim"}`}>{admin ? "●" : "○"}</span>
-              <span className="bright">{identity.name}</span>
+              {/* The name is the way in to your own account: whoever wants to
+                  change their password looks for themselves on screen first,
+                  and there is exactly one place they are named. */}
+              <Link to="/account" className="bright" title="your account">
+                {identity.name}
+              </Link>
               <span className="dim">{identity.role}</span>
               <button onClick={signOut}>sign out</button>
               <ThemeToggle />
@@ -120,6 +126,9 @@ export function App() {
                 {admin && <Route path="settings" element={<Settings />} />}
               </Route>
               <Route path="/r/:id" element={<Run />} />
+            {/* Every role, unlike /users: this is your own password, not the
+                server's list of people. */}
+            <Route path="/account" element={<Account />} />
               {/* Routed for an admin only. A builder who types the address gets
                   the unknown-page line rather than a screen of refusals — and
                   the routes behind it refuse them all the same. */}

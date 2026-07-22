@@ -114,11 +114,21 @@ export function Settings() {
   }
 
   return (
-    <>
+    <div className="danger">
       <h2 className="section">remove this project</h2>
+
+      {/* The one sentence somebody about to press the button needs to have
+          read, in the page's brightest text and before the reassurances. The
+          list below is all about what removal spares — true, and exactly the
+          sort of thing that reads as "this is safe" if it comes first. */}
+      <p className="irreversible">
+        <span className="mark">!</span> this cannot be undone from laneyard. adding{" "}
+        <span className="bright">{name ?? slug}</span> back means setting it up again.
+      </p>
+
       <p className="dim">
-        laneyard stops showing <span className="bright">{name ?? slug}</span>: its block leaves this
-        machine's config.yml, and nothing else happens. what that does not do:
+        laneyard stops showing it: its block leaves this machine's config.yml, and nothing else
+        happens. what that does not do:
       </p>
 
       <ul className="rows consequences">
@@ -182,6 +192,6 @@ export function Settings() {
       </form>
 
       {error && <p className="status-failed">refused — {error}</p>}
-    </>
+    </div>
   );
 }

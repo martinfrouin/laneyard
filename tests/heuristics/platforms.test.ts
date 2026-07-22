@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  appRootOf,
+  searchDir,
   PLATFORM_MARKERS,
   detectPlatforms,
   platformsOf,
@@ -28,6 +30,126 @@ const empty = repository([]);
 const xcode = repository([{ path: "Sample.xcodeproj", dir: true }]);
 const gradle = repository([{ path: "app/build.gradle" }]);
 const both = repository([{ path: "Sample.xcodeproj", dir: true }, { path: "app/build.gradle" }]);
+
+describe("appRootOf", () => {
+  it("is the repository root when fastlane sits at the top", () => {
+    expect(appRootOf("fastlane")).toBe(".");
+  });
+
+  /**
+   * The bug this exists for: a monorepo holding `app/fastlane/Fastfile` and
+   * `app/ios/Runner.xcodeproj` reported no platform at all, because the markers
+   * were looked for from the repository root — three levels up from the Xcode
+   * project, and the table reaches two.
+   */
+  it("is the app's directory when fastlane sits inside one", () => {
+    expect(appRootOf("app/fastlane")).toBe("app");
+    expect(appRootOf("packages/mobile/fastlane")).toBe("packages/mobile");
+  });
+
+  it("is the root when there is no Fastfile to go by", () => {
+    expect(appRootOf(null)).toBe(".");
+    expect(appRootOf(undefined)).toBe(".");
+    expect(appRootOf("")).toBe(".");
+  });
+
+  it("does not trip over a trailing slash", () => {
+    expect(appRootOf("app/fastlane/")).toBe("app");
+  });
+});
+
+describe("searchDir", () => {
+  it("is the directory given when the app is the repository", () => {
+    expect(searchDir("/w", ".")).toBe("/w");
+    expect(searchDir("/w", null)).toBe("/w");
+    expect(searchDir("/w", "")).toBe("/w");
+  });
+
+  it("descends to the app's own directory when there is one", () => {
+    expect(searchDir("/w", "app")).toBe("/w/app");
+    expect(searchDir("/w", "packages/mobile")).toBe("/w/packages/mobile");
+  });
+
+  it("refuses to climb out of the directory it was given", () => {
+    expect(searchDir("/w", "../elsewhere")).toBe("/w");
+  });
+});
+
+/**
+ * The arrangements that actually occur, each as the repository would look.
+ *
+ * Written as a table rather than as prose because the point is the spread: the
+ * fix that made a Flutter app inside a monorepo work must not be a fix that
+ * only makes *that* repository work.
+ */
+describe("detectPlatforms across real project layouts", () => {
+  const layout = (paths: string[]): FindPaths => {
+    const dirs = new Set(paths.filter((p) => p.endsWith("proj") || p.endsWith("workspace")));
+    return (globs, { onlyDirectories }) => {
+      const wanted = paths.filter((p) => (onlyDirectories ? dirs.has(p) : !dirs.has(p)));
+      const rx = globs.map(
+        (g) => new RegExp(`^${g.replace(/[.]/g, "\\.").replace(/\*/g, "[^/]*")}$`),
+      );
+      return Promise.resolve(wanted.filter((p) => rx.some((r) => r.test(p))));
+    };
+  };
+
+  /** What a caller lists: the same tree seen from each of the search roots. */
+  const seenFrom = (tree: string[], root: string): string[] =>
+    root === "."
+      ? tree
+      : tree.filter((p) => p.startsWith(`${root}/`)).map((p) => p.slice(root.length + 1));
+
+  const detect = async (tree: string[], fastlaneDir: string) => {
+    // `join(".", "app")` normalises to `app`, so this comes back usable as-is.
+    const root = searchDir(".", appRootOf(fastlaneDir));
+    return detectPlatforms(layout(seenFrom(tree, root)));
+  };
+
+  it("plain native app: fastlane and the project both at the root", async () => {
+    expect(await detect(["MyApp.xcodeproj", "fastlane/Fastfile"], "fastlane")).toEqual(["ios"]);
+  });
+
+  it("React Native or Flutter at the root", async () => {
+    const tree = ["ios/Runner.xcodeproj", "android/build.gradle", "fastlane/Fastfile"];
+    expect(await detect(tree, "fastlane")).toEqual(["ios", "android"]);
+  });
+
+  // The one that was broken: three levels down, and the table reaches two.
+  it("the same app one directory down, in a monorepo", async () => {
+    const tree = ["app/ios/Runner.xcodeproj", "app/android/build.gradle.kts", "app/fastlane/Fastfile"];
+    expect(await detect(tree, "app/fastlane")).toEqual(["ios", "android"]);
+  });
+
+  it("two directories down, which is where a packages/ monorepo puts it", async () => {
+    const tree = ["packages/mobile/ios/App.xcworkspace", "packages/mobile/fastlane/Fastfile"];
+    expect(await detect(tree, "packages/mobile/fastlane")).toEqual(["ios"]);
+  });
+
+  // A fastlane set up for one platform reports that platform, and not its
+  // sibling: those lanes build one thing, and an irrelevant section is what
+  // teaches someone to ignore the screen.
+  it("a per-platform fastlane reports its own platform only", async () => {
+    const tree = ["ios/Runner.xcodeproj", "android/build.gradle", "ios/fastlane/Fastfile"];
+    expect(await detect(tree, "ios/fastlane")).toEqual(["ios"]);
+  });
+
+  it("finds nothing in a repository that builds neither, rather than guessing", async () => {
+    expect(await detect(["src/main.ts", "fastlane/Fastfile"], "fastlane")).toEqual([]);
+  });
+
+  // What the third glob level would have cost: a dependency's own Xcode project
+  // reported as though the repository built for iOS.
+  it("does not call an Android project iOS because a dependency ships an xcodeproj", async () => {
+    const tree = [
+      "app/android/build.gradle",
+      "app/node_modules/some-package/ios/Thing.xcodeproj",
+      "app/ios/Pods/Pods.xcodeproj",
+      "app/fastlane/Fastfile",
+    ];
+    expect(await detect(tree, "app/fastlane")).toEqual(["android"]);
+  });
+});
 
 describe("detectPlatforms", () => {
   it("finds iOS from an Xcode project", async () => {

@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 /**
  * Which platforms a project builds for.
  *
@@ -14,6 +16,78 @@
  */
 
 export type Platform = "ios" | "android";
+
+/**
+ * Where to look for the markers, given where the Fastfile turned out to be.
+ *
+ * Two places, and the order does not matter because the answer is a union.
+ *
+ * The repository root is the obvious one, and used to be the only one. It is
+ * wrong on its own: the markers sit *beside* an app's fastlane folder, not
+ * beside the repository root — `ios/Runner.xcodeproj` and `fastlane/` are
+ * siblings, and both move together when the app is one directory of a
+ * monorepo. A repository holding `app/fastlane/Fastfile` and
+ * `app/ios/Runner.xcodeproj` reported "no Xcode project and no Gradle build",
+ * because that is three levels down and the table reaches two.
+ *
+ * The app's own directory is the second, and it is the one laneyard already
+ * knows: it asked where the Fastfile was during setup. Between them they cover
+ * the arrangements that actually occur —
+ *
+ * - `fastlane/` and `*.xcodeproj` both at the root: a plain native app;
+ * - `fastlane/`, `ios/`, `android/` at the root: React Native, Flutter;
+ * - `app/fastlane/`, `app/ios/`, `app/android/`: the same app inside a monorepo;
+ * - `ios/fastlane/`: a fastlane set up for one platform only, which then
+ *   reports that one platform and not its sibling — right, since those lanes
+ *   build one platform, and an irrelevant section is what teaches someone to
+ *   ignore the screen.
+ *
+ * Keeping both roots rather than replacing one with the other is what makes
+ * this strictly an addition: nothing the old behaviour found is lost.
+ *
+ * What is deliberately *not* done is deepening the table to `*​/*​/*` or `**`.
+ * A third level would match `node_modules/some-package/ios/X.xcodeproj` and
+ * `app/ios/Pods/Pods.xcodeproj`, and report iOS for an Android-only project on
+ * the strength of a dependency's own Xcode project. `**` would do that and walk
+ * every build directory to do it. Two levels from a root that is actually the
+ * app is a better question than four levels from a root that is not.
+ */
+export function appRootOf(fastlaneDir: string | null | undefined): string {
+  if (!fastlaneDir) return ".";
+  // Repository-relative and always forward-slashed, whatever the platform.
+  const parent = fastlaneDir.replace(/\/+$/, "").split("/").slice(0, -1).join("/");
+  return parent === "" ? "." : parent;
+}
+
+/**
+ * The one directory to list, given where the Fastfile turned out to be.
+ *
+ * Not the repository root, which is what it used to be and what made a
+ * repository holding `app/fastlane/Fastfile` and `app/ios/Runner.xcodeproj`
+ * report "no Xcode project and no Gradle build": that is three levels down and
+ * the table reaches two.
+ *
+ * Not both, either, though that was tempting — keeping the root as well would
+ * have made this purely additive. It also means a project configured with
+ * `ios/fastlane` is shown the Android section, on the strength of a sibling
+ * `android/` folder those lanes never touch. The fastlane directory is not a
+ * guess: setup asked for it and `laneyard.yml` records it, and it says which
+ * app this project *is*. Trusting it is the difference between a checklist
+ * about this project and a checklist about the repository it lives in.
+ *
+ * Anyone it gets wrong has the escape hatch the check itself names: `platforms`
+ * in `laneyard.yml` is read first and skips all of this.
+ *
+ * What is deliberately not done is deepening the table to `*​/*​/*` or `**`. A
+ * third level matches `node_modules/some-package/ios/X.xcodeproj` and
+ * `app/ios/Pods/Pods.xcodeproj`, and would report iOS for an Android-only
+ * project on the strength of a dependency. Two levels from a directory that is
+ * actually the app beats four from one that is not.
+ */
+export function searchDir(from: string, appRoot: string | null | undefined): string {
+  if (!appRoot || appRoot === "." || appRoot.startsWith("..")) return from;
+  return join(from, appRoot);
+}
 
 export interface PlatformMarker {
   platform: Platform;

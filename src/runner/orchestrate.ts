@@ -2,7 +2,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProjectSettings } from "../config/schema.js";
 import type { RunStore, Step } from "../db/runs.js";
-import { Workspace } from "../git/workspace.js";
+import { gitEnvFor, Workspace } from "../git/workspace.js";
 import type { GitAuth } from "../git/workspace.js";
 import type { LogStore } from "../logs/store.js";
 import { summarizeFailure } from "../heuristics/error-summary.js";
@@ -140,6 +140,20 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   // before even reaching fastlane would adopt the previous run's timeline.
   await rm(reportPath, { force: true });
 
+  // The identity fallback is only set when the workspace has none of its own:
+  // a clone Laneyard made carries no `user.email`, so a lane running `git
+  // commit` fails with "Please tell me who you are" on any server whose global
+  // git configuration is empty. Where an identity does exist — the server's own,
+  // or one set on the repository — it is left to win, because these variables
+  // override configuration rather than backing it up.
+  const gitEnv: NodeJS.ProcessEnv = gitEnvFor(opts.gitAuth ?? { kind: "none" });
+  if ((await workspace.identity().catch(() => null)) === null) {
+    gitEnv["GIT_AUTHOR_NAME"] = "Laneyard";
+    gitEnv["GIT_AUTHOR_EMAIL"] = "laneyard@localhost";
+    gitEnv["GIT_COMMITTER_NAME"] = "Laneyard";
+    gitEnv["GIT_COMMITTER_EMAIL"] = "laneyard@localhost";
+  }
+
   const { done } = startPty({
     command: useBundle ? "bundle" : "fastlane",
     args: useBundle
@@ -151,10 +165,20 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
       ...(opts.secrets ?? {}),
       // Order matters: secrets come after opts.env so a stored secret wins over
       // a variable that happens to exist in the server's own environment, and
-      // before these three fixed variables so no secret can override CI.
+      // before these fixed variables so no secret can override CI.
       CI: "true",
       FASTLANE_SKIP_UPDATE_CHECK: "1",
       FORCE_COLOR: "1",
+      // A lane may run git itself — bumping and pushing a build number is a
+      // reasonable thing for a Fastfile to do — and until now that `sh("git
+      // push")` inherited none of the care Laneyard takes with its own git
+      // calls. It got the worst failure available: a push needing a credential
+      // did not fail, it waited, and the run sat there until its timeout with
+      // nothing in the log to say what for.
+      //
+      // After the secrets, deliberately. These are not preferences: a stored
+      // `GIT_TERMINAL_PROMPT=1` would restore exactly the hang this removes.
+      ...gitEnv,
     },
     onData: (chunk) => void emit(chunk),
     timeoutMs: settings.timeout_minutes * 60_000,

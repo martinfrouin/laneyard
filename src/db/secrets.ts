@@ -55,6 +55,40 @@ export class SecretStore {
     return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
   }
 
+  /** One applicable row, ciphertext included, or undefined. */
+  find(projectSlug: string, key: string): (SecretSummary & { valueEnc: string }) | undefined {
+    const row = this.applicable(projectSlug).find((r) => r.key === key);
+    return row
+      ? {
+          key: row.key,
+          masked: row.masked === 1,
+          scope: row.project_slug === GLOBAL ? "global" : "project",
+          valueEnc: row.value_enc,
+        }
+      : undefined;
+  }
+
+  /**
+   * Flips whether a value is kept out of the logs, leaving the value alone.
+   *
+   * Its own operation rather than a re-`set`, because of a circle: to reveal a
+   * value you must first declare it not secret, and declaring that by storing it
+   * again would mean typing the value you were trying to read.
+   *
+   * Returns false when no row matches, so a caller can answer 404 rather than
+   * report a change that did not happen.
+   */
+  setMasked(projectSlug: string | null, key: string, masked: boolean): boolean {
+    return (
+      this.db
+        .prepare(
+          `UPDATE secret SET masked = ?, updated_at = ?
+           WHERE project_slug = ? AND key = ?`,
+        )
+        .run(masked ? 1 : 0, new Date().toISOString(), projectSlug ?? GLOBAL, key).changes > 0
+    );
+  }
+
   list(projectSlug: string): SecretSummary[] {
     return this.applicable(projectSlug).map((row) => ({
       key: row.key,

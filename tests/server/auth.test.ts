@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { openDatabase } from "../../src/db/open.js";
+import { SessionRecords } from "../../src/db/sessions.js";
 import {
   authenticate,
   hashPassword,
@@ -81,32 +83,95 @@ describe("authenticate", () => {
 });
 
 describe("SessionStore", () => {
+  // Backed by the database now, so that a restart does not sign everybody out.
+  // In memory here: the point under test is the mapping, not the file.
+  const newStore = () => new SessionStore(new SessionRecords(openDatabase(":memory:")));
+
   it("maps a token to who owns it", () => {
-    const store = new SessionStore();
+    const store = newStore();
     const token = store.issue({ name: "ci", role: "builder" });
     expect(store.get(token)).toEqual({ name: "ci", role: "builder" });
     expect(store.valid(token)).toBe(true);
   });
 
   it("knows nothing about a token it never issued", () => {
-    const store = new SessionStore();
+    const store = newStore();
     expect(store.get("made up")).toBeUndefined();
     expect(store.get(undefined)).toBeUndefined();
     expect(store.valid(undefined)).toBe(false);
   });
 
   it("forgets a revoked token", () => {
-    const store = new SessionStore();
+    const store = newStore();
     const token = store.issue({ name: "ci", role: "builder" });
     store.revoke(token);
     expect(store.get(token)).toBeUndefined();
   });
 
   it("gives two sessions of the same account distinct tokens", () => {
-    const store = new SessionStore();
+    const store = newStore();
     const a = store.issue({ name: "ci", role: "builder" });
     const b = store.issue({ name: "ci", role: "builder" });
     expect(a).not.toBe(b);
+  });
+
+  it("drops every session an account had, which is what a password change needs", () => {
+    const store = newStore();
+    const phone = store.issue({ name: "ci", role: "builder" });
+    const laptop = store.issue({ name: "ci", role: "builder" });
+    const other = store.issue({ name: "martin", role: "admin" });
+
+    store.revokeAllFor("ci");
+    expect(store.get(phone)).toBeUndefined();
+    expect(store.get(laptop)).toBeUndefined();
+    expect(store.get(other)).toBeDefined();
+  });
+
+  /**
+   * The whole reason these moved out of a Map: restarting the server to pick up
+   * an edit to config.yml used to sign everybody out.
+   */
+  it("survives the process that issued it", () => {
+    const db = openDatabase(":memory:");
+    const token = new SessionStore(new SessionRecords(db)).issue({ name: "ci", role: "builder" });
+
+    // A second store over the same database is what a restart amounts to.
+    expect(new SessionStore(new SessionRecords(db)).get(token)).toEqual({
+      name: "ci",
+      role: "builder",
+    });
+  });
+
+  it("stops honouring a session once its time is up", () => {
+    const db = openDatabase(":memory:");
+    const records = new SessionRecords(db);
+    const store = new SessionStore(records);
+    const token = store.issue({ name: "ci", role: "builder" }, new Date("2026-01-01T00:00:00Z"));
+
+    expect(records.find(token, new Date("2026-01-20T00:00:00Z"))).toBeDefined();
+    expect(records.find(token, new Date("2026-03-01T00:00:00Z"))).toBeUndefined();
+  });
+
+  // The token is a bearer credential: a copy of laneyard.db must be a list of
+  // digests, not a ring of working keys.
+  it("never writes the token itself down", () => {
+    const db = openDatabase(":memory:");
+    const token = new SessionStore(new SessionRecords(db)).issue({ name: "ci", role: "builder" });
+
+    const rows = db.prepare("SELECT token_hash FROM session").all() as { token_hash: string }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.token_hash).not.toBe(token);
+  });
+
+  it("sweeps away what has expired, and leaves what has not", () => {
+    const db = openDatabase(":memory:");
+    const records = new SessionRecords(db);
+    const store = new SessionStore(records);
+    store.issue({ name: "ci", role: "builder" }, new Date("2026-01-01T00:00:00Z"));
+    store.issue({ name: "ci", role: "builder" }, new Date("2026-06-01T00:00:00Z"));
+
+    expect(records.prune(new Date("2026-02-01T00:00:00Z"))).toBe(1);
+    expect(records.count(new Date("2026-02-01T00:00:00Z"))).toBe(1);
   });
 });
 

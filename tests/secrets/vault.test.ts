@@ -7,7 +7,10 @@ import { tmpDir } from "../fixtures/repos.js";
 
 async function vault() {
   const db = openDatabase(":memory:");
-  return { vault: await Vault.open(await tmpDir("laneyard-vault-"), new SecretStore(db), new CredentialStore(db)), db };
+  return {
+    vault: await Vault.open(await tmpDir("laneyard-vault-"), new SecretStore(db), new CredentialStore(db)),
+    db,
+  };
 }
 
 describe("Vault", () => {

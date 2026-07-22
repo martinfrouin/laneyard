@@ -18,9 +18,36 @@ export interface Asker {
   close(): void;
 }
 
+/**
+ * Thrown when the user walks away from a question — Ctrl-C or Ctrl-D. Not a
+ * failure: the caller turns it into one sentence and a 130 exit code.
+ */
+export class PromptAborted extends Error {
+  constructor() {
+    super("interrupted");
+    this.name = "PromptAborted";
+  }
+}
+
 /** Reads from the real terminal. */
 export function terminalAsker(): Asker {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+  // Left alone, Ctrl-C closes the interface while `rl.question` stays pending
+  // forever, and node reports that as "Detected unsettled top-level await" —
+  // an internal complaint about our code, printed at someone who just pressed
+  // Ctrl-C. Aborting the question makes it a rejection we can answer for.
+  const interrupted = new AbortController();
+  rl.on("SIGINT", () => rl.close());
+  rl.on("close", () => interrupted.abort());
+
+  async function question(prompt: string): Promise<string> {
+    try {
+      return await rl.question(prompt, { signal: interrupted.signal });
+    } catch {
+      throw new PromptAborted();
+    }
+  }
 
   return {
     async ask(label, proposed, hint) {
@@ -28,12 +55,12 @@ export function terminalAsker(): Asker {
       // The proposal is shown in the prompt rather than typed for the user:
       // pressing Return accepts it, which is what someone does nine times out
       // of ten, and correcting it costs one line.
-      const answer = (await rl.question(`  ${label} [${proposed}]: `)).trim();
+      const answer = (await question(`  ${label} [${proposed}]: `)).trim();
       return answer === "" ? proposed : answer;
     },
-    async confirm(question, defaultYes) {
+    async confirm(question_, defaultYes) {
       const suffix = defaultYes ? "[Y/n]" : "[y/N]";
-      const answer = (await rl.question(`${question} ${suffix} `)).trim().toLowerCase();
+      const answer = (await question(`${question_} ${suffix} `)).trim().toLowerCase();
       if (answer === "") return defaultYes;
       return answer.startsWith("y");
     },

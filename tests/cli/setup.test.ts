@@ -50,9 +50,42 @@ describe("addProjectToConfig", () => {
     expect(raw).toContain("# server password");
   });
 
-  it("refuses an already-taken slug", async () => {
+  /**
+   * Setup prints "Continuing updates its entry" before asking anything, and
+   * this used to throw instead — so running setup again, the one way to correct
+   * an entry written by an older version, was the one thing that could not be
+   * done. The refusal was the stale half.
+   */
+  it("updates an entry of the same name instead of refusing", async () => {
     const path = await configAt(EXISTING);
-    await expect(addProjectToConfig(path, { ...entry, slug: "deja-la" })).rejects.toThrow(/deja-la/);
+    await addProjectToConfig(path, { ...entry, slug: "deja-la", default_branch: "develop" });
+
+    const written = parse(await readFile(path, "utf8")) as {
+      projects: Record<string, unknown>[];
+    };
+    expect(written.projects).toHaveLength(1);
+    expect(written.projects[0]!["default_branch"]).toBe("develop");
+  });
+
+  it("leaves alone what the entry carried and setup knows nothing about", async () => {
+    const path = await configAt(EXISTING);
+    const doc = await readFile(path, "utf8");
+    await writeFile(
+      path,
+      doc.replace(
+        "slug: deja-la",
+        "slug: deja-la\n    timeout_minutes: 120\n    git_auth: { kind: ssh_key, ref: /keys/id }",
+      ),
+      "utf8",
+    );
+
+    await addProjectToConfig(path, { ...entry, slug: "deja-la" });
+
+    const written = parse(await readFile(path, "utf8")) as {
+      projects: Record<string, unknown>[];
+    };
+    expect(written.projects[0]!["timeout_minutes"]).toBe(120);
+    expect(written.projects[0]!["git_auth"]).toEqual({ kind: "ssh_key", ref: "/keys/id" });
   });
 
   it("creates the file if it doesn't exist", async () => {
@@ -107,6 +140,26 @@ describe("runSetupCommand", () => {
     return { root, app: join(root, "app"), configPath: join(await tmpDir(), "config.yml") };
   }
 
+  /** The ordinary shape: fastlane at the root, which needs no machine-side note. */
+  async function repoWithFastlaneAtRoot(): Promise<{ app: string; configPath: string }> {
+    const root = await tmpDir("laneyard-add-root-");
+    await mkdir(join(root, "fastlane"), { recursive: true });
+    await writeFile(join(root, "fastlane", "Fastfile"), "lane :beta do\nend\n", "utf8");
+    await mkdir(join(root, "App.xcodeproj"), { recursive: true });
+    await writeFile(join(root, "App.xcodeproj", "project.pbxproj"), "", "utf8");
+    // A Gemfile, so `bundle` is detected — which is the default, and therefore
+    // the case where the machine's file has nothing to say.
+    await writeFile(join(root, "Gemfile"), 'gem "fastlane"\n', "utf8");
+
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const run = promisify(execFile);
+    await run("git", ["init", "-q", "-b", "main"], { cwd: root });
+    await run("git", ["remote", "add", "origin", "git@example.com:you/plain.git"], { cwd: root });
+
+    return { app: root, configPath: join(await tmpDir(), "config.yml") };
+  }
+
   it("writes build behaviour into the repository, where it can be committed", async () => {
     // Two bugs in one place. The path used to be measured from the current
     // directory — run from `app/`, it was written as `fastlane` while the clone
@@ -138,7 +191,19 @@ describe("runSetupCommand", () => {
     expect(repoConfig.platforms).toEqual(["ios"]);
   });
 
-  it("keeps the machine's file to how the project is reached", async () => {
+  /**
+   * The repository is authoritative about how a project builds — but Laneyard
+   * builds from a clone of the remote, so `laneyard.yml` says nothing until it
+   * is committed and pushed. Between the end of setup and that push, a project
+   * whose fastlane folder is not at the root was simply unreadable, and said so
+   * with an ENOENT.
+   *
+   * So the one field needed to *find* the Fastfile is kept on this machine too,
+   * and only when it is not already the default. `laneyard.yml` still wins the
+   * moment it lands: this is the precedence config.yml documents, not a second
+   * source of truth.
+   */
+  it("keeps the machine's file to how the project is reached, plus what it takes to read it", async () => {
     const { app, configPath } = await monorepo();
     await runSetupCommand(app, configPath, { yes: true });
 
@@ -146,8 +211,24 @@ describe("runSetupCommand", () => {
       projects: Record<string, unknown>[];
     };
     expect(written.projects[0]).toHaveProperty("git_url");
-    // Build behaviour belongs in the repository, not here.
+    // The two the sidecar needs before it can read anything at all.
+    expect(written.projects[0]!["fastlane_dir"]).toBe("app/fastlane");
+    expect(written.projects[0]!["runtime"]).toBe("system");
+    // The rest of build behaviour stays in the repository.
+    expect(written.projects[0]).not.toHaveProperty("artifact_globs");
+    expect(written.projects[0]).not.toHaveProperty("platforms");
+    expect(written.projects[0]).not.toHaveProperty("timeout_minutes");
+  });
+
+  it("says nothing about either when they are the usual ones", async () => {
+    const { app, configPath } = await repoWithFastlaneAtRoot();
+    await runSetupCommand(app, configPath, { yes: true });
+
+    const written = parse(await readFile(configPath, "utf8")) as {
+      projects: Record<string, unknown>[];
+    };
     expect(written.projects[0]).not.toHaveProperty("fastlane_dir");
+    expect(written.projects[0]).not.toHaveProperty("runtime");
   });
 
   it("leaves an existing laneyard.yml alone", async () => {

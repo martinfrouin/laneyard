@@ -3,7 +3,7 @@ import { access, realpath } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import { glob } from "tinyglobby";
-import { detectPlatforms } from "../heuristics/platforms.js";
+import { detectPlatforms, searchDir } from "../heuristics/platforms.js";
 import type { FindPaths, Platform } from "../heuristics/platforms.js";
 
 const exec = promisify(execFile);
@@ -89,7 +89,7 @@ const toRepoPath = (root: string, absolute: string): string =>
  * sees and can correct before it's written.
  */
 export async function detectProject(dir: string): Promise<Detection> {
-  // Without a repository there is nothing to clone; `runAddCommand` refuses
+  // Without a repository there is nothing to clone; `runSetupCommand` refuses
   // shortly after, so falling back to `dir` here only keeps this function total.
   // Both sides are resolved before being compared: on macOS the temporary
   // directory is a symlink, and git always answers with the real path — so a
@@ -112,7 +112,16 @@ export async function detectProject(dir: string): Promise<Detection> {
     ? toRepoPath(root, await realpath(join(fastfile, "..")).catch(() => join(fastfile, "..")))
     : null;
 
-  const platforms = await detectPlatforms(findIn(dir));
+  // From beside the Fastfile rather than from where the user is standing: the
+  // markers are the app's siblings, and `*/*/fastlane/Fastfile` above already
+  // allows the app to be two directories down, out of reach of the two-level
+  // marker globs from here.
+  // `fastlaneDir` is relative to the repository root, while the listing happens
+  // where the user is standing — the same directory only when they are at the
+  // root. The absolute Fastfile path needs no such reconciling, so the app root
+  // is taken from it: the Fastfile's grandparent is the app.
+  const appRoot = fastfile ? toRepoPath(dir, join(fastfile, "..", "..")) : null;
+  const platforms = await detectPlatforms(findIn(searchDir(dir, appRoot)));
   const isIos = platforms.includes("ios");
   const isAndroid = platforms.includes("android");
 

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { bold, dim, field, heading } from "./cli/style.js";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
+import { PromptAborted } from "./cli/prompt.js";
 import { runSetupCommand } from "./cli/setup.js";
 import { runSecretCommand } from "./cli/secret.js";
 import { runUserCommand } from "./cli/user.js";
@@ -180,6 +181,13 @@ if (invokedDirectly()) {
     try {
       process.exit(await runSetupCommand(process.cwd(), join(home, "config.yml"), { slug, yes }));
     } catch (cause) {
+      // Ctrl-C in the middle of the questions. Nothing is written before the
+      // last confirmation, so the only thing worth saying is that it is safe to
+      // start over. 130 is what a shell expects from a command killed by SIGINT.
+      if (cause instanceof PromptAborted) {
+        process.stdout.write(`\n${dim("Setup interrupted — nothing was written. Run `laneyard setup` again.")}\n`);
+        process.exit(130);
+      }
       // A taken slug or an unreadable file are ordinary situations. A stack
       // trace is not an error message; it just suggests the tool is broken.
       process.stderr.write(`${(cause as Error).message}\n`);

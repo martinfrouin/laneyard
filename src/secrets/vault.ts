@@ -76,6 +76,37 @@ export class Vault {
   }
 
   /**
+   * One value, in the clear — and only when it was never declared secret.
+   *
+   * The refusal is the point. This vault has been write-only since it was
+   * written: the server never sent a value back, so the interface had nothing to
+   * uncover and no browser ever held one. That is worth keeping for anything
+   * anyone called a secret.
+   *
+   * But not everything stored here is one. `APP_VERSION`, `SENTRY_ORG`, an
+   * issuer id — those are identifiers, and being unable to check what was stored
+   * makes an import something you have to take on faith. The line between the
+   * two already existed and is the user's own: `masked` is "keep this out of the
+   * logs". A value that carries it is never returned, whoever asks.
+   *
+   * Returns null for an unknown key, and throws for a masked one — a caller
+   * that forgot to check must fail loudly rather than leak.
+   */
+  reveal(projectSlug: string, key: string): string | null {
+    const row = this.store.find(projectSlug, key);
+    if (!row) return null;
+    if (row.masked) {
+      throw new Error(`${key} is kept out of the logs, so its value is never sent back.`);
+    }
+    return decrypt(row.valueEnc, this.key);
+  }
+
+  /** Flips whether a value is kept out of the logs, leaving the value alone. */
+  setMasked(projectSlug: string | null, key: string, masked: boolean): boolean {
+    return this.store.setMasked(projectSlug, key, masked);
+  }
+
+  /**
    * Stores a signing block: the file, and the fields that make it usable.
    *
    * `cipher.ts` speaks strings and a `.jks` is bytes, so the file makes the trip

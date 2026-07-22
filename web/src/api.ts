@@ -142,6 +142,52 @@ export const api = {
   // signed in there. Only removing the account ends every session it has.
   logout: () => fetch("/api/logout", { method: "POST" }).then(empty),
 
+  /**
+   * Changes your own password — not `/api/users`, which is the admin list.
+   *
+   * The current one is sent along even though the cookie already proves who
+   * this is: the server asks for it, and the reason is the browser left open on
+   * a desk. The reply carries a fresh session cookie, so this page stays signed
+   * in while every other session this account had is dropped.
+   */
+  changeOwnPassword: (current: string, next: string) =>
+    fetch("/api/account/password", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ current, next }),
+    }).then(empty),
+
+  /**
+   * The names this project needs, and which are still missing.
+   *
+   * Names only. The file that holds the real values is the one that never
+   * reaches a clone — that is the problem this reports, not a source to read.
+   */
+  requiredSecrets: (slug: string) =>
+    fetch(`/api/projects/${slug}/required-secrets`).then(
+      json<{ required: string[]; missing: string[] }>,
+    ),
+
+  /**
+   * One secret's value, and only one that was never declared secret.
+   *
+   * A separate call rather than a field on the listing: a listing that carried
+   * values would put every one of them in the browser at once, for a page most
+   * people open to check a name. The server refuses a masked value whoever asks.
+   */
+  revealSecret: (slug: string, key: string) =>
+    fetch(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}/value`).then(
+      json<{ key: string; value: string }>,
+    ),
+
+  /** Turns redaction on or off without touching the value. */
+  setSecretMasked: (slug: string, key: string, masked: boolean) =>
+    fetch(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ masked }),
+    }).then(empty),
+
   users: () => fetch("/api/users").then(json<Identity[]>),
 
   // The refusals are sentences — the last admin, a password too short — and

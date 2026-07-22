@@ -78,7 +78,7 @@ projects:
     root,
     lanes: (slug, workspacePath, fastlaneDir) =>
       new LaneReader(cache, fakeInvoke).read(slug, workspacePath, fastlaneDir),
-    uses: async () => [],
+    uses: async () => ({ lanes: [], imports: false }),
     vault: await Vault.open(root, new SecretStore(db), new CredentialStore(db)),
   });
 

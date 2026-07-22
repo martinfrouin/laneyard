@@ -66,7 +66,23 @@ export const BLOCKING_RULES: BlockingRule[] = [
 export interface UsedAction {
   name: string;
   args: Record<string, unknown>;
+  /**
+   * Every keyword the call was given, whether or not its value could be read.
+   *
+   * `args` answers "what is this set to"; this answers "was it set at all".
+   * They are different questions, and a check that needs the second must not be
+   * made to ask the first: `json_key: ENV.fetch("…")` is a credential named in
+   * the call, and it leaves `args` untouched.
+   *
+   * Optional for the sake of a payload cached by an older sidecar; read it
+   * through `argsGiven` below rather than directly.
+   */
+  given?: string[];
 }
+
+/** `given`, with the fallback that keeps an older cached payload readable. */
+export const argsGiven = (action: UsedAction): string[] =>
+  action.given ?? Object.keys(action.args);
 
 export interface BlockingFinding {
   action: string;
