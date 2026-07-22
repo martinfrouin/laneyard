@@ -458,8 +458,9 @@ Read this before putting Laneyard on a network.
   it from your laptop, behind a password. Do not expose it publicly. If you need remote access,
   put it behind a VPN or an SSH tunnel.
 - **Passwords** are stored as scrypt hashes and repeated failures are throttled, per account, so
-  hammering one name cannot lock out the others. Sessions live in memory and do not survive a
-  restart.
+  hammering one name cannot lock out the others. Sessions survive a restart, and what is stored is
+  a SHA-256 of the token rather than the token: a stolen `laneyard.db` is a list of digests, not a
+  ring of working keys.
 - **A role is enforced by the server, not by the interface.** One table names the routes that
   require an admin, and one hook is the only thing that reads it — there is no permission check
   hidden inside a handler. What a builder is not shown is also what a builder is refused.
