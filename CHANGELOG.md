@@ -1,9 +1,8 @@
 # Changelog
 
-## 0.3.0 — unreleased
+## 0.4.0 — unreleased
 
-0.2.0 was published with a broken sidecar path: listing a project's lanes failed on any installed
-copy. If you have it, upgrade. Everything below is the difference from 0.1.0.
+Signing credentials stop being strings. Everything below is the difference from 0.3.0.
 
 ### A signing credential is a file and the fields that go with it
 
@@ -298,6 +297,11 @@ because a path in an Appfile says a credential was arranged, not that the file i
 
 It printed node's own "Detected unsettled top-level await" complaint and a stack trace at someone
 who had just pressed Ctrl-C. It now prints one sentence, writes nothing, and exits 130.
+
+## 0.3.0
+
+0.2.0 was published with a broken sidecar path: listing a project's lanes failed on any
+installed copy. If you have it, upgrade.
 
 ## 0.2.0
 
