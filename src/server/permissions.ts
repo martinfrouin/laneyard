@@ -27,6 +27,8 @@ export interface RoutePattern {
 export const REQUIRES_ADMIN: RoutePattern[] = [
   { method: "*", path: "/api/secrets" },
   { method: "*", path: "/api/projects/:slug/secrets" },
+  { method: "*", path: "/api/credentials" },
+  { method: "*", path: "/api/projects/:slug/credentials" },
   { method: "PUT", path: "/api/projects/:slug/fastfile" },
   { method: "POST", path: "/api/projects/:slug/commit" },
   { method: "POST", path: "/api/projects/:slug/push" },

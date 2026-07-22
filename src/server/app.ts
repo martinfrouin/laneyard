@@ -20,6 +20,7 @@ import type { Vault } from "../secrets/vault.js";
 import { authenticate, LoginThrottle, COOKIE_OPTIONS, SESSION_COOKIE, SessionStore } from "./auth.js";
 import type { Identity } from "./auth.js";
 import { requiresAdmin } from "./permissions.js";
+import { registerCredentialRoutes } from "./routes/credentials.js";
 import { registerFastfileRoutes } from "./routes/fastfile.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerAccountRoutes } from "./routes/account.js";
@@ -258,6 +259,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerProjectRoutes(app, ctx);
   await registerRunRoutes(app, ctx);
   await registerSecretRoutes(app, ctx);
+  await registerCredentialRoutes(app, ctx);
   await registerReadinessRoutes(app, ctx);
   await registerFastfileRoutes(app, ctx);
   await registerUserRoutes(app, ctx);

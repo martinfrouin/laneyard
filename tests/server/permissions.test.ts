@@ -66,6 +66,11 @@ describe("requiresAdmin", () => {
     expect(requiresAdmin("DELETE", "/api/projects/sample/secrets/APP_STORE_KEY")).toBe(true);
   });
 
+  it("keeps a builder out of the credential blocks", () => {
+    expect(requiresAdmin("POST", "/api/projects/popotheque/credentials")).toBe(true);
+    expect(requiresAdmin("DELETE", "/api/credentials/apple_asc")).toBe(true);
+  });
+
   it("matches a path parameter against any single segment", () => {
     expect(requiresAdmin("PUT", "/api/projects/anything-at-all/fastfile")).toBe(true);
   });
@@ -136,6 +141,12 @@ const ADMIN_ONLY_REQUESTS: { method: "GET" | "PUT" | "POST" | "DELETE"; url: str
   { method: "GET", url: "/api/projects/sample/secrets" },
   { method: "PUT", url: "/api/projects/sample/secrets/APP_KEY" },
   { method: "DELETE", url: "/api/projects/sample/secrets/APP_KEY" },
+  { method: "GET", url: "/api/credentials" },
+  { method: "PUT", url: "/api/credentials/apple_asc" },
+  { method: "DELETE", url: "/api/credentials/apple_asc" },
+  { method: "GET", url: "/api/projects/sample/credentials" },
+  { method: "PUT", url: "/api/projects/sample/credentials/apple_asc" },
+  { method: "DELETE", url: "/api/projects/sample/credentials/apple_asc" },
   { method: "PUT", url: "/api/projects/sample/fastfile" },
   { method: "POST", url: "/api/projects/sample/commit" },
   { method: "POST", url: "/api/projects/sample/push" },
