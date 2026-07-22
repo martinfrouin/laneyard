@@ -480,4 +480,84 @@ describe("GET /api/projects/:slug/required-secrets", () => {
     });
     expect(res.statusCode).toBe(404);
   });
+
+  it("does not ask for a name a signing block already supplies", async () => {
+    const { app } = await harness({
+      uses: async () => ({
+        lanes: [{ lane: "beta", actions: [], env: ["SUPPLY_JSON_KEY"] }],
+        imports: false,
+      }),
+    });
+    const cookies = { laneyard_session: await login(app) };
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/projects/sample/credentials/play_service_account",
+      cookies,
+      payload: {
+        fileName: "play.json",
+        fileBase64: Buffer.from('{"type":"service_account"}').toString("base64"),
+        fields: {},
+        varNames: { path: "SUPPLY_JSON_KEY" },
+      },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/projects/sample/required-secrets",
+      cookies,
+    });
+    expect(res.json().required).toEqual(["SUPPLY_JSON_KEY"]);
+    expect(res.json().missing).toEqual([]);
+  });
+
+  /**
+   * The two consumers of one computation, asked the same question.
+   *
+   * They are the screen and the sentence about the screen: a checklist telling
+   * someone to store `SUPPLY_JSON_KEY` while the form beside it has stopped
+   * offering the box is worse than either answer alone, because it is the one
+   * situation where no reading of the interface is right.
+   */
+  it("agrees with the readiness checklist about what is supplied", async () => {
+    const { app } = await harness({
+      uses: async () => ({
+        lanes: [{ lane: "beta", actions: [], env: ["SUPPLY_JSON_KEY", "SENTRY_AUTH_TOKEN"] }],
+        imports: false,
+      }),
+    });
+    const cookies = { laneyard_session: await login(app) };
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/projects/sample/credentials/play_service_account",
+      cookies,
+      payload: {
+        fileName: "play.json",
+        fileBase64: Buffer.from('{"type":"service_account"}').toString("base64"),
+        fields: {},
+        varNames: { path: "SUPPLY_JSON_KEY" },
+      },
+    });
+
+    const form = await app.inject({
+      method: "GET",
+      url: "/api/projects/sample/required-secrets",
+      cookies,
+    });
+    const checklist = await app.inject({
+      method: "GET",
+      url: "/api/projects/sample/readiness",
+      cookies,
+    });
+
+    const environment = (checklist.json().sections as { checks: { id: string; detail: string }[] }[])
+      .flatMap((s) => s.checks)
+      .find((c) => c.id === "environment")!;
+
+    // One name is missing and one is not, and both say so of the same one.
+    expect(form.json().missing).toEqual(["SENTRY_AUTH_TOKEN"]);
+    expect(environment.detail).toMatch(/SENTRY_AUTH_TOKEN/);
+    expect(environment.detail).not.toMatch(/SUPPLY_JSON_KEY/);
+  }, 60_000);
 });

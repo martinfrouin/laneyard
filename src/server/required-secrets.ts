@@ -28,7 +28,7 @@ import type { LaneUses } from "../heuristics/readiness.js";
 export interface RequiredSecrets {
   /** Everything the lanes need, sorted. */
   required: string[];
-  /** Those neither in the vault nor in the server's own environment. */
+  /** Those nothing supplies: not the vault, not a block, not the server. */
   missing: string[];
 }
 
@@ -38,6 +38,13 @@ export async function requiredSecrets(input: {
   workspacePath: string;
   fastlaneDir: string;
   vaultKeys: string[];
+  /**
+   * The names the applicable signing blocks export — `credentials/kinds.ts`
+   * reads them off the blocks, and the caller resolves those the way a run does.
+   * A name a block supplies counts exactly as a vault key does: the run gets it,
+   * so nobody is asked to type it. Names, like everything else here.
+   */
+  blockNames: string[];
   serverEnv: string[];
 }): Promise<RequiredSecrets> {
   const fromExample = await envExampleNames(input.workspacePath, input.fastlaneDir);
@@ -45,12 +52,11 @@ export async function requiredSecrets(input: {
     ...new Set([...input.lanes.flatMap((l) => l.env ?? []), ...input.declared, ...fromExample]),
   ].sort();
 
-  const inVault = new Set(input.vaultKeys);
-  const inServer = new Set(input.serverEnv);
+  const supplied = new Set([...input.vaultKeys, ...input.blockNames, ...input.serverEnv]);
 
   return {
     required,
-    missing: required.filter((name) => !inVault.has(name) && !inServer.has(name)),
+    missing: required.filter((name) => !supplied.has(name)),
   };
 }
 

@@ -9,6 +9,7 @@ import { NO_APPFILE, parseAppfile } from "../../heuristics/appfile.js";
 import { findAndroidBuild } from "../../heuristics/android-root.js";
 import type { AndroidBuild } from "../../heuristics/android-root.js";
 import type { PropertiesFile, SigningFacts } from "../../heuristics/android-signing.js";
+import { exportedVarNames } from "../../credentials/kinds.js";
 import { envExampleNames } from "../required-secrets.js";
 import type { AppfileFacts } from "../../heuristics/appfile.js";
 import { appRootOf, resolvePlatforms, searchDir } from "../../heuristics/platforms.js";
@@ -282,6 +283,11 @@ export async function registerReadinessRoutes(app: FastifyInstance, ctx: AppCont
       // own shadowing a global one — so the checklist and the run cannot
       // disagree about whether a credential exists.
       blocks: ctx.vault.listCredentials(slug).map((c) => c.kind),
+      // And the names those blocks will export, which the environment check
+      // counts as supplied — Laneyard writes the file and sets the variable
+      // itself, so a lane reading it is not a lane short of anything. The same
+      // list the secrets screen is given, from the same call.
+      blockNames: exportedVarNames(ctx.vault.listCredentials(slug)),
       keystore: keystoreSetting(ctx.vault, slug),
       uses,
       platforms,

@@ -348,6 +348,10 @@ Always:
   the server's own environment is reported rather than ticked over: it works, but it works because
   of how this server was started.
 
+  A name a signing block exports counts as being in the vault, since that is where the block is:
+  a lane reading `SUPPLY_JSON_KEY` with a Play block stored is not asked for it again, on this
+  checklist or on the Secrets tab. The two read the same answer.
+
 On iOS:
 
 - **App Store Connect** has an API key. The vault is checked first and is the only thing that

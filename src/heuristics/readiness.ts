@@ -1063,6 +1063,13 @@ export interface EnvironmentInput {
   secretKeys: string[];
   /** Names in the server's own environment, which a run inherits. */
   serverEnv: string[];
+  /**
+   * The names the applicable signing blocks export into a run — the path of the
+   * file Laneyard writes, and the fields stored beside it. Supplied, therefore
+   * not missing: a project whose Fastfile reads `SUPPLY_JSON_KEY` and which has
+   * uploaded a Play block is not short of anything.
+   */
+  blockNames?: string[];
   /** `required_secrets` from laneyard.yml: what the Fastfile cannot say for itself. */
   declared: string[];
   unread: Known<Unread>;
@@ -1088,12 +1095,17 @@ export interface EnvironmentInput {
  * fastlane reads for itself. `required_secrets` in laneyard.yml is where those
  * are declared, and they are treated exactly like the ones that were found.
  *
+ * A name a signing block exports counts as supplied. Laneyard writes that file
+ * and sets that variable itself for the length of a run, so asking someone to
+ * store it by hand would be asking them for the thing just uploaded.
+ *
  * A variable present only in the server's own environment is reported rather
  * than quietly ticked: it works, but it works because of how this particular
  * server happened to be started, which is not something the project carries.
  */
 export function checkEnvironment(input: EnvironmentInput): Check {
   const { uses, secretKeys, serverEnv, declared, unread } = input;
+  const blockNames = input.blockNames ?? [];
   if (!uses.ok) {
     return { ...META.environment, ...undetermined(`could not read the lanes: ${uses.reason}`) };
   }
@@ -1115,7 +1127,10 @@ export function checkEnvironment(input: EnvironmentInput): Check {
     return { ...META.environment, ...ok("no lane reads an environment variable.") };
   }
 
-  const inVault = new Set(secretKeys);
+  // A block's exported names sit with the vault keys rather than beside them: a
+  // signing block *is* in the vault, and a name it exports reaches the run from
+  // the same place, so nothing below has to distinguish the two.
+  const inVault = new Set([...secretKeys, ...blockNames]);
   const inServer = new Set(serverEnv);
   const missing = required.filter((name) => !inVault.has(name) && !inServer.has(name));
 
@@ -1187,6 +1202,11 @@ export interface ReadinessInput {
    * nothing else: no file, no field, no variable name.
    */
   blocks?: CredentialKind[];
+  /**
+   * The variable names those blocks export — read off the stored names by
+   * `credentials/kinds.ts`, never decrypted. Names, like `secretKeys`.
+   */
+  blockNames?: string[];
   /** What the keystore block says about the properties file. See `KeystoreSetting`. */
   keystore?: KeystoreSetting | null;
 }
@@ -1225,6 +1245,7 @@ export const SECTIONS: { platform: SectionPlatform; checks: CheckRow[] }[] = [
             uses: i.uses,
             secretKeys: i.secretKeys,
             serverEnv: i.serverEnv,
+            blockNames: i.blockNames ?? [],
             declared: i.declaredSecrets,
             unread: i.unread,
           }),

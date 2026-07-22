@@ -900,6 +900,31 @@ describe("checkEnvironment", () => {
     expect(check.detail).toMatch(/this server's own environment/);
   });
 
+  /**
+   * A block writes the file and exports the name itself, for the length of the
+   * run. Asking for it would be asking for what was just uploaded.
+   */
+  it("counts a name a signing block exports", () => {
+    const check = env({
+      uses: reading("SUPPLY_JSON_KEY"),
+      blockNames: ["SUPPLY_JSON_KEY"],
+    });
+    expect(check.state).toBe("ok");
+    // Not "borrowed from this server's environment": it comes from the vault,
+    // which is where the block is.
+    expect(check.detail).not.toMatch(/this server's own environment/);
+  });
+
+  it("still warns about the names no block supplies", () => {
+    const check = env({
+      uses: reading("SUPPLY_JSON_KEY", "SENTRY_AUTH_TOKEN"),
+      blockNames: ["SUPPLY_JSON_KEY"],
+    });
+    expect(check.state).toBe("warn");
+    expect(check.detail).toMatch(/SENTRY_AUTH_TOKEN/);
+    expect(check.detail).not.toMatch(/SUPPLY_JSON_KEY/);
+  });
+
   it("only warns about the ones actually missing", () => {
     const check = env({
       uses: reading("A", "B", "C"),

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../app.js";
 import { MIN_LENGTH as MIN_REDACTABLE } from "../../logs/redact.js";
+import { exportedVarNames } from "../../credentials/kinds.js";
 import { requiredSecrets } from "../required-secrets.js";
 
 /** POSIX environment variable names. Anything else would never reach fastlane. */
@@ -148,6 +149,10 @@ export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext
       workspacePath,
       fastlaneDir,
       vaultKeys: ctx.vault.list(slug).map((s) => s.key),
+      // Resolved the way a run resolves them, a project's own block shadowing a
+      // global one, so the form and the checklist cannot disagree about what is
+      // already supplied.
+      blockNames: exportedVarNames(ctx.vault.listCredentials(slug)),
       serverEnv: Object.keys(process.env),
     });
   });

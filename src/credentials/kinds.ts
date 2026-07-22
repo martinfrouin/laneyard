@@ -120,3 +120,33 @@ export function defaultVarNames(kind: CredentialKind): Record<string, string> {
 export function fieldsOf(kind: CredentialKind): FieldSpec[] {
   return specOf(kind).fields;
 }
+
+/**
+ * The variable names a set of stored blocks will export into a run.
+ *
+ * Read off the summaries — the kind and the names stored beside it — so nothing
+ * here decrypts anything. That is what lets the readiness check and the secrets
+ * screen both ask the question: a name a block supplies is a name the project
+ * already has, and asking someone to type it by hand is asking them for what
+ * Laneyard is about to hand the run itself.
+ *
+ * Every name in the block is counted, and no value is looked at. `path` is
+ * always exported, and every other slot belongs to a field the block could not
+ * be stored without — `credentials.ts` refuses a block with a required field
+ * empty, and the optional two have no slot at all. So a name here is a name
+ * `runner/materialise.ts` will set.
+ *
+ * The blocks passed in are the ones that apply, project shadowing global, which
+ * is `Vault.listCredentials` and the precedence a run uses.
+ */
+export function exportedVarNames(
+  blocks: { kind: CredentialKind; varNames: Record<string, string> }[],
+): string[] {
+  const names = new Set<string>();
+  for (const block of blocks) {
+    for (const name of Object.values({ ...defaultVarNames(block.kind), ...block.varNames })) {
+      if (name) names.add(name);
+    }
+  }
+  return [...names].sort();
+}
