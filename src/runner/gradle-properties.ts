@@ -116,8 +116,14 @@ function escapeValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/\r/g, "\\r").replace(/\n/g, "\\n");
 }
 
-/** The names to write, positionally overridden by the block's setting. */
-function propertyNames(fields: Record<string, string>): string[] {
+/**
+ * The names to write, positionally overridden by the block's setting.
+ *
+ * Exported because the readiness check names them on screen: what Laneyard is
+ * going to write into someone's build is not something to leave implicit, and
+ * the check must read the same list the writer does rather than a copy of it.
+ */
+export function propertyNames(fields: Record<string, string>): string[] {
   const configured = (fields["property_names"] ?? "").split(",").map((n) => n.trim());
   return DEFAULT_PROPERTY_NAMES.map((fallback, i) => configured[i] || fallback);
 }

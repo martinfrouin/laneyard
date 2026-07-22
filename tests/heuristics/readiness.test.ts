@@ -132,11 +132,17 @@ describe("checkDependencies", () => {
 });
 
 describe("checkAppStoreConnect", () => {
-  /** Only the vault differs in most of these; the other three places say nothing. */
+  /**
+   * Only the vault differs in most of these; the other three places say nothing.
+   *
+   * The default lane uploads, because a key is wanted by a lane and not by a
+   * platform: without something that signs in to Apple, every case below would
+   * be answered "nothing here needs a key" before it got as far as the vault.
+   */
   const asc = (secretKeys: string[], over: Partial<AppStoreConnectInput> = {}) =>
     checkAppStoreConnect({
       secretKeys,
-      uses: lanes(),
+      uses: lanes({ lane: "beta", actions: [{ name: "upload_to_testflight", args: {} }] }),
       keyFilesInRepo: known<string[]>([]),
       appfile: known(NO_APPFILE),
       ...over,
@@ -210,6 +216,77 @@ describe("checkAppStoreConnect", () => {
     });
     expect(check.state).toBe("warn");
     expect(check.detail).toMatch(/two-factor/);
+  });
+
+  it("takes a block as an answer, and says what a run does with it", () => {
+    const check = asc([], { blocks: ["apple_asc"] });
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/block/);
+    // What Laneyard does, not what the user must do next.
+    expect(check.detail).toMatch(/written for the length of a run/);
+    expect(check.fix).toBeUndefined();
+  });
+
+  it("stops greening a name no lane can see", () => {
+    // `API_KEY` prefix-matched `APP_STORE_CONNECT_API_KEY_P8`, a name that
+    // appears nowhere in fastlane: Laneyard's own screen invented it. The value
+    // is in the vault, it reaches nothing, and the tick said otherwise.
+    const check = asc(["APP_STORE_CONNECT_API_KEY_P8"]);
+    expect(check.state).toBe("warn");
+    expect(check.detail).toMatch(/no lane can see it/);
+    expect(check.fix).toMatch(/block/);
+    expect(check.fixIn).toBe("secrets");
+  });
+
+  it("still greens the names fastlane really does read", () => {
+    // The narrowing must not take the working names with it.
+    for (const name of [
+      "APP_STORE_CONNECT_API_KEY_ID",
+      "APP_STORE_CONNECT_API_KEY_KEY_ID",
+      "APP_STORE_CONNECT_API_KEY_ISSUER_ID",
+      "APP_STORE_CONNECT_API_KEY_KEY_FILEPATH",
+    ]) {
+      expect(asc([name]).state).toBe("ok");
+    }
+  });
+
+  it("asks nothing of a project whose lanes never sign in to Apple", () => {
+    // A lane that builds an artifact and stops. Nothing is uploaded, no
+    // certificate is fetched, and a key would sit there unread.
+    const check = asc([], {
+      uses: lanes({ lane: "build", actions: [{ name: "build_app", args: {} }] }),
+    });
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/nothing here needs a key/);
+    expect(check.fix).toBeUndefined();
+  });
+
+  it("counts match among the lanes that sign in, because it does", () => {
+    const check = asc([], {
+      uses: lanes({ lane: "certs", actions: [{ name: "match", args: { readonly: true } }] }),
+    });
+    expect(check.state).toBe("warn");
+  });
+
+  it("does not call a build-only project settled when the reading was partial", () => {
+    const check = asc([], {
+      uses: lanes({ lane: "build", actions: [{ name: "build_app", args: {} }] }),
+      unread: known({ imports: true, customActions: false }),
+    });
+    expect(check.state).toBe("unknown");
+    expect(check.detail).toMatch(/imports lanes from elsewhere/);
+  });
+
+  it("says it could not tell when the lanes were unreadable and the vault is empty", () => {
+    const check = asc([], { uses: unknown("no Ruby on this machine") });
+    expect(check.state).toBe("unknown");
+    expect(check.detail).toMatch(/no Ruby/);
+  });
+
+  it("answers from the vault even when the lanes could not be read", () => {
+    // The vault's answer owes nothing to the Fastfile.
+    expect(asc(["APP_STORE_CONNECT_API_KEY_ID"], { uses: unknown("no Ruby") }).state).toBe("ok");
+    expect(asc([], { uses: unknown("no Ruby"), blocks: ["apple_asc"] }).state).toBe("ok");
   });
 });
 
@@ -400,6 +477,54 @@ describe("checkAndroidKeystore", () => {
     expect(check.state).toBe("unknown");
     expect(check.detail).toMatch(/unparseable/);
   });
+
+  it("stops asking for a password the user already gave", () => {
+    // A block carries the keystore and both passphrases. Telling that user to
+    // store `ANDROID_KEYSTORE_PASSWORD` as well would be asking them to enter
+    // the same secret twice, in two places, and keep them in step.
+    const check = checkAndroidKeystore(
+      lanes({ lane: "beta", actions: [{ name: "gradle", args: { storeFile: "k.jks" } }] }),
+      [],
+      known(READ_EVERYTHING),
+      ["android_keystore"],
+    );
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/block/);
+  });
+
+  it("answers from the block even when no gradle call was seen", () => {
+    // The flutter case: gradle runs, but nothing in the Fastfile says so. The
+    // question is whether anything stops to ask for a passphrase, and a block
+    // means nothing can.
+    const check = checkAndroidKeystore(
+      lanes({ lane: "beta", actions: [{ name: "sh", args: {} }] }),
+      [],
+      known(READ_EVERYTHING),
+      ["android_keystore"],
+    );
+    expect(check.state).toBe("ok");
+  });
+
+  it("still accepts the old loose secret", () => {
+    const check = checkAndroidKeystore(
+      lanes({ lane: "beta", actions: [{ name: "gradle", args: { storeFile: "k.jks" } }] }),
+      ["ANDROID_KEYSTORE_PASSWORD"],
+      known(READ_EVERYTHING),
+      [],
+    );
+    expect(check.state).toBe("ok");
+  });
+
+  it("recommends the block rather than an edit to the lane", () => {
+    const check = checkAndroidKeystore(
+      lanes({ lane: "beta", actions: [{ name: "gradle", args: { storeFile: "k.jks" } }] }),
+      [],
+    );
+    expect(check.state).toBe("warn");
+    expect(check.fix).toMatch(/keystore block/);
+    expect(check.fix).not.toMatch(/ENV\[/);
+    expect(check.fix).not.toMatch(/storePassword:/);
+  });
 });
 
 describe("checkPlayStore", () => {
@@ -533,6 +658,54 @@ describe("checkPlayStore", () => {
       known({ ...NO_APPFILE, jsonKeyFile: { kind: "literal" as const, value: "play.json" } }),
     );
     expect(check.state).toBe("ok");
+  });
+
+  it("takes a block as an answer", () => {
+    const check = checkPlayStore(
+      lanes({ lane: "release", actions: [{ name: "supply", args: {} }] }),
+      [],
+      known(NO_APPFILE),
+      known(READ_EVERYTHING),
+      ["play_service_account"],
+    );
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/block/);
+  });
+
+  it("still accepts the old loose secrets", () => {
+    // `SUPPLY_JSON_KEY_DATA` is still a name supply reads, and an installation
+    // that stored one before blocks existed is not asked to move it.
+    const check = checkPlayStore(
+      lanes({ lane: "release", actions: [{ name: "supply", args: {} }] }),
+      ["SUPPLY_JSON_KEY_DATA"],
+      known(NO_APPFILE),
+      known(READ_EVERYTHING),
+      [],
+    );
+    expect(check.state).toBe("ok");
+  });
+
+  it("does not ask a build-only project for a service account", () => {
+    // Nothing is uploaded anywhere, so nothing needs uploading credentials.
+    const check = checkPlayStore(
+      lanes({ lane: "build", actions: [{ name: "gradle", args: { task: "bundle" } }] }),
+      [],
+      known(NO_APPFILE),
+      known(READ_EVERYTHING),
+      [],
+    );
+    expect(check.state).toBe("ok");
+    expect(check.fix).toBeUndefined();
+  });
+
+  it("recommends the block when neither route holds anything", () => {
+    const check = checkPlayStore(
+      lanes({ lane: "release", actions: [{ name: "supply", args: {} }] }),
+      [],
+      known(NO_APPFILE),
+    );
+    expect(check.state).toBe("warn");
+    expect(check.fix).toMatch(/service account block/);
   });
 });
 
@@ -834,6 +1007,235 @@ describe("checkReleaseSigning", () => {
     expect(check.state).toBe("unknown");
     expect(check.detail).toMatch(/no android build\.gradle/);
   });
+
+  it("asks for a block rather than for a rewritten build script", () => {
+    const check = checkReleaseSigning({
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "root" },
+      }),
+      conditionalFilePresent: false,
+    });
+    expect(check.state).toBe("warn");
+    expect(check.fix).toMatch(/keystore block/);
+    expect(check.fix).toMatch(/Nothing in the build script changes/);
+    // What it used to say: supply the keystore through the environment, and
+    // make a missing key an error — a `build.gradle.kts` edit, twice over.
+    expect(check.fix).not.toMatch(/through the environment/);
+    expect(check.fix).not.toMatch(/an error rather than a fallback/);
+  });
+
+  it("says what it will write, where, and under which names", () => {
+    const check = checkReleaseSigning({
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "root" },
+      }),
+      conditionalFilePresent: false,
+      keystore: {
+        propertyNames: ["storeFile", "storePassword", "keyPassword", "keyAlias"],
+        propertiesPath: null,
+      },
+    });
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/Laneyard writes key\.properties in the Gradle root directory/);
+    for (const key of ["storeFile", "storePassword", "keyPassword", "keyAlias"]) {
+      expect(check.detail).toContain(key);
+    }
+    // The assumption is stated rather than hidden: the names came from a
+    // convention, not from the build script.
+    expect(check.detail).toMatch(/rather than something the build script states/);
+  });
+
+  it("names the keys the block was given, not the ones it assumed", () => {
+    const check = checkReleaseSigning({
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "signing.properties", scope: "module" },
+      }),
+      conditionalFilePresent: false,
+      keystore: { propertyNames: ["store", "storePw", "keyPw", "alias"], propertiesPath: null },
+    });
+    expect(check.detail).toMatch(/store, storePw, keyPw and alias/);
+    expect(check.detail).not.toMatch(/storeFile/);
+  });
+
+  it("uses the path the block names when there is one", () => {
+    const check = checkReleaseSigning({
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "unknown" },
+      }),
+      conditionalFilePresent: false,
+      keystore: {
+        propertyNames: ["storeFile", "storePassword", "keyPassword", "keyAlias"],
+        propertiesPath: "android/key.properties",
+      },
+    });
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/android\/key\.properties/);
+  });
+
+  it("promises nothing when nobody can say which directory the file goes in", () => {
+    // The runner declines to write in that case — writing into the likelier of
+    // two directories would leave the build signing with the debug key beside a
+    // file that looked like the answer. A check that promised a file here would
+    // be reassuring and wrong.
+    const check = checkReleaseSigning({
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "unknown" },
+      }),
+      conditionalFilePresent: false,
+      keystore: {
+        propertyNames: ["storeFile", "storePassword", "keyPassword", "keyAlias"],
+        propertiesPath: null,
+      },
+    });
+    expect(check.state).toBe("unknown");
+    expect(check.detail).toMatch(/will not guess/);
+    expect(check.fix).toMatch(/properties file path on the keystore block/);
+    expect(check.fixIn).toBe("secrets");
+  });
+
+  it("leaves the project's own properties file alone, and says so", () => {
+    const check = checkReleaseSigning({
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "root" },
+      }),
+      conditionalFilePresent: true,
+      keystore: {
+        propertyNames: ["storeFile", "storePassword", "keyPassword", "keyAlias"],
+        propertiesPath: null,
+      },
+    });
+    expect(check.state).toBe("ok");
+    expect(check.detail).toMatch(/the project's own, which Laneyard leaves alone/);
+  });
+});
+
+/**
+ * The constraint the whole product rests on, asserted across the table rather
+ * than sentence by sentence: **Laneyard adapts to the project, and never the
+ * other way round.** A repository that builds today keeps building unedited.
+ *
+ * It is written as a sweep because it is the kind of rule that gets honoured
+ * once, in the change that introduced it, and lost quietly two features later —
+ * a sentence added to one branch of one check, which nobody reads again.
+ *
+ * The vocabulary below is what "edit your own project" sounded like in the
+ * three messages this replaced: reading a secret in the lane with `ENV[…]`,
+ * passing `storePassword:` to gradle, supplying the keystore through the
+ * environment, and making a missing key an error instead of a fallback. Any of
+ * them reappearing on a credential line is the regression.
+ */
+describe("never tells the user to edit their own project", () => {
+  const HOMEWORK = [
+    /ENV\[/,
+    /ENV\.fetch/,
+    /storePassword:/,
+    /through the environment/i,
+    /an error rather than a fallback/i,
+    /\b(edit|rewrite|change|adapt|modify)\b[^.]*\b(Fastfile|build\.gradle|build script|lane|lanes|project|repository)\b/i,
+    /\badd\b[^.]*\bto (your|the) (Fastfile|build\.gradle|build script|lane)\b/i,
+  ];
+
+  /** Every credential line, over every arrangement that produces one. */
+  const everyCredentialCheck = (): Check[] => {
+    const withKey = lanes({
+      lane: "release",
+      actions: [
+        { name: "upload_to_testflight", args: {} },
+        { name: "upload_to_play_store", args: {} },
+        { name: "gradle", args: { storeFile: "k.jks" } },
+      ],
+    });
+    const named = lanes({
+      lane: "release",
+      actions: [
+        { name: "app_store_connect_api_key", args: { key_filepath: "AuthKey.p8" } },
+        { name: "upload_to_play_store", args: { json_key: "play.json" } },
+      ],
+    });
+    const buildOnly = lanes({ lane: "build", actions: [{ name: "build_app", args: {} }] });
+    const blindly = known({ imports: true, customActions: true });
+    const appfiles = [
+      known(NO_APPFILE),
+      known({ ...NO_APPFILE, appleId: { kind: "literal" as const, value: "me@x.com" } }),
+      known({ ...NO_APPFILE, jsonKeyFile: { kind: "literal" as const, value: "play.json" } }),
+    ];
+
+    const checks: Check[] = [];
+    for (const uses of [withKey, named, buildOnly, unknown<LaneUses[]>("no Ruby")]) {
+      for (const unread of [known(READ_EVERYTHING), blindly]) {
+        for (const secretKeys of [[], ["FASTLANE_SESSION"], ["APP_STORE_CONNECT_API_KEY_P8"]]) {
+          for (const appfile of appfiles) {
+            checks.push(
+              checkAppStoreConnect({
+                secretKeys,
+                uses,
+                keyFilesInRepo: known<string[]>(["AuthKey.p8"]),
+                appfile,
+                unread,
+                blocks: [],
+              }),
+              checkAndroidKeystore(uses, secretKeys, unread, []),
+              checkPlayStore(uses, secretKeys, appfile, unread, []),
+            );
+          }
+        }
+      }
+    }
+
+    for (const scope of ["root", "module", "unknown"] as const) {
+      for (const conditionalFilePresent of [true, false]) {
+        for (const keystore of [
+          null,
+          { propertyNames: ["storeFile", "storePassword", "keyPassword", "keyAlias"], propertiesPath: null },
+        ]) {
+          checks.push(
+            checkReleaseSigning({
+              gradle: known({
+                releaseCanUseDebugKey: true,
+                conditionalOn: { name: "key.properties", scope },
+              }),
+              conditionalFilePresent,
+              keystore,
+            }),
+          );
+        }
+      }
+    }
+    return checks;
+  };
+
+  it("recommends a block, never a commit", () => {
+    const checks = everyCredentialCheck();
+    // A sweep that swept nothing would pass in silence.
+    expect(checks.length).toBeGreaterThan(50);
+    expect(checks.filter((c) => c.fix !== undefined).length).toBeGreaterThan(10);
+
+    for (const check of checks) {
+      for (const pattern of HOMEWORK) {
+        expect(`${check.id}: ${check.fix ?? ""}`).not.toMatch(pattern);
+        expect(`${check.id}: ${check.detail}`).not.toMatch(pattern);
+      }
+    }
+  });
+
+  it("catches the phrasing that was there before, so the sweep is known to work", () => {
+    // The three messages this replaced, verbatim. If none of them trips the
+    // patterns above, the test above proves nothing.
+    const gone = [
+      'Store the keystore passphrase as `ANDROID_KEYSTORE_PASSWORD` from the secrets tab, and read it in the lane with `storePassword: ENV["ANDROID_KEYSTORE_PASSWORD"]`.',
+      "key.properties is gitignored, so it never reaches a clone. Supply the keystore through the environment instead, and make a release build without one an error rather than a fallback.",
+      "Add `app_store_connect_api_key` to your Fastfile.",
+    ];
+    for (const sentence of gone) {
+      expect(HOMEWORK.some((pattern) => pattern.test(sentence))).toBe(true);
+    }
+  });
 });
 
 describe("runChecklist", () => {
@@ -929,6 +1331,48 @@ describe("runChecklist", () => {
   it("does not throw when nothing sensible was passed for the platforms", async () => {
     const sections = await runChecklist(input({ platforms: null as unknown as Known<Platform[]> }));
     expect(sections.map((s) => s.platform)).toEqual(["all"]);
+  });
+
+  it("hands the blocks to every check that has a use for them", async () => {
+    // The wiring, asserted at the table rather than check by check: a block
+    // stored once must answer on all three lines it applies to.
+    const sections = await runChecklist(
+      input({
+        platforms: known<Platform[]>(["ios", "android"]),
+        secretKeys: [],
+        uses: lanes({
+          lane: "release",
+          actions: [
+            { name: "upload_to_testflight", args: {} },
+            { name: "upload_to_play_store", args: {} },
+            { name: "gradle", args: { storeFile: "k.jks" } },
+          ],
+        }),
+        blocks: ["apple_asc", "android_keystore", "play_service_account"],
+      }),
+    );
+    const checks = sections.flatMap((s) => s.checks);
+    for (const id of ["app-store-connect", "android-keystore", "play-store"]) {
+      expect(checks.find((c) => c.id === id)!.state).toBe("ok");
+    }
+  });
+
+  it("shows a project that ships nowhere a screen with nothing to do", async () => {
+    // A lane that builds and stops, on both platforms, with an empty vault.
+    // Not one line asks for a credential, because not one line needs one.
+    const sections = await runChecklist(
+      input({
+        platforms: known<Platform[]>(["ios", "android"]),
+        secretKeys: [],
+        uses: lanes({ lane: "build", actions: [{ name: "build_app", args: {} }] }),
+        blocks: [],
+      }),
+    );
+    const credentials = sections
+      .flatMap((s) => s.checks)
+      .filter((c) => ["app-store-connect", "play-store"].includes(c.id));
+    expect(credentials).toHaveLength(2);
+    expect(credentials.every((c) => c.state === "ok")).toBe(true);
   });
 
   it("gives every check a title", async () => {

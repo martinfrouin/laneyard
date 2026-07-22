@@ -14,8 +14,9 @@ import type { AppfileFacts } from "../../heuristics/appfile.js";
 import { appRootOf, resolvePlatforms, searchDir } from "../../heuristics/platforms.js";
 import type { FindPaths, Platform } from "../../heuristics/platforms.js";
 import { runChecklist } from "../../heuristics/readiness.js";
-import type { Known, LaneUses, Unread } from "../../heuristics/readiness.js";
-import { LANEYARD_MARKER } from "../../runner/gradle-properties.js";
+import type { KeystoreSetting, Known, LaneUses, Unread } from "../../heuristics/readiness.js";
+import { LANEYARD_MARKER, propertyNames } from "../../runner/gradle-properties.js";
+import type { Vault } from "../../secrets/vault.js";
 import type { AppContext } from "../app.js";
 
 const exec = promisify(execFile);
@@ -140,6 +141,28 @@ async function androidSigning(
   return { androidSigning: { ok: true, value: build.facts }, signingFilePresent: present };
 }
 
+/**
+ * What the keystore block says about the properties file, and nothing else.
+ *
+ * The block has to be decrypted to be asked — `property_names` and
+ * `properties_path` are stored with the passphrases — so the narrowing happens
+ * here, at the last point that touches plaintext. What crosses into the
+ * checklist is two settings a browser is already shown on the block's own form.
+ *
+ * A block that will not decrypt is not an error page: it is a keystore the
+ * checklist cannot speak for, and `credentials` already reports that separately.
+ */
+function keystoreSetting(vault: Vault, slug: string): KeystoreSetting | null {
+  try {
+    const block = vault.resolveCredential(slug, "android_keystore");
+    if (!block) return null;
+    const path = (block.fields["properties_path"] ?? "").trim();
+    return { propertyNames: propertyNames(block.fields), propertiesPath: path === "" ? null : path };
+  } catch {
+    return null;
+  }
+}
+
 export async function registerReadinessRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   /**
    * Computed only when asked for.
@@ -255,6 +278,11 @@ export async function registerReadinessRoutes(app: FastifyInstance, ctx: AppCont
       },
       // Names only: the vault never hands a value to anything but a run.
       secretKeys: ctx.vault.list(slug).map((s) => s.key),
+      // Which blocks apply, resolved the way a run resolves them — a project's
+      // own shadowing a global one — so the checklist and the run cannot
+      // disagree about whether a credential exists.
+      blocks: ctx.vault.listCredentials(slug).map((c) => c.kind),
+      keystore: keystoreSetting(ctx.vault, slug),
       uses,
       platforms,
       appfile,

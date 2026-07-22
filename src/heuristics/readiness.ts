@@ -1,3 +1,4 @@
+import type { CredentialKind } from "../credentials/kinds.js";
 import type { PropertiesFile, SigningFacts } from "./android-signing.js";
 import type { AppfileFacts } from "./appfile.js";
 import { argsGiven, findBlockingActions } from "./blocking-actions.js";
@@ -21,6 +22,25 @@ import type { Platform } from "./platforms.js";
  * - **No check reaches for a database, a config store or a shell.** Everything
  *   a check needs arrives as an argument, which is what makes the whole table
  *   testable with plain values.
+ * - **No check hands the user homework Laneyard could have done itself.** A
+ *   repository that builds today keeps building unedited: Laneyard adapts to the
+ *   project, never the other way round. So a check may say that something is
+ *   missing, or that it cannot tell — it may not say to rewrite a Fastfile, a
+ *   `build.gradle`, or a lane, for anything Laneyard is able to supply. Where a
+ *   credential is what is missing, the recommendation is a signing block, which
+ *   Laneyard materialises for the length of a run under the names the project
+ *   already reads. Asking a question on the block's own form is allowed; asking
+ *   for a commit is not.
+ *
+ * One consequence of that is worth stating on its own, because it decides how
+ * half of the table reads: **a credential is required by a lane, never by a
+ * platform.** Fastlane takes screenshots, runs tests and builds enterprise
+ * artifacts as readily as it uploads. A project whose lanes only produce an
+ * `.aab` needs the keystore that signs it and nothing else — no `.p8`, no
+ * service account, because nothing is being sent anywhere. Each check therefore
+ * derives what it wants from the actions the lanes were seen to call, and a
+ * credential no lane could use is reported as not needed here rather than as a
+ * gap.
  *
  * The list is in three sections. The shared one always applies; the iOS and
  * Android ones only when the project builds for that platform. An Android
@@ -110,10 +130,14 @@ const warn = (detail: string, fix?: string, fixIn?: "secrets"): Outcome => ({
   ...(fix === undefined ? {} : { fix }),
   ...(fixIn === undefined ? {} : { fixIn }),
 });
-const undetermined = (detail: string, fix?: string): Outcome => ({
+// `fixIn` belongs here as much as on a warning: "could not tell" and "here is
+// the one setting that would settle it" are not in tension, and a link is worth
+// more on the line nobody knows what to do with than on the one that says so.
+const undetermined = (detail: string, fix?: string, fixIn?: "secrets"): Outcome => ({
   state: "unknown",
   detail,
   ...(fix === undefined ? {} : { fix }),
+  ...(fixIn === undefined ? {} : { fixIn }),
 });
 
 /** A rejection is not always an `Error`; a checklist saying "undefined" is worse than useless. */
@@ -214,13 +238,61 @@ export async function checkDependencies(input: DependenciesInput): Promise<Check
 /** Any suffix: the key is split across several variables, and their names vary by lane. */
 const API_KEY = /^APP_STORE_CONNECT_API_KEY/;
 
+/**
+ * The one name on this page that never worked.
+ *
+ * `APP_STORE_CONNECT_API_KEY_P8` appears nowhere in fastlane 2.237 — no action
+ * declares it, so no lane can read it. Laneyard's own screen invented it and
+ * asked people to store their `.p8` under it, and `API_KEY` above prefix-matches
+ * it, so the result was a green tick for a value that reached nothing.
+ *
+ * Excluded rather than merely un-ticked: the value is still in the vault, and
+ * someone who put it there is entitled to be told it does nothing instead of
+ * being left with a checklist that has quietly gone silent about it.
+ */
+const DEAD_API_KEY = /^APP_STORE_CONNECT_API_KEY_P8$/;
+
 const STORE_API_KEY =
-  "Store an App Store Connect API key — `APP_STORE_CONNECT_API_KEY_ID`, " +
-  "`APP_STORE_CONNECT_API_KEY_ISSUER_ID` and the `.p8` contents — from the secrets tab. " +
+  "Upload the `.p8` as an App Store Connect key block from the secrets tab, with its key id and " +
+  "issuer id. Laneyard writes the file for the length of a run and exports the three of them under " +
+  "the names the block carries, so nothing in the project has to change. " +
   "An API key does not expire on its own.";
 
 /** The action whose whole job is to load a `.p8`, under both of its names. */
 const ASC_KEY_ACTIONS = new Set(["app_store_connect_api_key", "asc_api_key"]);
+
+/**
+ * The actions that sign in to Apple, and therefore the ones that decide whether
+ * this project needs a key at all.
+ *
+ * Deliberately wider than "uploads": `match` fetches from a certificates
+ * repository but authenticates with App Store Connect to do it, and
+ * `latest_testflight_build_number` is the version-numbering call half the
+ * Fastfiles in existence make before they build anything. A lane that only
+ * builds, tests or screenshots is in none of them, and that lane's project is
+ * told it needs nothing — which is the whole point of asking.
+ */
+const APPLE_AUTH_ACTIONS = new Set([
+  ...ASC_KEY_ACTIONS,
+  "upload_to_testflight",
+  "pilot",
+  "upload_to_app_store",
+  "deliver",
+  "latest_testflight_build_number",
+  "app_store_build_number",
+  "download_dsyms",
+  "precheck",
+  "check_app_store_metadata",
+  "produce",
+  "create_app_online",
+  "register_devices",
+  "match",
+  "sync_code_signing",
+  "get_certificates",
+  "cert",
+  "get_provisioning_profile",
+  "sigh",
+]);
 
 /**
  * Arguments that name the key somewhere other than the vault.
@@ -237,6 +309,8 @@ export interface AppStoreConnectInput {
   keyFilesInRepo: Known<string[]>;
   appfile: Known<AppfileFacts>;
   unread?: Known<Unread>;
+  /** The signing blocks that apply to this project, by kind. */
+  blocks?: CredentialKind[];
 }
 
 /**
@@ -253,12 +327,43 @@ export interface AppStoreConnectInput {
  * a credential was arranged — it does not say the file is on *this* machine,
  * with the passphrase and permissions a run needs. A green tick that means "it
  * looks arranged" is the tick nobody can trust afterwards.
+ *
+ * The vault holds two routes and both are answers: a block, which Laneyard
+ * writes to disk for the run, and the loose variables a project stored before
+ * blocks existed. Neither is preferred over the other here — a recommendation is
+ * only made when there is nothing at all.
  */
 export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
   const { secretKeys, uses, keyFilesInRepo, appfile } = input;
+  const blocks = input.blocks ?? [];
 
-  if (secretKeys.some((key) => API_KEY.test(key))) {
+  if (blocks.includes("apple_asc")) {
+    return {
+      ...META.appStoreConnect,
+      ...ok(
+        "an App Store Connect key block is in the vault: the `.p8` is written for the length of a " +
+          "run, with its key id and issuer id exported beside it.",
+      ),
+    };
+  }
+
+  if (secretKeys.some((key) => API_KEY.test(key) && !DEAD_API_KEY.test(key))) {
     return { ...META.appStoreConnect, ...ok("an App Store Connect API key is in the vault.") };
+  }
+
+  // The one place on this checklist where somebody is asked to redo work — and
+  // it is work that never did anything. See `DEAD_API_KEY`.
+  if (secretKeys.some((key) => DEAD_API_KEY.test(key))) {
+    return {
+      ...META.appStoreConnect,
+      ...warn(
+        "`APP_STORE_CONNECT_API_KEY_P8` is in the vault, and no action in fastlane reads a variable " +
+          "of that name: the value is stored, and no lane can see it. An earlier version of this " +
+          "interface asked for it.",
+        STORE_API_KEY,
+        "secrets",
+      ),
+    };
   }
 
   // Named in a lane: the commonest way a pre-existing project holds its key,
@@ -281,6 +386,32 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
           "names is on this machine is not something a Fastfile says.",
         STORE_API_KEY,
       ),
+    };
+  }
+
+  // Nothing in the vault, and nothing named in a lane. Before reporting an
+  // absence, ask whether the absence matters here: a key is wanted by a lane
+  // that signs in to Apple, not by a project that happens to build for iOS.
+  if (!uses.ok) {
+    return { ...META.appStoreConnect, ...undetermined(`could not read the lanes: ${uses.reason}`) };
+  }
+
+  // Read once: three of the outcomes below turn on the same blindness.
+  const blind = unreadReason(input.unread ?? { ok: true, value: READ_EVERYTHING });
+
+  const signsIn = uses.value.some((lane) =>
+    lane.actions.some((action) => APPLE_AUTH_ACTIONS.has(action.name)),
+  );
+  if (!signsIn) {
+    if (blind) {
+      return {
+        ...META.appStoreConnect,
+        ...undetermined(`no lane seen to sign in to App Store Connect — but ${blind}.`, STORE_API_KEY),
+      };
+    }
+    return {
+      ...META.appStoreConnect,
+      ...ok("no lane signs in to App Store Connect: nothing here needs a key."),
     };
   }
 
@@ -326,7 +457,6 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
   // This one is a warning rather than a tick, so being wrong costs less — but
   // "in the lanes" is a claim about lanes that were read, and saying it about
   // lanes that could not be is still saying something untrue.
-  const blind = unreadReason(input.unread ?? { ok: true, value: READ_EVERYTHING });
   if (blind) {
     return {
       ...META.appStoreConnect,
@@ -465,15 +595,38 @@ const KEYSTORE_ARGS = ["storeFile", "storePassword"];
 /** `ANDROID_KEYSTORE_PASSWORD`, `KEYSTORE_PASSWORD`, `STORE_PASSWORD`. */
 const KEYSTORE_PASSWORD = /(^|_)(KEYSTORE|STORE)_PASSWORD$/;
 
-const STORE_KEYSTORE_PASSWORD =
-  "Store the keystore passphrase as `ANDROID_KEYSTORE_PASSWORD` from the secrets tab, " +
-  "and read it in the lane with `storePassword: ENV[\"ANDROID_KEYSTORE_PASSWORD\"]`.";
+/**
+ * What to do about a keystore, said once.
+ *
+ * It used to say to store the passphrase loose and read it in the lane with
+ * `storePassword: ENV["ANDROID_KEYSTORE_PASSWORD"]` — which is a Fastfile edit,
+ * and so not Laneyard's to ask for. A block carries the file and the passphrases
+ * together, and a run gets both without the project knowing anything about it.
+ */
+const STORE_KEYSTORE =
+  "Upload the keystore as an android keystore block from the secrets tab, with its alias and its " +
+  "two passphrases. Laneyard writes the file for the length of a run and exports the names the " +
+  "block carries, so no lane has to be changed to find it.";
 
 export function checkAndroidKeystore(
   uses: Known<LaneUses[]>,
   secretKeys: string[],
   unread: Known<Unread> = { ok: true, value: READ_EVERYTHING },
+  blocks: CredentialKind[] = [],
 ): Check {
+  // Answered before the lanes are read, and on purpose: the question is whether
+  // anything will stop and ask for a passphrase, and a block means nothing can —
+  // whichever lane, and whether or not gradle is called by name.
+  if (blocks.includes("android_keystore")) {
+    return {
+      ...META.androidKeystore,
+      ...ok(
+        "an android keystore block is in the vault: the keystore is written for the length of a " +
+          "run and its passphrases exported with it, so nothing stops to ask for one.",
+      ),
+    };
+  }
+
   if (!uses.ok) {
     return { ...META.androidKeystore, ...undetermined(`could not read the lanes: ${uses.reason}`) };
   }
@@ -500,6 +653,7 @@ export function checkAndroidKeystore(
           ". This project builds for Android, so signing is configured somewhere a Fastfile does " +
           "not show: `build.gradle`, `key.properties`, or a build driven through flutter or " +
           "react-native.",
+        STORE_KEYSTORE,
       ),
     };
   }
@@ -540,7 +694,7 @@ export function checkAndroidKeystore(
     ...warn(
       `${nameList(withoutPassphrase.map((c) => c.lane))} hands gradle a keystore, but no keystore ` +
         "passphrase is in the vault: gradle asks for it and waits.",
-      STORE_KEYSTORE_PASSWORD,
+      STORE_KEYSTORE,
       "secrets",
     ),
   };
@@ -562,7 +716,9 @@ const DECLARE_SECRETS =
   "`required_secrets` in laneyard.yml and they are checked like the rest.";
 
 const STORE_PLAY_KEY =
-  "Store the service account JSON as `SUPPLY_JSON_KEY_DATA` from the secrets tab. " +
+  "Upload the service account JSON as a Play Store service account block from the secrets tab. " +
+  "Laneyard writes the file for the length of a run and exports its path under the name the block " +
+  "carries — `SUPPLY_JSON_KEY`, which supply reads by itself, unless the block says otherwise. " +
   "A service account does not expire on its own.";
 
 export function checkPlayStore(
@@ -570,6 +726,7 @@ export function checkPlayStore(
   secretKeys: string[],
   appfile: Known<AppfileFacts>,
   unread: Known<Unread> = { ok: true, value: READ_EVERYTHING },
+  blocks: CredentialKind[] = [],
 ): Check {
   if (!uses.ok) {
     return { ...META.playStore, ...undetermined(`could not read the lanes: ${uses.reason}`) };
@@ -596,6 +753,18 @@ export function checkPlayStore(
       };
     }
     return { ...META.playStore, ...ok("no lane uploads to the Play Store.") };
+  }
+
+  // Either route answers: the block, or the loose variable a project stored
+  // before blocks existed and which fastlane still reads exactly as it did.
+  if (blocks.includes("play_service_account")) {
+    return {
+      ...META.playStore,
+      ...ok(
+        "a Play Store service account block is in the vault: the JSON is written for the length of " +
+          "a run and its path exported.",
+      ),
+    };
   }
 
   if (secretKeys.some((key) => PLAY_JSON_KEY.test(key))) {
@@ -691,11 +860,41 @@ function platformNote(platforms: Known<Platform[]>): Check {
   };
 }
 
+/**
+ * What the keystore block says about the properties file Laneyard would write.
+ *
+ * Two settings, and both exist because a build script does not answer for them.
+ * `propertyNames` are the keys written inside the file: the script reads them
+ * out of a `Properties` object indexed by string, somewhere the parser never
+ * goes, so these are the block's — the Flutter documentation's four by default.
+ * `propertiesPath` is where the file goes when the script named it in a way that
+ * left the directory unresolved.
+ *
+ * No passphrase, no alias, no path to the keystore itself: a check has no
+ * business holding a secret, and this one needs none to say what will happen.
+ */
+export interface KeystoreSetting {
+  /** The keys the file will carry, in the order they are written. */
+  propertyNames: string[];
+  /** The configured location, relative to the app, or null when unset. */
+  propertiesPath: string | null;
+}
+
+/**
+ * The one question the block's form can settle that nothing else can. Asked
+ * here, answered there, and no file in the repository is touched either way.
+ */
+const SET_PROPERTIES_PATH =
+  "Set the properties file path on the keystore block, relative to the app, and Laneyard writes " +
+  "the file there for the length of a run.";
+
 export interface ReleaseSigningInput {
   /** The android build script, or why it could not be read. */
   gradle: Known<SigningFacts>;
   /** Whether the properties file it is conditional on is present in the clone. */
   conditionalFilePresent: boolean;
+  /** The keystore block that would supply that file, or null when there is none. */
+  keystore?: KeystoreSetting | null;
 }
 
 /**
@@ -714,6 +913,25 @@ function where(file: PropertiesFile): string {
 }
 
 /**
+ * Where Laneyard would write that file, or null when it would write nothing.
+ *
+ * The same three answers `runner/gradle-properties.ts` arrives at, in the same
+ * order, and that is not a coincidence to be maintained by hand: a check that
+ * promised a file the runner then declined to write would be the worst line on
+ * this page, because it would be reassuring and wrong. The configured path wins
+ * outright, an unresolved scope with no configured path means nothing is
+ * written, and everything else follows the scope the parser read.
+ */
+function writesAt(block: KeystoreSetting | null, file: PropertiesFile): string | null {
+  if (block === null) return null;
+  if (block.propertiesPath !== null && block.propertiesPath !== "") {
+    return ` at ${block.propertiesPath}, the path the block names`;
+  }
+  if (file.scope === "unknown") return null;
+  return where(file);
+}
+
+/**
  * Will a release build actually be signed with the release key?
  *
  * The one check here whose failure is silent. Everything else fails loudly — a
@@ -728,6 +946,7 @@ function where(file: PropertiesFile): string {
  */
 export function checkReleaseSigning(input: ReleaseSigningInput): Check {
   const { gradle, conditionalFilePresent } = input;
+  const keystore = input.keystore ?? null;
 
   if (!gradle.ok) {
     return {
@@ -745,31 +964,86 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
 
   const { conditionalOn } = gradle.value;
 
-  if (conditionalOn && !conditionalFilePresent) {
-    const { name } = conditionalOn;
-    const looksIn = where(conditionalOn);
-    return {
-      ...META.releaseSigning,
-      ...warn(
-        `the release build falls back to the debug signing config when ${name} is missing, and ` +
-          `${name} is not in the clone` +
-          (looksIn === "" ? "" : ` — the build looks for it${looksIn}`) +
-          ". The build will not fail: it will produce an artifact signed with the debug key, and " +
-          "the store will reject it.",
-        `${name} is gitignored, so it never reaches a clone. Supply the keystore through ` +
-          "the environment instead, and make a release build without one an error rather than a " +
-          "fallback — a build that cannot sign should stop, not succeed quietly.",
-      ),
-    };
-  }
-
   if (conditionalOn) {
+    const { name } = conditionalOn;
+    const writes = writesAt(keystore, conditionalOn);
+
+    // What Laneyard will do, in the words of the file the build already asks
+    // for. The keys are named rather than assumed silently: they are a
+    // convention — the Flutter documentation's — and the one thing between a
+    // signed artifact and a debug-signed one that nobody read out of the script.
+    if (writes !== null && keystore !== null) {
+      const keys = nameList(keystore.propertyNames);
+      const supplied =
+        `Laneyard writes ${name}${writes} for the length of a run, from the keystore block, with ` +
+        `the keys ${keys}. Those names come from the block's settings rather than something the ` +
+        "build script states — what a script reads out of that file is not written anywhere this " +
+        "can see — so the setting starts from the Flutter documentation's four, and a build that " +
+        "reads others is corrected there.";
+
+      if (!conditionalFilePresent) {
+        return {
+          ...META.releaseSigning,
+          ...ok(
+            `the release build falls back to the debug signing config when ${name} is missing, and ` +
+              `${name} is not in the clone. ${supplied}`,
+          ),
+        };
+      }
+      return {
+        ...META.releaseSigning,
+        ...ok(
+          `${name} is present${where(conditionalOn)}, so the release key is used — and that file is ` +
+            `the project's own, which Laneyard leaves alone. Were it ever to go missing, ${supplied}`,
+        ),
+      };
+    }
+
+    // A block, and nowhere to put the file: the script names it on a receiver
+    // the parser could not follow, so the directory is genuinely unknown. Two
+    // directories, one right, and writing into the wrong one would leave the
+    // build signing with the debug key next to a file that looked like the
+    // answer. The block's own form settles it — a question, not a commit.
+    if (keystore !== null && !conditionalFilePresent) {
+      return {
+        ...META.releaseSigning,
+        ...undetermined(
+          `the release build falls back to the debug signing config when ${name} is missing, and ` +
+            `${name} is not in the clone. A keystore block is in the vault, but the build script ` +
+            `names ${name} without saying which directory it resolves against, so Laneyard will ` +
+            "not guess where to write it.",
+          SET_PROPERTIES_PATH,
+          "secrets",
+        ),
+      };
+    }
+
+    if (!conditionalFilePresent) {
+      const looksIn = where(conditionalOn);
+      return {
+        ...META.releaseSigning,
+        ...warn(
+          `the release build falls back to the debug signing config when ${name} is missing, and ` +
+            `${name} is not in the clone` +
+            (looksIn === "" ? "" : ` — the build looks for it${looksIn}`) +
+            ". The build will not fail: it will produce an artifact signed with the debug key, and " +
+            "the store will reject it.",
+          `${name} is gitignored by the same documentation that recommends it, so it never reaches ` +
+            "a clone. Upload the keystore as an android keystore block from the secrets tab: " +
+            `Laneyard then writes ${name} itself for the length of a run, and removes it ` +
+            "afterwards. Nothing in the build script changes.",
+          "secrets",
+        ),
+      };
+    }
+
     return {
       ...META.releaseSigning,
       ...undetermined(
         `${conditionalOn.name} is present${where(conditionalOn)}, so the release key is ` +
           "used — but the build falls back to the debug signing config if it ever goes missing, " +
           "and does so without failing.",
+        keystore === null ? STORE_KEYSTORE : SET_PROPERTIES_PATH,
       ),
     };
   }
@@ -907,6 +1181,14 @@ export interface ReadinessInput {
   androidSigning: Known<SigningFacts>;
   /** Whether the properties file signing is conditional on is in the clone. */
   signingFilePresent: boolean;
+  /**
+   * The signing blocks that apply to this project, by kind — a project's own
+   * shadowing a global one, exactly as a run resolves them. Names of kinds, and
+   * nothing else: no file, no field, no variable name.
+   */
+  blocks?: CredentialKind[];
+  /** What the keystore block says about the properties file. See `KeystoreSetting`. */
+  keystore?: KeystoreSetting | null;
 }
 
 /** "all" is everyone's; the other two are shown only when they apply. */
@@ -961,6 +1243,7 @@ export const SECTIONS: { platform: SectionPlatform; checks: CheckRow[] }[] = [
             keyFilesInRepo: i.keyFilesInRepo,
             appfile: i.appfile,
             unread: i.unread,
+            blocks: i.blocks ?? [],
           }),
       },
       { ...META.match, run: (i) => checkMatch(i.uses, i.secretKeys) },
@@ -969,14 +1252,21 @@ export const SECTIONS: { platform: SectionPlatform; checks: CheckRow[] }[] = [
   {
     platform: "android",
     checks: [
-      { ...META.androidKeystore, run: (i) => checkAndroidKeystore(i.uses, i.secretKeys, i.unread) },
-      { ...META.playStore, run: (i) => checkPlayStore(i.uses, i.secretKeys, i.appfile, i.unread) },
+      {
+        ...META.androidKeystore,
+        run: (i) => checkAndroidKeystore(i.uses, i.secretKeys, i.unread, i.blocks ?? []),
+      },
+      {
+        ...META.playStore,
+        run: (i) => checkPlayStore(i.uses, i.secretKeys, i.appfile, i.unread, i.blocks ?? []),
+      },
       {
         ...META.releaseSigning,
         run: (i) =>
           checkReleaseSigning({
             gradle: i.androidSigning,
             conditionalFilePresent: i.signingFilePresent,
+            keystore: i.keystore ?? null,
           }),
       },
     ],
