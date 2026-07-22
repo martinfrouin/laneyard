@@ -61,3 +61,42 @@ CREATE TABLE IF NOT EXISTS secret (
   updated_at   TEXT    NOT NULL,
   PRIMARY KEY (project_slug, key)
 );
+
+-- A signing credential: a file plus the fields that make it usable. Separate
+-- from `secret` because these are not key/value pairs — stored as loose rows,
+-- nothing knew the parts belonged together, and deleting one left a half-dead
+-- group no check could detect.
+--
+-- `fields_enc` is one encrypted JSON object rather than a column per field: the
+-- three kinds do not share a shape, and a column per field would mean a
+-- migration every time a kind gains one.
+--
+-- `var_names` is NOT encrypted. It holds variable names, never values, and the
+-- interface has to display them.
+CREATE TABLE IF NOT EXISTS credential (
+  project_slug TEXT NOT NULL DEFAULT '',
+  kind         TEXT NOT NULL,
+  file_name    TEXT NOT NULL,
+  file_enc     TEXT NOT NULL,
+  fields_enc   TEXT NOT NULL,
+  var_names    TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (project_slug, kind)
+);
+
+-- Sessions outlive a restart, which is the whole reason they are here rather
+-- than in a Map. What is stored is a SHA-256 of the token, never the token: the
+-- cookie is a bearer credential, and a stolen `laneyard.db` must not hand
+-- anybody a live session the way a table of raw tokens would.
+--
+-- `expires_at` is an ISO timestamp compared as text, which sorts correctly
+-- because ISO-8601 does. A session with no end is not a convenience, it is a
+-- credential nobody can lose track of.
+CREATE TABLE IF NOT EXISTS session (
+  token_hash TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  role       TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_by_name ON session (name);
