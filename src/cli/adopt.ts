@@ -77,9 +77,10 @@ export async function runAdoption(options: AdoptionOptions): Promise<AdoptionRes
   const accepted: Proposal[] = [];
   for (const proposal of proposals) {
     process.stdout.write(describe(fastlaneDir, proposal) + "\n");
-    if (await asker.confirm(`  Store it here and use ${bold(proposal.varName)}?`, proposal.checked)) {
-      accepted.push(proposal);
+    if (!(await asker.confirm(`  Store it here and use ${bold(proposal.varName)}?`, proposal.checked))) {
+      continue;
     }
+    accepted.push(proposal.tier === "secret" ? await named(asker, proposal) : proposal);
   }
   if (accepted.length === 0) {
     process.stdout.write(dim("\nNothing written. Your Fastfile is as it was.\n"));
@@ -173,6 +174,29 @@ function describe(fastlaneDir: string, proposal: Proposal): string {
     `                        → ${shown}\n` +
     dim(`  ${why}\n`)
   );
+}
+
+/**
+ * A tier-3 proposal carrying the variable name the user actually wants.
+ *
+ * This is the one tier whose name is a guess. Tiers 1 and 2 take theirs from
+ * `credentials/kinds.ts`, which holds the names fastlane itself reads; a
+ * literal secret has no such table, so the name is assembled from the action
+ * and the argument — `PILOT_API_TOKEN` — and a project that already calls that
+ * variable something else would end up with the vault holding one name and the
+ * patched Fastfile reading another. Nothing would report it: the run would
+ * simply meet an absent variable.
+ *
+ * The replacement is rebuilt from the answer rather than patched afterwards,
+ * so the name stored and the name read cannot drift apart.
+ */
+async function named(asker: Asker, proposal: Proposal): Promise<Proposal> {
+  const varName = await asker.ask("  variable name", proposal.varName);
+  return {
+    ...proposal,
+    varName,
+    edit: { ...proposal.edit, replacement: `ENV.fetch("${varName}")` },
+  };
 }
 
 /** Lifts one accepted proposal into the vault. */

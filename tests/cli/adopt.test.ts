@@ -96,4 +96,37 @@ describe("runAdoption", () => {
       db.close();
     }
   });
+
+  it("stores a literal secret under the name the user gives, and patches to it", async () => {
+    // The one tier whose name Laneyard invents. A project that already calls
+    // the variable something else must end up with the vault and the Fastfile
+    // agreeing — the failure this guards against is silent, since a run simply
+    // meets an absent variable.
+    const source = `lane :beta do\n  pilot(api_token: "abc123def")\nend\n`;
+    const { dir, vault, db } = await project(source);
+    const renaming = {
+      ...acceptingAsker,
+      async ask(_label: string, proposed: string) {
+        return _label.includes("variable name") ? "TESTFLIGHT_TOKEN" : proposed;
+      },
+      // Tier 3 arrives unticked, so accepting it means overriding the default.
+      async confirm() {
+        return true;
+      },
+    };
+
+    try {
+      await runAdoption({ cwd: dir, fastlaneDir: "fastlane", slug: "app", vault, asker: renaming });
+
+      // Through `resolve`, not `reveal`: a tier-3 value is stored masked, so
+      // it is never handed back to a reader — only to a run's environment,
+      // which is the thing that has to agree with the patch below.
+      expect(vault.resolve("app")["TESTFLIGHT_TOKEN"]).toBe("abc123def");
+      expect(await readFile(join(dir, "fastlane", "Fastfile"), "utf8")).toBe(
+        `lane :beta do\n  pilot(api_token: ENV.fetch("TESTFLIGHT_TOKEN"))\nend\n`,
+      );
+    } finally {
+      db.close();
+    }
+  });
 });
