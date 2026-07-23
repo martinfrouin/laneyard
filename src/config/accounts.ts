@@ -116,6 +116,42 @@ export async function upsertUserInConfig(
 }
 
 /**
+ * Renames an account in place, keeping everything else it carried.
+ *
+ * A rename is not an upsert. `upsertUserInConfig` keys by name, so handing it the
+ * new name would add a second account and orphan the first — dropping the role,
+ * the hash and, most quietly of all, the `projects` grants the old entry held.
+ * So the edit is to the `name` field of the matching node, through the YAML
+ * document, which leaves role, password_hash, projects and the file's comments
+ * and key order exactly where they were.
+ *
+ * Refuses when `newName` already belongs to another account rather than folding
+ * two entries into one, and refuses when no account carried `oldName` — there is
+ * nothing there to rename. Returns whether the rename happened, which is the
+ * difference between a fresh name and a collision in a sentence.
+ */
+export async function renameUserInConfig(
+  path: string,
+  oldName: string,
+  newName: string,
+): Promise<boolean> {
+  const doc = await open(path);
+  const users = doc.getIn(["server", "users"]);
+  if (!(users instanceof YAMLSeq)) return false;
+
+  // Checked before the target is looked up: a name already in the file must not
+  // be written onto a second entry, whoever else already holds it.
+  if (users.items.some((item) => nameOf(item) === newName)) return false;
+
+  const at = users.items.findIndex((item) => nameOf(item) === oldName);
+  if (at === -1) return false;
+
+  (users.items[at] as YAMLMap).set("name", newName);
+  await writeFile(path, serializeYaml(doc), "utf8");
+  return true;
+}
+
+/**
  * Writes an account's project grants, replacing whatever list it had.
  *
  * The one edit behind `PUT /api/users/:name/projects`: it sets `projects` on the

@@ -35,6 +35,17 @@ export const ProjectsChanged = createContext<() => void>(() => {});
  */
 export const Session = createContext<Identity | null>(null);
 
+/**
+ * Told when who is signed in has changed under the app.
+ *
+ * The one thing that changes it from inside the app is the account page renaming
+ * itself: the server sets a fresh cookie under the new name, and this is how the
+ * header stops showing the old one. A context rather than a prop for the same
+ * reason as `ProjectsChanged` — the only caller is a route deep, and threading a
+ * callback to it through components with no use for it would say something false.
+ */
+export const SessionChanged = createContext<() => void>(() => {});
+
 export function App() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [checked, setChecked] = useState(false);
@@ -66,6 +77,7 @@ export function App() {
 
   return (
     <Session.Provider value={identity}>
+      <SessionChanged.Provider value={() => void load()}>
       <ProjectsChanged.Provider value={() => void load()}>
         <div className="shell">
           <header>
@@ -146,6 +158,7 @@ export function App() {
           </main>
         </div>
       </ProjectsChanged.Provider>
+      </SessionChanged.Provider>
     </Session.Provider>
   );
 }

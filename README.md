@@ -175,12 +175,18 @@ shell history. Without `--role`, the account is a builder.
 Two things are refused, in the API and on the command line alike: removing the last admin, and
 demoting the last admin. A server nobody can administer cannot be repaired from the interface.
 
-Anyone changes their own password from **your account**, which is said in those words in the header
-and again on your own row of the accounts screen — a builder included, since that page is about one
-person rather than about the server's list of people. It asks for the current password even though you are already signed in: a session
+Anyone changes their own password — and their own name — from **your account**, which is said in
+those words in the header and again on your own row of the accounts screen — a builder included,
+since that page is about one person rather than about the server's list of people. Either one asks
+for the current password even though you are already signed in: a session
 is a cookie in a browser that may have been left open on a desk. Doing it ends every other session
 that account has, and leaves the page you did it on signed in. That is how the random password
 `laneyard setup` printed once stops being a string on a sticky note.
+
+Changing your name edits your entry in `config.yml` in place, keeping your role and your project
+access exactly as they were, and refuses a name another account already has. It is your login name
+that changes: the next time you sign in, it is the new one you type. This is self-service and needs
+no admin — the identifier is yours to change, whatever your role.
 
 Removing an account ends its sessions immediately — "remove the account" and "revoke access" are
 the same act. So does editing `config.yml` by hand: every request looks the account up again, so

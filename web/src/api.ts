@@ -214,6 +214,20 @@ export const api = {
     }).then(empty),
 
   /**
+   * Changes your own name — beside the password, and not `/api/users`, which is
+   * the admin list of other people. The current password is sent along for the
+   * same reason: the browser may have been left open on a desk. The reply hands
+   * back the new name — the old session's cookie is dropped and a fresh one under
+   * the new name set — so the header and this page can follow it.
+   */
+  setAccountName: (current: string, next: string) =>
+    fetch("/api/account/name", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ current, next }),
+    }).then(json<Identity>),
+
+  /**
    * The names this project needs, and which are still missing.
    *
    * Names only. The file that holds the real values is the one that never
