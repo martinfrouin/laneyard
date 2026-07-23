@@ -7,11 +7,11 @@ import { stat } from "node:fs/promises";
  * '…/workspaces/popotheque-app/fastlane'` — technically accurate and no help at
  * all, because the interesting part is *why* it was looking there.
  *
- * It is nearly always the same story. `laneyard setup` writes `laneyard.yml`
- * into the working copy, and Laneyard builds from a clone of the remote, so the
- * file that says where fastlane lives does not reach the clone until it is
- * committed and pushed. Until then `fastlane_dir` falls back to `fastlane`,
- * which in a monorepo is not where anything is.
+ * It is nearly always the same story: the configured fastlane folder is in the
+ * working copy setup ran against, but not in the clone Laneyard builds from. A
+ * folder only present locally — never committed, not yet pushed, or gitignored
+ * — does not reach the clone, and neither does a `laneyard.yml` that would
+ * point at it until it too is committed and pushed.
  */
 export async function assertFastlaneDir(dir: string, configured: string): Promise<void> {
   const found = await stat(dir).then(
@@ -22,8 +22,8 @@ export async function assertFastlaneDir(dir: string, configured: string): Promis
 
   throw new Error(
     `No ${configured}/ in the clone. Laneyard builds from a clone of the remote, ` +
-      "so `laneyard.yml` only takes effect once it is committed and pushed — " +
-      "until then this falls back to `fastlane`. Push it, or set `fastlane_dir` " +
-      "on the project's block in config.yml.",
+      "so a fastlane folder that exists only in your working copy — uncommitted, " +
+      "unpushed, or gitignored — never reaches it. Commit and push it, or set " +
+      "`fastlane_dir` on the project's block in config.yml.",
   );
 }

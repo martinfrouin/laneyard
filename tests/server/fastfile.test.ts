@@ -50,7 +50,7 @@ const fakeInvoke: Invoke = async (command, cwd, fastlaneDir) => {
   };
 };
 
-async function harness() {
+async function harness(fastlaneDir?: string) {
   const origin = await makeOriginRepo({ "fastlane/Fastfile": INITIAL_FASTFILE });
   const root = await tmpDir("laneyard-fastfile-");
   const configPath = join(root, "config.yml");
@@ -63,7 +63,7 @@ projects:
   - slug: sample
     name: Sample
     git_url: ${origin}
-`,
+${fastlaneDir === undefined ? "" : `    fastlane_dir: "${fastlaneDir}"\n`}`,
     "utf8",
   );
 
@@ -112,6 +112,25 @@ describe("fastfile API", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ content: INITIAL_FASTFILE, dirty: false, diff: "" });
+  }, SLOW);
+
+  it("explains, rather than ENOENTs, when the configured dir is not in the clone", async () => {
+    // The failure that started this: a `fastlane_dir` detected in a working
+    // copy that never reached the remote — a stray `app copie/` macOS made,
+    // uncommitted, or gitignored — so the clone Laneyard builds from has no
+    // such folder. The read used to surface a raw ENOENT; it must now name the
+    // directory and say what to do.
+    const { app } = await harness("app copie/fastlane");
+    const cookies = { laneyard_session: await login(app) };
+
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/fastfile", cookies });
+
+    expect(res.statusCode).toBe(503);
+    const { error } = res.json() as { error: string };
+    expect(error).not.toMatch(/ENOENT/);
+    expect(error).toContain("app copie/fastlane");
+    expect(error).toMatch(/clone of the remote/);
+    expect(error).toMatch(/config\.yml/);
   }, SLOW);
 
   it("writes the content byte for byte and it shows up dirty", async () => {

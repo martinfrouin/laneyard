@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { FastfileStore } from "../../fastfile/store.js";
 import type { VerifyResult } from "../../fastfile/store.js";
 import { Workspace } from "../../git/workspace.js";
+import { assertFastlaneDir } from "../../sidecar/fastlane-dir.js";
 import type { AppContext } from "../app.js";
 
 /** What every route here needs once the project is known to exist and its clone is present. */
@@ -55,6 +56,12 @@ export async function registerFastfileRoutes(app: FastifyInstance, ctx: AppConte
     if (!r) return;
 
     try {
+      // The common case is not a hand-deleted Fastfile but a `fastlane_dir`
+      // that never reached the clone — a path only in someone's working copy,
+      // uncommitted or gitignored, or a stray local copy. `store.read` would
+      // surface that as a bare ENOENT; this turns it into the same sentence the
+      // sidecar gives, naming the directory and how to fix it.
+      await assertFastlaneDir(join(r.workspacePath, r.fastlaneDir), r.fastlaneDir);
       const [content, dirty, diff] = await Promise.all([
         store.read(r.workspacePath, r.fastlaneDir),
         r.workspace.isDirty(),
