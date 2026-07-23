@@ -351,6 +351,8 @@ export async function runSetupCommand(
     // app moved or duplicated keeps this file unchanged; `store.ts` puts the
     // prefix back when it reads it.
     const wroteRepoConfig = await writeRepoConfigIfAbsent(repoConfigPath, {
+      // First, as the file's identity: `remove` reads it from here.
+      slug,
       ...(appRelative(appRoot, fastlaneDir) === "fastlane"
         ? {}
         : { fastlane_dir: appRelative(appRoot, fastlaneDir) }),
@@ -502,6 +504,7 @@ async function existingProject(configPath: string, slug: string): Promise<string
 async function writeRepoConfigIfAbsent(
   path: string,
   settings: {
+    slug: string;
     fastlane_dir?: string;
     runtime: string;
     artifact_globs: string[];

@@ -2,7 +2,21 @@
 
 ## 0.6.0 — unreleased
 
-What `laneyard setup` does about a credential the Fastfile names outright.
+What `laneyard setup` does about a credential the Fastfile names outright, and a
+`laneyard.yml` that each project command reads from where it lives.
+
+### `laneyard remove` runs from the project's directory
+
+`laneyard.yml` now carries a `slug`, written by `setup`. `laneyard remove` drops
+its slug argument and reads it from the `laneyard.yml` in the current directory —
+refusing if the file is absent, or has no slug (run `setup` again). It deletes
+that file too; commit the deletion.
+
+### `laneyard secret` is gone
+
+Secrets are managed from the web. The CLI `laneyard secret set`/`import` is
+removed; the vault and what the server and interface do with secrets are
+untouched.
 
 ### Setup offers to lift a credential your Fastfile hardcodes
 

@@ -1,7 +1,7 @@
 # Anchor project commands to their laneyard.yml
 
 Date: 2026-07-23
-Status: approved, not implemented
+Status: implemented
 
 ## The problem
 

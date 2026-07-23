@@ -1,7 +1,18 @@
 import { z } from "zod";
 
+/** A slug is used as a folder name and a URL segment. */
+const slugSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-]*$/, "slug: lowercase letters, digits and hyphens only");
+
 /** Build behaviour settings. They can come from the repository or the server. */
 export const projectSettingsSchema = z.object({
+  // The project this file belongs to. Written by `setup` and read by `remove`,
+  // which runs from the app's directory and takes the slug from here rather than
+  // from an argument. An identity, not a path — `normaliseAppConfig` leaves it
+  // untouched — and the running server ignores it, identifying the project
+  // through `config.yml`. Optional so an older file without it still parses.
+  slug: slugSchema.optional(),
   fastlane_dir: z.string().default("fastlane"),
   runtime: z.enum(["bundle", "system"]).default("bundle"),
   timeout_minutes: z.number().int().positive().default(60),
@@ -23,11 +34,6 @@ export const projectSettingsSchema = z.object({
 
 /** Same vocabulary, but everything is optional in the files. */
 export const projectSettingsInputSchema = projectSettingsSchema.partial();
-
-/** A slug is used as a folder name and a URL segment. */
-const slugSchema = z
-  .string()
-  .regex(/^[a-z0-9][a-z0-9-]*$/, "slug: lowercase letters, digits and hyphens only");
 
 export const projectEntrySchema = projectSettingsInputSchema.extend({
   slug: slugSchema,

@@ -10,7 +10,6 @@ import { PromptAborted } from "./cli/prompt.js";
 import { runSetupCommand } from "./cli/setup.js";
 import { runRemoveCommand } from "./cli/remove.js";
 import { runResetCommand } from "./cli/reset.js";
-import { runSecretCommand } from "./cli/secret.js";
 import { runUninstallCommand } from "./cli/uninstall.js";
 import { runUserCommand } from "./cli/user.js";
 import { ConfigStore } from "./config/store.js";
@@ -132,12 +131,10 @@ const USAGE = `laneyard — a self-hosted web UI for fastlane
 
   laneyard setup      set up the project in the current directory
                       --yes accepts every detected value without asking
-  laneyard secret set NAME [--project <slug>]
-                      store a secret, its value read from standard input
   laneyard user add NAME [--role admin|builder]
                       create an account, its password read from standard input
-  laneyard remove <slug>
-                      remove one project and everything Laneyard holds for it
+  laneyard remove     remove the project of the current directory, and its
+                      laneyard.yml — run from where that file lives
                       --dry-run shows what would go and stops
   laneyard reset      wipe the data, keeping the accounts and the vault key
                       --dry-run shows what would go and stops
@@ -205,20 +202,6 @@ if (invokedDirectly()) {
     }
   }
 
-  // Above the catch-all below, which would otherwise reject it as unknown.
-  if (command === "secret") {
-    const home = homeDir();
-    await mkdir(home, { recursive: true });
-    process.exit(
-      await runSecretCommand(home, rest, {
-        stdin: process.stdin,
-        interactive: process.stdin.isTTY === true,
-        out: (text) => process.stdout.write(text),
-        err: (text) => process.stderr.write(text),
-      }),
-    );
-  }
-
   if (command === "user") {
     const home = homeDir();
     await mkdir(home, { recursive: true });
@@ -247,7 +230,7 @@ if (invokedDirectly()) {
   // No `mkdir` either: like `uninstall`, these read what is already there.
   if (command === "remove") {
     process.exit(
-      await runRemoveCommand(homeDir(), rest, {
+      await runRemoveCommand(homeDir(), process.cwd(), rest, {
         stdin: process.stdin,
         out: (text) => process.stdout.write(text),
         err: (text) => process.stderr.write(text),

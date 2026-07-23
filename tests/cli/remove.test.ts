@@ -19,16 +19,27 @@ interface Captured {
   err: string;
 }
 
-/** Runs the command with an answer already on standard input. */
-async function run(home: string, args: string[], typed = ""): Promise<Captured> {
+/** Runs the command from `cwd`, with an answer already on standard input. */
+async function run(home: string, cwd: string, args: string[], typed = ""): Promise<Captured> {
   let out = "";
   let err = "";
-  const code = await runRemoveCommand(home, args, {
+  const code = await runRemoveCommand(home, cwd, args, {
     stdin: Readable.from([`${typed}\n`]),
     out: (t) => (out += t),
     err: (t) => (err += t),
   });
   return { code, out, err };
+}
+
+/** An app checkout carrying (or not) a laneyard.yml that names its project. */
+async function appDir(slug: string | null): Promise<string> {
+  const dir = await tmpDir("laneyard-app-");
+  await writeFile(
+    join(dir, "laneyard.yml"),
+    (slug === null ? "" : `slug: ${slug}\n`) + "runtime: bundle\n",
+    "utf8",
+  );
+  return dir;
 }
 
 /**
@@ -93,11 +104,12 @@ async function snapshot(dir: string): Promise<Record<string, number>> {
   return found;
 }
 
-describe("laneyard remove <slug>", () => {
-  it("removes the block, the clone, the artifacts, the runs, the logs and the slug's vault rows", async () => {
+describe("laneyard remove", () => {
+  it("removes the machine data and the laneyard.yml, reading the slug from the file", async () => {
     const { home, runId } = await installed();
+    const cwd = await appDir("sample");
 
-    const { code, out } = await run(home, ["sample"], "sample");
+    const { code, out } = await run(home, cwd, [], "sample");
     expect(code).toBe(0);
     expect(out).toContain("removed");
 
@@ -109,6 +121,10 @@ describe("laneyard remove <slug>", () => {
     expect(existsSync(join(home, "workspaces", "sample"))).toBe(false);
     expect(existsSync(join(home, "artifacts", String(runId)))).toBe(false);
     expect(existsSync(join(home, "logs", `${runId}.log`))).toBe(false);
+
+    // The repository's laneyard.yml is gone too, and the message says to commit that.
+    expect(existsSync(join(cwd, "laneyard.yml"))).toBe(false);
+    expect(out).toMatch(/commit/i);
 
     // Gone from the database, and the vault, and both scopes left intact.
     const db = openDatabase(join(home, "laneyard.db"));
@@ -122,41 +138,72 @@ describe("laneyard remove <slug>", () => {
     db.close();
   });
 
-  it("refuses an empty confirmation and removes nothing", async () => {
+  it("refuses when the directory has no laneyard.yml", async () => {
     const { home } = await installed();
+    const cwd = await tmpDir("laneyard-bare-");
     const before = await snapshot(home);
 
-    const { code, err } = await run(home, ["sample"], "");
+    const { code, err } = await run(home, cwd, [], "sample");
+    expect(code).toBe(1);
+    expect(err).toMatch(/laneyard\.yml/);
+    expect(await snapshot(home)).toEqual(before);
+  });
+
+  it("refuses a laneyard.yml that has no slug", async () => {
+    const { home } = await installed();
+    const cwd = await appDir(null);
+
+    const { code, err } = await run(home, cwd, [], "sample");
+    expect(code).toBe(1);
+    expect(err).toMatch(/slug/);
+    // The file that could not be acted on is left where it was.
+    expect(existsSync(join(cwd, "laneyard.yml"))).toBe(true);
+  });
+
+  it("refuses an empty confirmation and removes nothing", async () => {
+    const { home } = await installed();
+    const cwd = await appDir("sample");
+    const before = await snapshot(home);
+
+    const { code, err } = await run(home, cwd, [], "");
     expect(code).toBe(1);
     expect(err).toContain("Nothing was typed, so nothing was removed.");
     expect(await snapshot(home)).toEqual(before);
+    expect(existsSync(join(cwd, "laneyard.yml"))).toBe(true);
   });
 
   it("refuses a wrong confirmation and removes nothing", async () => {
     const { home } = await installed();
+    const cwd = await appDir("sample");
     const before = await snapshot(home);
 
     // The slug of the other project is exactly the near-miss to defend against.
-    const { code, err } = await run(home, ["sample"], "other");
+    const { code, err } = await run(home, cwd, [], "other");
     expect(code).toBe(1);
     expect(err).toContain("That is not the slug, so nothing was removed.");
     expect(await snapshot(home)).toEqual(before);
+    expect(existsSync(join(cwd, "laneyard.yml"))).toBe(true);
   });
 
-  it("writes nothing at all with --dry-run", async () => {
+  it("writes nothing at all with --dry-run, and lists the laneyard.yml", async () => {
     const { home } = await installed();
+    const cwd = await appDir("sample");
     const before = await snapshot(home);
 
-    const { code, out } = await run(home, ["sample", "--dry-run"]);
+    const { code, out } = await run(home, cwd, ["--dry-run"]);
     expect(code).toBe(0);
     expect(out).toContain("what will be removed");
     expect(out).toContain("Nothing was removed");
+    expect(out).toMatch(/laneyard\.yml/);
     expect(await snapshot(home)).toEqual(before);
+    expect(existsSync(join(cwd, "laneyard.yml"))).toBe(true);
   });
 
-  it("refuses an unknown slug, and names the ones it knows", async () => {
+  it("refuses when the laneyard.yml names a project the machine does not know", async () => {
     const { home } = await installed();
-    const { code, err } = await run(home, ["typo"], "typo");
+    const cwd = await appDir("typo");
+
+    const { code, err } = await run(home, cwd, [], "typo");
     expect(code).toBe(1);
     expect(err).toMatch(/Unknown project/);
     expect(err).toContain("sample");
@@ -165,21 +212,15 @@ describe("laneyard remove <slug>", () => {
 
   it("refuses while a run of that project is in flight, and removes nothing", async () => {
     const { home, runId } = await installed();
+    const cwd = await appDir("sample");
     const db = openDatabase(join(home, "laneyard.db"));
     new RunStore(db).markRunning(runId, { branch: "main", commitSha: "abc" });
     db.close();
     const before = await snapshot(home);
 
-    const { code, err } = await run(home, ["sample"], "sample");
+    const { code, err } = await run(home, cwd, [], "sample");
     expect(code).toBe(1);
     expect(err).toMatch(/run in flight/);
     expect(await snapshot(home)).toEqual(before);
-  });
-
-  it("wants a slug", async () => {
-    const { home } = await installed();
-    const { code, err } = await run(home, []);
-    expect(code).toBe(1);
-    expect(err).toMatch(/Which project/);
   });
 });

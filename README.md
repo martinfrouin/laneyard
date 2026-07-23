@@ -326,44 +326,13 @@ reported and the last valid configuration stays live — a typo never takes the 
 
 ### Secrets
 
-The variables your lanes read do not live in a file. They go into an encrypted vault, from the
-Secrets tab of a project or from the command line — the files a project signs with go in the same
-vault, as blocks, and have a section of their own below:
+The variables your lanes read go into an encrypted vault, from a project's Secrets tab — global
+secrets apply everywhere, a project's own win over them. The files it signs with go in the same
+vault as blocks (below).
 
-```bash
-laneyard secret set MATCH_PASSWORD --project cartes-ios   # reads the value from standard input
-echo "$GITHUB_TOKEN" | laneyard secret set GITHUB_TOKEN    # global, and out of your shell history
-```
-
-The value is never an argument: a command line ends up in `~/.zsh_history` and in the output of
-`ps`. Typing the command alone leaves you at a blank line — type or paste the value, then
-`Ctrl-D`.
-
-**Reading one back.** The vault is write-only for anything you called a secret: the server never
-sends a masked value back, so the interface has nothing to uncover and no browser ever holds one.
-
-Not everything stored here is a secret, though — `APP_VERSION`, `SENTRY_ORG`, an issuer id are
-identifiers, and being unable to check what an import stored makes the import something you take on
-faith. So the line is the one you drew yourself: a value kept out of the logs is never returned; a
-value you stored without that is shown on request, one named key at a time. `mask` and `unmask`
-change which it is without touching the value — otherwise revealing something would mean first
-retyping the value you were trying to read.
-
-**Bring the ones you already have.** A project that builds today has its variables in
-`fastlane/.env` — gitignored, on one laptop, and therefore absent from the clone a build runs
-from. From that working copy:
-
-```bash
-laneyard secret import --project cartes-ios          # shows what it would store
-laneyard secret import --project cartes-ios --yes    # stores it
-```
-
-It runs from the CLI because that is where the `.env` is; the server only ever sees a clone. A
-variable naming a service account JSON has the **file's contents** stored, under `SUPPLY_JSON_KEY_DATA`
-— a name supply reads on its own — because a path does not travel to another machine. A variable
-naming a `.p8` is reported and left alone: no action in fastlane reads a `.p8` out of an environment
-variable, and that credential belongs in a signing block, described below. Everything stored is
-masked, and nothing is printed but names.
+A secret is write-only: the server never sends a masked value back, so no browser ever holds one.
+What you did not mark secret — `APP_VERSION`, an issuer id — is shown on request, one key at a time;
+masking and unmasking switch which it is without retyping the value.
 
 Nothing in your lanes has to change afterwards. `key_filepath:` and `json_key:` keep working as
 written — a signing block puts a real file back on disk for the length of a run.
@@ -587,16 +556,19 @@ What it does *not* touch, said as plainly:
 Removal is refused while a run of that project is in flight — that run is using the workspace. A
 run still waiting in the queue will not start: it ends as failed, saying its project is gone.
 
-The same thing from the command line:
+The same thing from the command line, run from the app's directory — the one holding its
+`laneyard.yml`:
 
 ```bash
-laneyard remove cartes-ios --dry-run   # show what would go, and stop
-laneyard remove cartes-ios             # remove it, after a typed confirmation
+cd apps/cartes-ios
+laneyard remove --dry-run   # show what would go, and stop
+laneyard remove             # remove it, after a typed confirmation
 ```
 
-It removes exactly what the Settings tab does, leaves exactly what it leaves, and is confirmed the
-same way — by typing the project's slug back, not `y`. `--dry-run` prints the inventory and stops.
-It is refused for an unknown slug, and while a run of the project is in flight.
+No slug to give: it reads one from the `laneyard.yml` there, refusing if the file is missing or has
+no slug (run `laneyard setup` again). It deletes that file too, and says to commit the deletion.
+Otherwise it matches the Settings tab: confirmed by typing the slug back, `--dry-run` stops at the
+inventory, refused during a run.
 
 ### Resetting
 
@@ -674,8 +646,8 @@ Read this before putting Laneyard on a network.
   substitution happens once, at the point where a run's output fans out, so the log file on disk,
   the live stream to your browser and the stored error summary all contain `••••••` and never the
   value. It survives being split across two chunks of terminal output.
-- **Do not put secrets in `config.yml`.** It is a plain file with ordinary permissions. Use
-  `laneyard secret set` or the Secrets tab.
+- **Do not put secrets in `config.yml`.** It is a plain file with ordinary permissions. Use the
+  Secrets tab, which puts them in the encrypted vault instead.
 
 What this does *not* cover, stated plainly:
 

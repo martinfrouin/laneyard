@@ -254,6 +254,16 @@ describe("runSetupCommand", () => {
     expect(written.projects[0]).not.toHaveProperty("runtime");
   });
 
+  it("writes the project's slug into the file, so remove can read it back", async () => {
+    // The slug is the file's identity: `remove`, run from the app's directory,
+    // takes it from here rather than from an argument.
+    const { app, configPath } = await repoWithFastlaneAtRoot();
+    await runSetupCommand(app, configPath, { yes: true });
+
+    const repoConfig = parse(await readFile(join(app, "laneyard.yml"), "utf8")) as { slug?: string };
+    expect(repoConfig.slug).toBe("plain");
+  });
+
   it("leaves an existing laneyard.yml alone", async () => {
     // Someone put it there, possibly with comments and choices this command
     // knows nothing about — and its values win anyway. It lives in the app's own
