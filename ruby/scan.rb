@@ -76,6 +76,22 @@ rescue LoadError => e
   fail_with("prism is not available in this Ruby (#{e.message})")
 end
 
+# The name in `ENV["X"]` or `ENV.fetch("X")`, or nil for anything else.
+#
+# Both spellings read the environment, and both are how a Fastfile that already
+# uses variables writes a credential — the caller rewrites either to the name a
+# signing block exports. Only a literal string argument is resolved: `ENV[key]`
+# with a computed key names nothing this can report.
+def env_lookup_name(node)
+  return nil unless node.is_a?(Prism::CallNode)
+  receiver = node.receiver
+  return nil unless receiver.is_a?(Prism::ConstantReadNode) && receiver.name == :ENV
+  return nil unless node.name == :[] || node.name == :fetch
+
+  first = node.arguments&.arguments&.first
+  first.is_a?(Prism::StringNode) ? first.unescaped : nil
+end
+
 # Every `key: "literal"` inside a call, wherever the call sits.
 #
 # Descends through everything: a call inside an `if`, inside a `def`, inside a
@@ -99,16 +115,30 @@ def literals_in(node, out = [])
       hashes.flat_map(&:elements).each do |el|
         next unless el.is_a?(Prism::AssocNode)
         next unless el.key.is_a?(Prism::SymbolNode)
-        next unless el.value.is_a?(Prism::StringNode)
-        # A heredoc's location covers its *marker* — `<<~P` is four bytes —
-        # while its value lives on the lines below. Reporting that range would
-        # have the caller splice `ENV.fetch("...")` over the marker and leave
-        # the body stranded after the call: a Fastfile that no longer parses,
-        # written silently into someone's repository. Dropping heredocs costs
-        # nothing real, because a credential path is never written as one while
-        # `changelog:` and `message:` routinely are. Only Ruby can tell a
-        # heredoc from a quoted string, so the decision has to be made here.
-        next if el.value.opening&.start_with?("<<")
+
+        # A literal string, or an environment lookup — the two ways a credential
+        # is written into a call. `adoption.ts` decides which arguments matter;
+        # this stays ignorant of credentials and reports both shapes, tagged so
+        # the caller can tell "a path to lift" from "a variable to rename". A
+        # value that is neither — a computed expression — has nothing the caller
+        # can act on and is skipped.
+        value = el.value
+        if value.is_a?(Prism::StringNode)
+          # A heredoc's location covers its *marker* — `<<~P` is four bytes —
+          # while its value lives on the lines below. Reporting that range would
+          # have the caller splice `ENV.fetch("...")` over the marker and leave
+          # the body stranded after the call: a Fastfile that no longer parses,
+          # written silently into someone's repository. Only Ruby can tell a
+          # heredoc from a quoted string, so the decision has to be made here.
+          next if value.opening&.start_with?("<<")
+          kind = "literal"
+          reported = value.unescaped
+        else
+          name = env_lookup_name(value)
+          next if name.nil?
+          kind = "env"
+          reported = name
+        end
 
         # `start_offset` and `length` are byte offsets, and must stay that way:
         # the caller splices them into a Buffer. Prism also offers
@@ -118,9 +148,10 @@ def literals_in(node, out = [])
         out << {
           action: child.name.to_s,
           arg: el.key.unescaped,
-          value: el.value.unescaped,
-          value_start: el.value.location.start_offset,
-          value_length: el.value.location.length,
+          kind: kind,
+          value: reported,
+          value_start: value.location.start_offset,
+          value_length: value.location.length,
           pair_start: el.location.start_offset,
           pair_length: el.location.length,
           line: el.location.start_line

@@ -5,6 +5,7 @@ import type { Literal } from "../../src/sidecar/scan.js";
 const literal = (over: Partial<Literal>): Literal => ({
   action: "supply",
   arg: "json_key",
+  kind: "literal",
   value: "./play.json",
   valueStart: 10,
   valueLength: 13,
@@ -109,6 +110,38 @@ describe("proposalsFor", () => {
       replacement: 'ENV.fetch("APP_STORE_CONNECT_API_KEY_KEY_ID")',
     });
     expect(p!.suggestedFields).toEqual({ key_id: "9K2LM4XY" });
+  });
+
+  it("normalises an ENV[...] credential arg to Laneyard's name, without a value to lift", () => {
+    const [p] = proposalsFor([
+      literal({ action: "app_store_connect_api_key", arg: "key_filepath", kind: "env", value: "ASC_KEY_FILEPATH", valueStart: 30, valueLength: 22 }),
+    ]);
+    expect(p!.kind).toBe("apple_asc");
+    expect(p!.edits).toContainEqual({
+      start: 30,
+      length: 22,
+      replacement: 'ENV.fetch("APP_STORE_CONNECT_API_KEY_KEY_FILEPATH")',
+    });
+  });
+
+  it("normalises env-ref identifiers too, filling no field from an env name", () => {
+    const [p] = proposalsFor([
+      literal({ action: "app_store_connect_api_key", arg: "key_filepath", kind: "env", value: "ASC_KEY_FILEPATH", valueStart: 30, valueLength: 22 }),
+      literal({ action: "app_store_connect_api_key", arg: "issuer_id", kind: "env", value: "ASC_ISSUER_ID", valueStart: 60, valueLength: 20 }),
+    ]);
+    expect(p!.edits).toContainEqual({
+      start: 60,
+      length: 20,
+      replacement: 'ENV.fetch("APP_STORE_CONNECT_API_KEY_ISSUER_ID")',
+    });
+    // An env name is not the id's value, so nothing pre-fills the block's field.
+    expect(p!.suggestedFields).toEqual({});
+  });
+
+  it("emits nothing when the value already reads the canonical name", () => {
+    expect(
+      proposalsFor([literal({ action: "supply", arg: "json_key", kind: "env", value: "SUPPLY_JSON_KEY" })]),
+    ).toEqual([]);
   });
 
   it("offers a literal secret unchecked, because a false positive is likely", () => {

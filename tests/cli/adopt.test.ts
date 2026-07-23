@@ -41,6 +41,36 @@ describe("runAdoption", () => {
     }
   });
 
+  it("normalises ENV[...] credential args to Laneyard's names, lifting nothing", async () => {
+    const src =
+      `lane :beta do\n` +
+      `  app_store_connect_api_key(\n` +
+      `    key_id: ENV["ASC_KEY_ID"],\n` +
+      `    issuer_id: ENV["ASC_ISSUER_ID"],\n` +
+      `    key_filepath: ENV["ASC_KEY_FILEPATH"],\n` +
+      `  )\n` +
+      `  upload_to_play_store(json_key: ENV["PLAY_JSON"])\n` +
+      `end\n`;
+    const { dir, vault, db } = await project(src);
+    try {
+      const res = await runAdoption({ cwd: dir, fastlaneDir: "fastlane", slug: "app", vault, asker: acceptingAsker });
+
+      expect(res.applied).toBeGreaterThan(0);
+      // The values were variables, not files: nothing is lifted into the vault.
+      expect(vault.listCredentials("app")).toEqual([]);
+
+      const after = await readFile(join(dir, "fastlane", "Fastfile"), "utf8");
+      expect(after).toContain('key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_KEY_ID")');
+      expect(after).toContain('issuer_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ISSUER_ID")');
+      expect(after).toContain('key_filepath: ENV.fetch("APP_STORE_CONNECT_API_KEY_KEY_FILEPATH")');
+      expect(after).toContain('json_key: ENV.fetch("SUPPLY_JSON_KEY")');
+      expect(after).not.toContain("ASC_");
+      expect(after).not.toContain("PLAY_JSON");
+    } finally {
+      db.close();
+    }
+  });
+
   it("writes nothing at all when declined", async () => {
     const { dir, vault, db } = await project(WITH_JSON, { "play.json": `{}` });
     try {

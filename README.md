@@ -120,6 +120,12 @@ Three kinds, by how sure the reading is:
   `api_key` or `url`. **Defaults to no**, value masked: it is the one kind where a false positive is
   likely, and patching a non-secret by default is a silent regression.
 
+The credential args of `app_store_connect_api_key` and Play — `key_id`, `issuer_id`, `key_filepath`,
+`json_key` — are also normalised when they already read a variable: `issuer_id: ENV["ASC_ISSUER_ID"]`
+becomes `ENV.fetch("APP_STORE_CONNECT_API_KEY_ISSUER_ID")`, the name a signing block exports. Store
+the `.p8`/JSON once as a block and the old `ASC_*` secrets can go. A value already reading the right
+name is left alone.
+
 The vault is written before the Fastfile: if lifting fails, nothing has been patched to read a
 missing variable. The patch is spliced by byte offset — everything outside the replaced range is
 byte-identical — and the file is re-parsed before the command returns; if it no longer parses, the

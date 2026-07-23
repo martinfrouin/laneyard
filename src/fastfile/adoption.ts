@@ -89,24 +89,35 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
     const file = FILE_ARGS.find((r) => r.action.test(literal.action) && r.arg === literal.arg);
     if (file) {
       const name = defaultVarNames(file.kind)["path"]!;
+      const main = rewriteTo(literal, name);
       const identifiers = file.kind === "apple_asc" ? appleIdentifierRewrites(appleIdentifiers) : EMPTY;
+      const edits = [...(main ? [main] : []), ...identifiers.edits];
+      // Every edit was a no-op — the value already reads its Laneyard name, and
+      // so did each identifier. Nothing to propose.
+      if (edits.length === 0) continue;
       out.push({
         tier: "file",
         kind: file.kind,
         varName: name,
-        // The explicit literal wins over the Key ID read from the filename.
-        suggestedFields: { ...suggestedFields(file.kind, literal.value), ...identifiers.fields },
+        // The filename gives a Key ID only for a literal path; an env name is not
+        // one. The explicit literal identifier wins over the filename either way.
+        suggestedFields: {
+          ...(literal.kind === "literal" ? suggestedFields(file.kind, literal.value) : {}),
+          ...identifiers.fields,
+        },
         literal,
-        edits: [
-          { start: literal.valueStart, length: literal.valueLength, replacement: `ENV.fetch("${name}")` },
-          ...identifiers.edits,
-        ],
+        edits,
         checked: true,
       });
       continue;
     }
 
-    const inline = INLINE_ARGS.find((r) => r.action.test(literal.action) && r.arg === literal.arg);
+    // Inline contents and a literal secret are, by definition, literals: an
+    // `ENV[...]` here is a variable, handled by the file pass above or left alone.
+    const inline =
+      literal.kind === "literal"
+        ? INLINE_ARGS.find((r) => r.action.test(literal.action) && r.arg === literal.arg)
+        : undefined;
     if (inline) {
       const name = defaultVarNames(inline.kind)["path"]!;
       const identifiers = inline.kind === "apple_asc" ? appleIdentifierRewrites(appleIdentifiers) : EMPTY;
@@ -130,7 +141,7 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
       continue;
     }
 
-    if (SECRET_ARG.test(literal.arg)) {
+    if (literal.kind === "literal" && SECRET_ARG.test(literal.arg)) {
       const name = `${literal.action}_${literal.arg}`.toUpperCase();
       out.push({
         tier: "secret",
@@ -170,14 +181,29 @@ function appleIdentifierRewrites(
   const edits: Edit[] = [];
   const fields: Record<string, string> = {};
   for (const id of identifiers) {
-    edits.push({
-      start: id.valueStart,
-      length: id.valueLength,
-      replacement: `ENV.fetch("${defaults[id.arg]!}")`,
-    });
-    fields[id.arg] = id.value;
+    const edit = rewriteTo(id, defaults[id.arg]!);
+    if (edit) edits.push(edit);
+    // Only a literal is the identifier's value; an env name is the *variable* it
+    // was read from, not the id itself, so it pre-fills nothing.
+    if (id.kind === "literal") fields[id.arg] = id.value;
   }
   return { edits, fields };
+}
+
+/**
+ * The edit that makes one argument read `varName`, or null when it already does.
+ *
+ * A literal is always rewritten — a path or a value is never the variable name.
+ * An `ENV[...]` already reading that exact name is left alone: the point is to
+ * reach Laneyard's name, and it is already there.
+ */
+function rewriteTo(literal: Literal, varName: string): Edit | null {
+  if (literal.kind === "env" && literal.value === varName) return null;
+  return {
+    start: literal.valueStart,
+    length: literal.valueLength,
+    replacement: `ENV.fetch("${varName}")`,
+  };
 }
 
 /** What the credential's filename gives away, so the prompt starts filled in. */

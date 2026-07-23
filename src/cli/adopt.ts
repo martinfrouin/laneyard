@@ -55,15 +55,16 @@ export async function runAdoption(options: AdoptionOptions): Promise<AdoptionRes
     return { applied: 0 };
   }
 
-  // A literal pointing at nothing is dropped rather than reported: there is no
-  // file to lift into the vault, and patching to a variable nothing supplies
-  // would trade one broken build for another.
-  // Resolved once, here, so the prompt, the vault write and the git check all
-  // speak about the same file rather than each resolving the path again.
+  // A literal path is looked up on disk so its bytes can go in the vault; one
+  // pointing at nothing is dropped, since patching to a variable nothing supplies
+  // would trade one broken build for another. An `env` value names no file — it
+  // is already a variable, only its *name* changes — so it is kept without a
+  // lookup, a rewrite with nothing to store. Resolved once, here, so the prompt,
+  // the vault write and the git check all speak about the same file.
   const found = new Map<Proposal, { bytes: Buffer; path: string }>();
   const proposals: Proposal[] = [];
   for (const proposal of proposalsFor(literals)) {
-    if (proposal.tier === "file") {
+    if (proposal.tier === "file" && proposal.literal.kind === "literal") {
       const hit = await readCredential(cwd, fastlaneDir, proposal);
       if (hit === null) continue;
       found.set(proposal, hit);
@@ -77,7 +78,13 @@ export async function runAdoption(options: AdoptionOptions): Promise<AdoptionRes
   const accepted: Proposal[] = [];
   for (const proposal of proposals) {
     process.stdout.write(describe(fastlaneDir, proposal) + "\n");
-    if (!(await asker.confirm(`  Store it here and use ${bold(proposal.varName)}?`, proposal.checked))) {
+    // A rewrite-only proposal stores nothing — it renames a variable your lane
+    // already reads — so the question is not "store it here".
+    const rewriteOnly = proposal.tier === "file" && !found.has(proposal);
+    const question = rewriteOnly
+      ? `  Rewrite it to ${bold(proposal.varName)}?`
+      : `  Store it here and use ${bold(proposal.varName)}?`;
+    if (!(await asker.confirm(question, proposal.checked))) {
       continue;
     }
     accepted.push(proposal.tier === "secret" ? await named(asker, proposal) : proposal);
@@ -156,17 +163,21 @@ function describe(fastlaneDir: string, proposal: Proposal): string {
   // transcripts — printing it there would be this feature leaking the very
   // thing it exists to put away. The file and line above say where to look.
   const shown =
-    proposal.tier === "file"
-      ? `"${literal.value}"`
-      : proposal.tier === "inline"
-        ? dim("(a key, inline in the file)")
-        : dim("(a literal value, masked)");
-  const why =
-    proposal.tier === "inline"
-      ? "This key is in your repository in cleartext."
+    literal.kind === "env"
+      ? `ENV["${literal.value}"]`
       : proposal.tier === "file"
-        ? "That path does not survive the clone: Laneyard builds from your remote."
-        : "A literal secret in a build file is a secret in your history.";
+        ? `"${literal.value}"`
+        : proposal.tier === "inline"
+          ? dim("(a key, inline in the file)")
+          : dim("(a literal value, masked)");
+  const why =
+    literal.kind === "env"
+      ? "Renamed to the variable Laneyard's signing block exports."
+      : proposal.tier === "inline"
+        ? "This key is in your repository in cleartext."
+        : proposal.tier === "file"
+          ? "That path does not survive the clone: Laneyard builds from your remote."
+          : "A literal secret in a build file is a secret in your history.";
 
   return (
     "\n" +
@@ -212,6 +223,11 @@ async function store(
     return;
   }
 
+  // A rewrite-only proposal — a `file` arg that was already a variable — lifts
+  // nothing: there is no file on disk, and the block it points at is the user's
+  // to upload. The report tells them so; here there is simply nothing to store.
+  if (proposal.tier === "file" && found === undefined) return;
+
   const bytes =
     proposal.tier === "inline" ? Buffer.from(proposal.literal.value, "utf8") : found!.bytes;
   // The original name is kept: some tools read meaning from it, and
@@ -238,9 +254,17 @@ async function report(
   accepted: Proposal[],
   found: Map<Proposal, { bytes: Buffer; path: string }>,
 ): Promise<void> {
+  // A rewrite-only proposal — an arg that was already a variable — stored
+  // nothing; counting it as stored would claim a credential is in the vault when
+  // it is the user's still to upload.
+  const stored = accepted.filter((p) => p.tier !== "file" || found.has(p));
+  const normalised = accepted.filter((p) => p.tier === "file" && !found.has(p));
+
   process.stdout.write(
     "\n" +
-      ok(`Stored ${accepted.length} credential${accepted.length > 1 ? "s" : ""} in this machine's vault.\n`) +
+      (stored.length > 0
+        ? ok(`Stored ${stored.length} credential${stored.length > 1 ? "s" : ""} in this machine's vault.\n`)
+        : "") +
       ok(`Patched ${fastlaneDir}/Fastfile.\n`) +
       "\n" +
       // Said plainly because it is the trap `addProjectToConfig` already
@@ -249,6 +273,19 @@ async function report(
       warn("Commit and push it, or your runs still read the old file.\n") +
       dim("  git diff -- " + join(fastlaneDir, "Fastfile") + "\n"),
   );
+
+  // The rewrites now read names a signing block exports. Nothing was stored for
+  // them, so the block is what makes them real — and the old variables the lane
+  // used to read are free to go.
+  if (normalised.length > 0) {
+    const names = [...new Set(normalised.map((p) => p.varName))].sort();
+    process.stdout.write(
+      "\n" +
+        warn(`Supply ${names.join(", ")} from a signing block.\n`) +
+        dim("  Upload the .p8 or service account there; the block exports these names,\n") +
+        dim("  and the variables you set as secrets for them can go.\n"),
+    );
+  }
 
   // Said, never done. Removing a file from someone's repository is not
   // setup's to decide, and `git rm --cached` does not take it out of the

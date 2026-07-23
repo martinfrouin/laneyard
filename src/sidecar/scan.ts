@@ -9,10 +9,13 @@ const exec = promisify(execFile);
 
 const SCRIPT = resolveSidecarScript(dirname(fileURLToPath(import.meta.url)), "scan.rb");
 
-/** One keyword argument written as a literal string, and where it sits. */
+/** One keyword argument the scanner can act on, and where it sits. */
 export interface Literal {
   action: string;
   arg: string;
+  /** `literal` is a quoted string; `env` is an `ENV[...]`/`ENV.fetch(...)` lookup. */
+  kind: "literal" | "env";
+  /** The string for a literal, the looked-up name for an env lookup. */
   value: string;
   /** Byte range of the literal itself, quotes included. */
   valueStart: number;
@@ -49,6 +52,7 @@ export async function scanFastfile(cwd: string, fastlaneDir: string): Promise<Li
     return res.literals.map((l) => ({
       action: String(l["action"]),
       arg: String(l["arg"]),
+      kind: l["kind"] === "env" ? ("env" as const) : ("literal" as const),
       value: String(l["value"]),
       valueStart: Number(l["value_start"]),
       valueLength: Number(l["value_length"]),

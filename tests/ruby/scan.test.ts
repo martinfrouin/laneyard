@@ -49,6 +49,7 @@ describe("scan.rb", () => {
     const [found] = res.literals;
     expect(found.action).toBe("app_store_connect_api_key");
     expect(found.arg).toBe("key_filepath");
+    expect(found.kind).toBe("literal");
     expect(found.value).toBe("./AuthKey_9K2LM4XY.p8");
 
     // The value range covers the literal including its quotes.
@@ -109,9 +110,40 @@ describe("scan.rb", () => {
     expect((await scan(dir)).literals).toEqual([]);
   });
 
-  it("ignores a keyword whose value is not a literal string", async () => {
+  it("reports an ENV[...] lookup as an env value, with the whole expression's range", async () => {
+    const source = `lane :beta do\n  app_store_connect_api_key(issuer_id: ENV["ASC_ISSUER_ID"])\nend\n`;
+    const dir = await projectWithFastfile(source);
+
+    const res = await scan(dir);
+    expect(res.literals).toHaveLength(1);
+
+    const [found] = res.literals;
+    expect(found.action).toBe("app_store_connect_api_key");
+    expect(found.arg).toBe("issuer_id");
+    expect(found.kind).toBe("env");
+    // `value` is the looked-up name, not a path.
+    expect(found.value).toBe("ASC_ISSUER_ID");
+    // The range covers the whole `ENV[...]` expression, so a rewrite replaces it whole.
+    expect(source.slice(found.value_start, found.value_start + found.value_length))
+      .toBe('ENV["ASC_ISSUER_ID"]');
+  });
+
+  it("reports an ENV.fetch(...) lookup as an env value", async () => {
+    const source = `lane :beta do\n  supply(json_key: ENV.fetch("PLAY_JSON"))\nend\n`;
+    const dir = await projectWithFastfile(source);
+
+    const [found] = (await scan(dir)).literals;
+    expect(found.arg).toBe("json_key");
+    expect(found.kind).toBe("env");
+    expect(found.value).toBe("PLAY_JSON");
+    expect(source.slice(found.value_start, found.value_start + found.value_length))
+      .toBe('ENV.fetch("PLAY_JSON")');
+  });
+
+  it("ignores a value that is neither a literal nor an env lookup", async () => {
+    // A computed value has nothing the caller can act on — out of scope.
     const dir = await projectWithFastfile(
-      `lane :beta do\n  supply(json_key: ENV.fetch("SUPPLY_JSON_KEY"))\nend\n`,
+      `lane :beta do\n  supply(json_key: resolve_key)\nend\n`,
     );
     expect((await scan(dir)).literals).toEqual([]);
   });

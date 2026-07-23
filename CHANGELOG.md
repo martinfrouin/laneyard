@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.1
+
+### Setup normalises credential args that already read a variable
+
+Adoption only ever rewrote literal values, so a Fastfile that already read its
+App Store Connect and Play credentials from variables of its own —
+`issuer_id: ENV["ASC_ISSUER_ID"]` — was left as it was, and you had to store
+those `ASC_*` names as secrets by hand. Setup now rewrites the credential args of
+`app_store_connect_api_key` and `supply`/`upload_to_play_store` to the names a
+signing block exports (`APP_STORE_CONNECT_API_KEY_*`, `SUPPLY_JSON_KEY`) whether
+they are literals or `ENV[...]` — so you store the `.p8`/JSON once as a block and
+delete the `ASC_*` secrets. A value already reading the right name is left alone.
+
+Also: `laneyard --version` read a hand-bumped constant that had drifted to 0.5.0;
+it reads `package.json` now, so it cannot lie again.
+
 ## 0.6.0
 
 What `laneyard setup` does about a credential the Fastfile names outright, and a
