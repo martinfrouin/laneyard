@@ -46,6 +46,31 @@ describe("scan.rb", () => {
       .toBe('key_filepath: "./AuthKey_9K2LM4XY.p8"');
   });
 
+  it("reports a keyword argument written inside braces", async () => {
+    // `supply({json_key: "..."})` is a HashNode, not a KeywordHashNode, and is
+    // as much a keyword argument as the braceless form.
+    const source = `lane :beta do\n  supply({json_key: "./brace.json"})\nend\n`;
+    const dir = await projectWithFastfile(source);
+
+    const res = await scan(dir);
+    expect(res.literals).toHaveLength(1);
+
+    const [found] = res.literals;
+    expect(found.action).toBe("supply");
+    expect(found.arg).toBe("json_key");
+    expect(source.slice(found.pair_start, found.pair_start + found.pair_length))
+      .toBe('json_key: "./brace.json"');
+  });
+
+  it("does not descend into a nested hash", async () => {
+    // The inner key is a bundle id, not a keyword, so there is nothing the
+    // caller could rewrite: reporting it under `gym` would be noise.
+    const dir = await projectWithFastfile(
+      `lane :beta do\n  gym(export_options: { provisioningProfiles: { "com.x.y" => "./x.mobileprovision" } })\nend\n`,
+    );
+    expect((await scan(dir)).literals).toEqual([]);
+  });
+
   it("ignores a keyword whose value is not a literal string", async () => {
     const dir = await projectWithFastfile(
       `lane :beta do\n  supply(json_key: ENV.fetch("SUPPLY_JSON_KEY"))\nend\n`,

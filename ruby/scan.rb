@@ -5,12 +5,19 @@
 #
 #   ruby scan.rb --fastlane-dir fastlane
 #
-# Deliberately ignorant. It reports every keyword argument whose value is a
-# literal string, with the byte ranges of the value and of the whole
-# `key: value` pair, and has no idea what a credential is. Deciding which of
-# those matters is `src/fastfile/adoption.ts`'s job, next to the one table that
-# already describes each credential kind — a second copy of that table here
-# would be free to disagree with it, in a language that cannot check it.
+# Deliberately ignorant. It reports the keyword arguments given directly to a
+# call whose value is a literal string, with the byte ranges of the value and of
+# the whole `key: value` pair, and has no idea what a credential is. Deciding
+# which of those matters is `src/fastfile/adoption.ts`'s job, next to the one
+# table that already describes each credential kind — a second copy of that
+# table here would be free to disagree with it, in a language that cannot check
+# it.
+#
+# Nested structures are deliberately not descended into. The literal inside
+# `gym(export_options: { provisioningProfiles: { "id" => "./x" } })` has no
+# keyword to report — its key is a bundle id — and attributing it to `gym` would
+# be noise the caller cannot act on. This claim stays narrow on purpose: a
+# confident answer that is wrong is worse than one that admits its edge.
 #
 # It never requires fastlane. `introspect.rb` must, to enumerate lanes; a
 # syntax tree needs only Prism, and paying a fastlane boot for it would make
@@ -61,8 +68,15 @@ def literals_in(node, out = [])
 
   node.compact_child_nodes.each do |child|
     if child.is_a?(Prism::CallNode)
-      hash = (child.arguments&.arguments || []).find { |a| a.is_a?(Prism::KeywordHashNode) }
-      hash&.elements&.each do |el|
+      # Both node types, because `supply(json_key: "…")` parses as a
+      # KeywordHashNode and `supply({json_key: "…"})` as a HashNode. They are
+      # the same argument written two ways, and looking for only the first
+      # missed the braced form entirely — silently, since a scan that finds
+      # nothing is indistinguishable from a file with nothing to find.
+      hashes = (child.arguments&.arguments || []).select do |a|
+        a.is_a?(Prism::KeywordHashNode) || a.is_a?(Prism::HashNode)
+      end
+      hashes.flat_map(&:elements).each do |el|
         next unless el.is_a?(Prism::AssocNode)
         next unless el.key.is_a?(Prism::SymbolNode)
         next unless el.value.is_a?(Prism::StringNode)
