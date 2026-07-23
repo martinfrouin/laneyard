@@ -70,38 +70,33 @@ export interface RunDetail {
 }
 
 /**
- * What removing a project left behind.
+ * What removing a project removed, and what it left alone.
  *
- * Every field is something the action did *not* do: history it kept, files it
- * left where they were. The interface states them before asking, and names them
- * afterwards so they can be removed by hand.
+ * `removed` is everything Laneyard held for the project — the one confirmed act
+ * clears it all. `untouched` counts the global vault rows it is not allowed to
+ * take; the git remote and the credential originals are untouched too, said in
+ * prose rather than as a number because there is nothing here to count.
  */
 export interface ProjectRemoval {
   slug: string;
   name: string;
-  /** Runs still in the database, each reachable at its own URL. */
-  runsKept: number;
-  /** Absolute paths — the clone, then one folder per run that produced artifacts. */
-  leftOnDisk: string[];
-  /**
-   * What the vault still holds. Counted rather than listed for the same reason
-   * the Secrets tab has no reveal button: a name is all this side ever sees.
-   */
-  vaultKept: {
-    /** Stored under this slug, and found again by a project set up with the same name. */
+  removed: {
+    /** Run rows and their logs — the one thing here that cannot be rebuilt. */
+    runs: number;
+    /** Artifact folders deleted from disk. */
+    artifacts: number;
+    /** Whether the clone was on disk and is now gone. */
+    workspace: boolean;
+    /** Slug-scoped secrets forgotten from the vault. */
     secrets: number;
+    /** Slug-scoped signing blocks forgotten from the vault. */
     signingBlocks: number;
-    /** Shared by every project, and not this removal's business either way. */
+  };
+  /** Shared by every project, so never this removal's to take. */
+  untouched: {
     globalSecrets: number;
     globalSigningBlocks: number;
   };
-}
-
-/** What the second, explicit act removed from the vault. */
-export interface VaultForgotten {
-  slug: string;
-  secretsRemoved: number;
-  signingBlocksRemoved: number;
 }
 
 /** What a listing may expose. There is deliberately no value here. */
@@ -258,16 +253,14 @@ export const api = {
   run: (id: number) => fetch(`/api/runs/${id}`).then(json<RunDetail>),
   log: (id: number, from = 0) => fetch(`/api/runs/${id}/log?from=${from}`).then((r) => r.text()),
 
-  // Refused with 409 while a run of that project is in flight, and the sentence
-  // saying so is the answer — `json` carries it through to the screen.
+  // Irreversible, so gated by the slug typed back — the server refuses a
+  // request that does not carry it, and removes nothing. Refused with 409 while
+  // a run of that project is in flight; either sentence is the answer, and
+  // `json` carries it through to the screen.
   removeProject: (slug: string) =>
-    fetch(`/api/projects/${slug}`, { method: "DELETE" }).then(json<ProjectRemoval>),
-
-  // The one thing removing a project does not do, offered afterwards and never
-  // as part of it. The server refuses while the slug is still a project, so
-  // this is only ever reachable as the clean-up after a removal.
-  forgetProjectVault: (slug: string) =>
-    fetch(`/api/projects/${slug}/vault`, { method: "DELETE" }).then(json<VaultForgotten>),
+    fetch(`/api/projects/${slug}?confirm=${encodeURIComponent(slug)}`, { method: "DELETE" }).then(
+      json<ProjectRemoval>,
+    ),
 
   secrets: (slug: string) => fetch(`/api/projects/${slug}/secrets`).then(json<SecretSummary[]>),
 

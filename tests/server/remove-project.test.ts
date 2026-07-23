@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -10,7 +11,6 @@ import { RunStore } from "../../src/db/runs.js";
 import { CredentialStore } from "../../src/db/credentials.js";
 import { SecretStore } from "../../src/db/secrets.js";
 import { hashPassword } from "../../src/server/auth.js";
-import { requiresAdmin } from "../../src/server/permissions.js";
 import { Vault } from "../../src/secrets/vault.js";
 import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
@@ -126,31 +126,64 @@ describe("removeProjectFromConfig", () => {
   });
 });
 
-describe("DELETE /api/projects/:slug", () => {
-  it("takes the project out of the configuration and out of the listing", async () => {
-    const { app, configPath } = await harness();
-    const cookies = { laneyard_session: await login(app) };
-
-    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
-    expect(res.statusCode).toBe(200);
-
-    const parsed = parse(await readFile(configPath, "utf8")) as { projects: { slug: string }[] };
-    expect(parsed.projects.map((p) => p.slug)).toEqual(["other"]);
-
-    const listing = await app.inject({ method: "GET", url: "/api/projects", cookies });
-    expect((listing.json() as { slug: string }[]).map((p) => p.slug)).toEqual(["other"]);
+/** Queues a run, and writes it a log and an artifact folder as a real one would. */
+async function makeRun(
+  app: Awaited<ReturnType<typeof harness>>["app"],
+  root: string,
+  cookies: Record<string, string>,
+): Promise<number> {
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/projects/sample/runs",
+    cookies,
+    payload: { lane: "beta", params: {} },
   });
+  const { id } = created.json() as { id: number };
 
+  await mkdir(join(root, "logs"), { recursive: true });
+  await writeFile(join(root, "logs", `${id}.log`), "building...\n", "utf8");
+  const artifacts = join(root, "artifacts", String(id));
+  await mkdir(artifacts, { recursive: true });
+  await writeFile(join(artifacts, "app.ipa"), "bytes", "utf8");
+  return id;
+}
+
+const del = (slug: string, confirm?: string): string =>
+  confirm === undefined ? `/api/projects/${slug}` : `/api/projects/${slug}?confirm=${confirm}`;
+
+describe("DELETE /api/projects/:slug", () => {
   it("404s on a project this machine does not know", async () => {
     const { app } = await harness();
     const cookies = { laneyard_session: await login(app) };
-    const res = await app.inject({ method: "DELETE", url: "/api/projects/absent", cookies });
+    const res = await app.inject({ method: "DELETE", url: del("absent", "absent"), cookies });
     expect(res.statusCode).toBe(404);
   });
 
-  it("refuses while a run of that project is in flight, and writes nothing", async () => {
-    const { app, configPath, runs } = await harness();
+  it("refuses without the slug typed back, and removes nothing", async () => {
+    const { app, configPath, root, vault, runs } = await harness();
     const cookies = { laneyard_session: await login(app) };
+    await fillVault(vault);
+    const before = await readFile(configPath, "utf8");
+    const id = await makeRun(app, root, cookies);
+
+    // No confirmation at all, then a confirmation that is not the slug.
+    for (const url of [del("sample"), del("sample", "wrong")]) {
+      const res = await app.inject({ method: "DELETE", url, cookies });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: string }).error).toMatch(/nothing was removed/i);
+    }
+
+    // Everything is exactly where it was.
+    expect(await readFile(configPath, "utf8")).toBe(before);
+    expect(runs.get(id)).not.toBeNull();
+    expect(existsSync(join(root, "artifacts", String(id)))).toBe(true);
+    expect(vault.ownedBy("sample").secrets).toHaveLength(2);
+  });
+
+  it("refuses while a run of that project is in flight, and removes nothing", async () => {
+    const { app, configPath, vault, runs } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    await fillVault(vault);
     const before = await readFile(configPath, "utf8");
 
     const created = await app.inject({
@@ -163,122 +196,92 @@ describe("DELETE /api/projects/:slug", () => {
     // Queued is not in flight: only a run that has begun holds the workspace.
     runs.markRunning(id, { branch: "main", commitSha: "abc" });
 
-    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
+    // Confirmed, so it is the run in flight and not the confirmation that refuses.
+    const res = await app.inject({ method: "DELETE", url: del("sample", "sample"), cookies });
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: string }).error).toMatch(/run/i);
     expect(await readFile(configPath, "utf8")).toBe(before);
+    expect(runs.get(id)).not.toBeNull();
+    expect(vault.ownedBy("sample").secrets).toHaveLength(2);
   });
 
-  it("keeps the run history reachable by its own URL", async () => {
-    const { app } = await harness();
+  it("removes the config block and takes the project out of the listing", async () => {
+    const { app, configPath } = await harness();
     const cookies = { laneyard_session: await login(app) };
 
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/projects/sample/runs",
-      cookies,
-      payload: { lane: "beta", params: {} },
-    });
-    const { id } = created.json() as { id: number };
+    const res = await app.inject({ method: "DELETE", url: del("sample", "sample"), cookies });
+    expect(res.statusCode).toBe(200);
 
-    const removed = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
-    expect((removed.json() as { runsKept: number }).runsKept).toBe(1);
+    const parsed = parse(await readFile(configPath, "utf8")) as { projects: { slug: string }[] };
+    expect(parsed.projects.map((p) => p.slug)).toEqual(["other"]);
 
-    const run = await app.inject({ method: "GET", url: `/api/runs/${id}`, cookies });
-    expect(run.statusCode).toBe(200);
-    expect(run.json()).toMatchObject({ id, projectSlug: "sample" });
+    const listing = await app.inject({ method: "GET", url: "/api/projects", cookies });
+    expect((listing.json() as { slug: string }[]).map((p) => p.slug)).toEqual(["other"]);
   });
 
-  it("names the paths it leaves on disk, and leaves them there", async () => {
-    const { app, root } = await harness();
+  it("removes the clone, the artifacts, the run history and its logs", async () => {
+    const { app, root, runs } = await harness();
     const cookies = { laneyard_session: await login(app) };
 
     const workspace = join(root, "workspaces", "sample");
     await mkdir(workspace, { recursive: true });
     await writeFile(join(workspace, "Gemfile"), "source 'x'\n", "utf8");
 
-    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
+    const id = await makeRun(app, root, cookies);
+    const artifacts = join(root, "artifacts", String(id));
+    const log = join(root, "logs", `${id}.log`);
+
+    const res = await app.inject({ method: "DELETE", url: del("sample", "sample"), cookies });
     expect(res.statusCode).toBe(200);
-    expect((res.json() as { leftOnDisk: string[] }).leftOnDisk).toContain(workspace);
+    expect(res.json()).toMatchObject({
+      removed: { runs: 1, artifacts: 1, workspace: true },
+    });
 
-    // Named, not deleted: the whole point of naming them is that they are still there.
-    expect(await readFile(join(workspace, "Gemfile"), "utf8")).toBe("source 'x'\n");
+    // Gone from disk.
+    expect(existsSync(workspace)).toBe(false);
+    expect(existsSync(artifacts)).toBe(false);
+    expect(existsSync(log)).toBe(false);
+
+    // Gone from the database, and no longer reachable at its own URL.
+    expect(runs.get(id)).toBeNull();
+    const run = await app.inject({ method: "GET", url: `/api/runs/${id}`, cookies });
+    expect(run.statusCode).toBe(404);
   });
 
-  it("does not name a workspace that was never cloned", async () => {
-    const { app } = await harness();
-    const cookies = { laneyard_session: await login(app) };
-    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
-    expect((res.json() as { leftOnDisk: string[] }).leftOnDisk).toEqual([]);
-  });
-
-  it("counts what stays in the vault, and leaves it there", async () => {
+  it("forgets the slug-scoped vault rows and leaves the global ones intact", async () => {
     const { app, vault } = await harness();
     const cookies = { laneyard_session: await login(app) };
     await fillVault(vault);
 
-    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
+    const res = await app.inject({ method: "DELETE", url: del("sample", "sample"), cookies });
     expect(res.json()).toMatchObject({
-      vaultKept: {
-        secrets: 2,
-        signingBlocks: 1,
-        // Shared by every project, so named apart rather than folded in.
-        globalSecrets: 1,
-        globalSigningBlocks: 1,
-      },
+      removed: { secrets: 2, signingBlocks: 1 },
+      // Shared by every project, so named apart and left alone.
+      untouched: { globalSecrets: 1, globalSigningBlocks: 1 },
     });
 
-    // Counted, not deleted: the whole point of counting them is that they are
-    // still there, and still readable by a project set up under the same name.
-    expect(vault.ownedBy("sample").secrets.map((s) => s.key)).toEqual(["SAMPLE_ISSUER", "SAMPLE_TOKEN"]);
-    expect(vault.resolveCredential("sample", "android_keystore")?.fileName).toBe("release.jks");
-  });
-
-  it("reports zero for a project that never had a secret", async () => {
-    const { app } = await harness();
-    const cookies = { laneyard_session: await login(app) };
-    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
-    expect(res.json()).toMatchObject({
-      vaultKept: { secrets: 0, signingBlocks: 0, globalSecrets: 0, globalSigningBlocks: 0 },
-    });
-  });
-});
-
-describe("DELETE /api/projects/:slug/vault", () => {
-  it("removes this project's secrets and blocks, and only those", async () => {
-    const { app, vault } = await harness();
-    const cookies = { laneyard_session: await login(app) };
-    await fillVault(vault);
-    await app.inject({ method: "DELETE", url: "/api/projects/sample", cookies });
-
-    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample/vault", cookies });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ slug: "sample", secretsRemoved: 2, signingBlocksRemoved: 1 });
-
+    // The project's own rows are gone.
     expect(vault.ownedBy("sample")).toEqual({ secrets: [], credentials: [] });
-    // The global rows are every project's, and survive one project going away.
+    // The global rows survive, and still resolve for another project.
     expect(vault.listGlobal().map((s) => s.key)).toEqual(["SHARED_TOKEN"]);
     expect(vault.listGlobalCredentials().map((c) => c.kind)).toEqual(["play_service_account"]);
-    // The other project's own rows were never in scope either.
-    expect(vault.list("other").map((s) => s.key)).toEqual(["SHARED_TOKEN"]);
+    expect(vault.resolve("other")).toMatchObject({ SHARED_TOKEN: "shared-token-value" });
   });
 
-  it("refuses while the slug is still a project on this machine", async () => {
-    const { app, vault } = await harness();
+  it("reports zero for a project with nothing behind it", async () => {
+    const { app } = await harness();
     const cookies = { laneyard_session: await login(app) };
-    await fillVault(vault);
-
-    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample/vault", cookies });
-    expect(res.statusCode).toBe(409);
-    expect((res.json() as { error: string }).error).toMatch(/still a project/i);
-    expect(vault.ownedBy("sample").secrets).toHaveLength(2);
+    const res = await app.inject({ method: "DELETE", url: del("sample", "sample"), cookies });
+    expect(res.json()).toMatchObject({
+      removed: { runs: 0, artifacts: 0, workspace: false, secrets: 0, signingBlocks: 0 },
+      untouched: { globalSecrets: 0, globalSigningBlocks: 0 },
+    });
   });
 
-  it("is an admin's action, like every other route into the vault", () => {
-    // It inherits the restriction rather than declaring its own: the table
-    // matches on a path prefix, and `DELETE /api/projects/:slug` already covers
-    // everything below it. Asserted anyway, because "inherits" is exactly the
-    // kind of thing that stops being true when a table is reordered.
-    expect(requiresAdmin("DELETE", "/api/projects/sample/vault")).toBe(true);
+  it("no longer answers on the old /vault route", async () => {
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    const res = await app.inject({ method: "DELETE", url: "/api/projects/sample/vault", cookies });
+    expect(res.statusCode).toBe(404);
   });
 });

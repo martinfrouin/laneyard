@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { mkdir, open, readFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -67,5 +67,14 @@ export class LogStore {
   /** For serving a large log without loading it entirely into memory. */
   stream(runId: number, fromOffset = 0): NodeJS.ReadableStream {
     return createReadStream(this.pathFor(runId), { start: fromOffset });
+  }
+
+  /**
+   * Removes a run's log file. A run that never opened one is not an error:
+   * `force` makes a missing file a no-op, which is exactly the case for a run
+   * that failed before it wrote a line.
+   */
+  async remove(runId: number): Promise<void> {
+    await rm(this.pathFor(runId), { force: true });
   }
 }

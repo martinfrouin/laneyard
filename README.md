@@ -434,33 +434,34 @@ artifacts and reports scattered around, and none of them belong in your history.
 
 ### Removing a project
 
-Every project has a Settings tab, and the one thing on it is removal. It takes the project's block
-out of `config.yml` — through the YAML document, so your comments and your key order survive —
-and stops showing it. It is confirmed by typing the project's name: it is the one destructive
-action in Laneyard, and a dialogue you can click through is not a confirmation.
+Every project has a Settings tab, and the one thing on it is removal. It removes everything
+Laneyard holds for the project, in one confirmed act. It is confirmed by typing the project's
+name: it is the one destructive action in Laneyard, and a dialogue you can click through is not a
+confirmation.
 
-What it does *not* do is most of the point, because "delete" elsewhere usually means the opposite:
+What it removes:
 
-- **the runs stay.** Every build that project ever ran keeps its page, its log and its artifacts,
-  each still at its own address. Removing a project means stop showing it, not destroy its past;
-- **the clone and the artifacts stay on disk.** Their paths are printed when it is done, so you
-  can remove them yourself. Nothing is deleted from a web page on one click;
-- **the secrets and the signing blocks stay in the vault**, encrypted. The screen counts them
-  before you confirm and again once it is done, because they are the one thing on this list you
-  cannot go and look at — no route ever sends a credential back. Their scope is the slug, so a
-  project set up later under the same name finds them and would sign with a keystore nobody
-  uploaded;
-- **the repository is untouched.** Its `laneyard.yml`, its Fastfile and its history are the
-  repository's, not Laneyard's.
+- **its block in `config.yml`** — taken out through the YAML document, so your comments and your
+  key order survive;
+- **its run history and its logs.** Every build the project ran, its rows and its logs, deleted.
+  This is the one thing here nothing can rebuild, and the reason removal is behind a typed name;
+- **the clone and the artifacts on disk**, deleted;
+- **its secrets and its signing blocks in the vault** — Laneyard's own encrypted copies, forgotten.
+  The screen counts them before you confirm and again once it is done, because they are the one
+  thing on this list you cannot go and look at: no route ever sends a credential back.
+
+What it does *not* touch, said as plainly:
+
+- **the git remote.** The repository is on your host and your disk. Laneyard neither reads nor
+  writes it;
+- **the credential originals.** The `.p8` and the keystore you uploaded are wherever you keep them
+  — a password manager, a safe. Laneyard removes only its own encrypted copy; you would upload them
+  again from there;
+- **global secrets and global signing blocks.** They are read by every project on the machine, not
+  this one's to take, and they are left alone. The result names how many it left.
 
 Removal is refused while a run of that project is in flight — that run is using the workspace. A
 run still waiting in the queue will not start: it ends as failed, saying its project is gone.
-
-Once it is done, the result screen offers the one thing removal deliberately did not do: removing
-what the vault still holds under that name. It is a second action, confirmed by typing the name
-again, and it is never part of removing the project — a `.p8` or a keystore cannot be read back
-out of Laneyard, so the copy it holds is the only one it ever had. Global secrets and global
-signing blocks are shared by every project and are left alone.
 
 ### Uninstalling
 
@@ -554,7 +555,7 @@ What this does *not* cover, stated plainly:
 - `✓` edit the Fastfile in the browser, verified on every save
 - `✓` signing credentials stored whole — the file and the fields beside it — written to disk for
   the length of a run and exported under the names your project already reads
-- `✓` remove a project from the interface, without touching its history
+- `✓` remove a project from the interface — everything Laneyard holds for it, behind a typed name
 - `✓` `laneyard uninstall`: the whole inventory first, then a typed confirmation, then the folder
 - `✓` named accounts, with a builder role that never sees a credential
 - `○` git-triggered and scheduled builds

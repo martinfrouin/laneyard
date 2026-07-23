@@ -120,6 +120,18 @@ export class RunStore {
     return rows.map(toRun);
   }
 
+  /**
+   * Deletes every run of a project, and returns how many rows went.
+   *
+   * The steps and the artifact records go with them, by the `ON DELETE CASCADE`
+   * on their foreign keys — with `foreign_keys = ON`, which `openDatabase` sets.
+   * The log files and the artifact folders live on disk, not here: the caller
+   * removes those, which is why it reads the run ids before calling this.
+   */
+  removeByProject(slug: string): number {
+    return this.db.prepare("DELETE FROM run WHERE project_slug = ?").run(slug).changes;
+  }
+
   setStatus(id: number, status: RunStatus): void {
     this.db.prepare("UPDATE run SET status = ? WHERE id = ?").run(status, id);
   }

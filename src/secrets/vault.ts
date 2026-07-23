@@ -65,12 +65,13 @@ export class Vault {
   /**
    * Forgets everything stored under one project's name.
    *
-   * Never called by removing a project: that route leaves the vault alone on
-   * purpose and says what stayed. This is the separate, deliberate act someone
-   * takes afterwards, once they have read what it is they are about to lose —
-   * a credential is the one thing here that cannot be looked at before it goes.
+   * Part of removing a project: that act clears the vault along with the clone,
+   * the artifacts and the run history, behind the one typed confirmation that
+   * covers all of it. What it forgets is Laneyard's own encrypted copy — the
+   * `.p8` and the keystore that went in are still wherever the user keeps them.
    *
-   * Scoped by slug, so a global secret or a global signing block survives it.
+   * Scoped by slug, so a global secret or a global signing block survives it:
+   * those are read by every project and are never one project's to remove.
    */
   forget(projectSlug: string): { secrets: number; credentials: number } {
     return {
