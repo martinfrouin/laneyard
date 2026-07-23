@@ -20,7 +20,7 @@ import type { FastfileUses } from "../sidecar/uses.js";
 import type { Vault } from "../secrets/vault.js";
 import { authenticate, LoginThrottle, COOKIE_OPTIONS, SESSION_COOKIE, SessionStore } from "./auth.js";
 import type { Identity } from "./auth.js";
-import { requiresAdmin } from "./permissions.js";
+import { accountMayReach, projectSlugOfRequest, requiresAdmin } from "./permissions.js";
 import { registerCredentialRoutes } from "./routes/credentials.js";
 import { registerFastfileRoutes } from "./routes/fastfile.js";
 import { registerProjectRoutes } from "./routes/projects.js";
@@ -255,6 +255,18 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
     if (identity.role !== "admin" && requiresAdmin(req.method, req.url)) {
       return reply.code(403).send({ error: "This action requires the admin role" });
+    }
+
+    // Per-project reach, for a non-admin only: a project this account may not
+    // reach is invisible, not shown-and-locked, so it answers 404 with the very
+    // body a genuinely unknown project gives. A 403 would confirm the project
+    // exists. The slug is resolved here, in the one hook, rather than in each
+    // run and project handler — the same reason `requiresAdmin` lives here.
+    if (identity.role !== "admin") {
+      const slug = projectSlugOfRequest(req.url, (id) => ctx.runs.get(id)?.projectSlug ?? null);
+      if (slug !== null && !accountMayReach(account, slug)) {
+        return reply.code(404).send({ error: "Unknown project" });
+      }
     }
   });
 

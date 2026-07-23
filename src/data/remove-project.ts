@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { removeProjectFromAccounts } from "../config/accounts.js";
 import { removeProjectFromConfig } from "../cli/setup.js";
 import type { RunStore } from "../db/runs.js";
 import type { LogStore } from "../logs/store.js";
@@ -77,6 +78,10 @@ export async function removeProjectData(deps: RemoveProjectDeps, slug: string): 
   if (!removed) {
     return { found: false, runs: 0, artifacts: 0, workspace: false, clonePath, secrets: 0, signingBlocks: 0 };
   }
+  // The slug also leaves every account's grants, in the same file: a grant onto
+  // a project that no longer exists is dead data, and a slug re-used later must
+  // not silently inherit it.
+  await removeProjectFromAccounts(deps.configPath, slug);
   await deps.reloadConfig();
 
   // The clone.

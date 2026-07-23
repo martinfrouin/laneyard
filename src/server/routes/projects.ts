@@ -1,19 +1,30 @@
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../app.js";
+import { accountMayReach } from "../permissions.js";
 import { removeProjectData } from "../../data/remove-project.js";
 
 export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
-  app.get("/api/projects", async () =>
-    ctx.config.projects().map((p) => {
-      const last = ctx.runs.listByProject(p.slug, 1)[0] ?? null;
-      return {
-        slug: p.slug,
-        name: p.name,
-        color: p.color,
-        lastRun: last && { id: last.id, status: last.status, lane: last.lane, finishedAt: last.finishedAt },
-      };
-    }),
-  );
+  // The listing every account is shown, filtered to what it may reach. This is
+  // the source of the invisibility the interface shows — the nav and the project
+  // list are driven by it, so a filtered response filters the UI with no change
+  // beyond what the data carries. The account is looked up fresh, the way the
+  // auth hook does, because config.yml is the truth on every request. An admin,
+  // and a builder with no `projects` field, are served every project.
+  app.get("/api/projects", async (req) => {
+    const account = ctx.config.server()?.users.find((u) => u.name === req.identity!.name);
+    return ctx.config
+      .projects()
+      .filter((p) => account !== undefined && accountMayReach(account, p.slug))
+      .map((p) => {
+        const last = ctx.runs.listByProject(p.slug, 1)[0] ?? null;
+        return {
+          slug: p.slug,
+          name: p.name,
+          color: p.color,
+          lastRun: last && { id: last.id, status: last.status, lane: last.lane, finishedAt: last.finishedAt },
+        };
+      });
+  });
 
   /**
    * Removes everything Laneyard holds for a project, in one confirmed act.
@@ -93,8 +104,10 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
     );
     if (!result.found) return reply.code(404).send({ error: "Unknown project" });
 
-    // A later change will strip this slug from every account's access grants.
-    // That is one more "forget for this slug" step, and it belongs in the core.
+    // The slug is also stripped from every account's access grants, in the core
+    // beside the other "forget for this slug" steps: a grant pointing at a
+    // project that no longer exists is dead data, and a project re-created later
+    // under the same slug must not silently inherit an old grant.
 
     return reply.send({
       slug,

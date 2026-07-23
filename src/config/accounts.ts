@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
-import { Document, parseDocument, YAMLSeq } from "yaml";
+import { Document, parseDocument, YAMLMap, YAMLSeq } from "yaml";
 import { hashPassword } from "../server/auth.js";
 import type { UserEntry, UserRole } from "./schema.js";
 import { serializeYaml } from "./yaml.js";
@@ -89,18 +89,87 @@ export async function upsertUserInConfig(
   const doc = await open(path);
   const seq = usersSeq(doc);
 
-  const stored: UserEntry = {
-    name: entry.name,
-    role: entry.role,
-    password_hash: hashPassword(entry.password),
-  };
   const at = seq.items.findIndex((item) => nameOf(item) === entry.name);
-  const node = doc.createNode(stored);
-  if (at === -1) seq.add(node);
-  else seq.items[at] = node;
+  const password_hash = hashPassword(entry.password);
+
+  if (at === -1) {
+    // A new account starts with no access: `projects: []` is the empty grant,
+    // told apart from an absent field, which would mean "every project". A
+    // builder is thus created seeing nothing until an admin grants a project;
+    // an admin ignores the field, and carries it only so the entries are
+    // uniform.
+    seq.add(doc.createNode({ name: entry.name, role: entry.role, password_hash, projects: [] }));
+    await writeFile(path, serializeYaml(doc), "utf8");
+    return { created: true };
+  }
+
+  // Replacing changes the role and the password and nothing else: the fields are
+  // set on the existing node rather than a fresh one put in its place, so a
+  // hand-added `projects` grant — and any comment or key order — survives a
+  // password change it has nothing to do with.
+  const item = seq.items[at] as YAMLMap;
+  item.set("role", entry.role);
+  item.set("password_hash", password_hash);
 
   await writeFile(path, serializeYaml(doc), "utf8");
-  return { created: at === -1 };
+  return { created: false };
+}
+
+/**
+ * Writes an account's project grants, replacing whatever list it had.
+ *
+ * The one edit behind `PUT /api/users/:name/projects`: it sets `projects` on the
+ * named account through the YAML document, so a hand-written file keeps its
+ * comments and its key order. Returns false when no account carried that name,
+ * so the caller can answer 404 rather than write a grant onto nobody.
+ */
+export async function setUserProjectsInConfig(
+  path: string,
+  name: string,
+  projects: string[],
+): Promise<boolean> {
+  const doc = await open(path);
+  const users = doc.getIn(["server", "users"]);
+  if (!(users instanceof YAMLSeq)) return false;
+
+  const at = users.items.findIndex((item) => nameOf(item) === name);
+  if (at === -1) return false;
+
+  (users.items[at] as YAMLMap).set("projects", doc.createNode(projects));
+  await writeFile(path, serializeYaml(doc), "utf8");
+  return true;
+}
+
+/**
+ * Strips a project's slug from every account's grants.
+ *
+ * Called when a project is removed: a grant pointing at a project that no longer
+ * exists is dead data, and — the same hazard as a re-used vault slug — a project
+ * re-created later under that slug must not silently inherit an old grant. Only
+ * accounts that carried the slug are touched, so a file with no grants at all
+ * comes back byte-for-byte unchanged.
+ */
+export async function removeProjectFromAccounts(path: string, slug: string): Promise<void> {
+  const doc = await open(path);
+  const users = doc.getIn(["server", "users"]);
+  if (!(users instanceof YAMLSeq)) return;
+
+  let changed = false;
+  for (const item of users.items) {
+    if (!(item instanceof YAMLMap)) continue;
+    const projects = item.get("projects");
+    if (!(projects instanceof YAMLSeq)) continue;
+
+    const at = projects.items.findIndex(
+      (n) => (n && typeof n === "object" && "value" in n ? (n as { value: unknown }).value : n) === slug,
+    );
+    if (at !== -1) {
+      projects.items.splice(at, 1);
+      changed = true;
+    }
+  }
+
+  if (changed) await writeFile(path, serializeYaml(doc), "utf8");
 }
 
 /**

@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../../src/server/app.js";
 import { hashPassword } from "../../src/server/auth.js";
-import { REQUIRES_ADMIN, requiresAdmin } from "../../src/server/permissions.js";
+import {
+  REQUIRES_ADMIN,
+  accountMayReach,
+  projectSlugOfRequest,
+  requiresAdmin,
+} from "../../src/server/permissions.js";
 import { ConfigStore } from "../../src/config/store.js";
 import { openDatabase } from "../../src/db/open.js";
 import { CredentialStore } from "../../src/db/credentials.js";
@@ -153,8 +158,58 @@ const ADMIN_ONLY_REQUESTS: { method: "GET" | "PUT" | "POST" | "DELETE"; url: str
   { method: "DELETE", url: "/api/projects/sample" },
   { method: "GET", url: "/api/users" },
   { method: "POST", url: "/api/users" },
+  { method: "PUT", url: "/api/users/ci/projects" },
   { method: "DELETE", url: "/api/users/ci" },
 ];
+
+describe("accountMayReach", () => {
+  it("passes an admin every slug, whatever its list says", () => {
+    expect(accountMayReach({ role: "admin", projects: undefined }, "anything")).toBe(true);
+    // An admin ignores the field: even an empty list reaches everything.
+    expect(accountMayReach({ role: "admin", projects: [] }, "anything")).toBe(true);
+  });
+
+  it("passes a builder with no list every slug — an old config keeps its access", () => {
+    expect(accountMayReach({ role: "builder", projects: undefined }, "a")).toBe(true);
+  });
+
+  it("refuses a builder with an empty list every slug", () => {
+    expect(accountMayReach({ role: "builder", projects: [] }, "a")).toBe(false);
+  });
+
+  it("holds a builder to the slugs its list names", () => {
+    expect(accountMayReach({ role: "builder", projects: ["a"] }, "a")).toBe(true);
+    expect(accountMayReach({ role: "builder", projects: ["a"] }, "b")).toBe(false);
+  });
+});
+
+describe("projectSlugOfRequest", () => {
+  const runSlug = (id: number) => (id === 12 ? "from-run" : null);
+
+  it("reads the slug straight out of a project path", () => {
+    expect(projectSlugOfRequest("/api/projects/sample/runs", runSlug)).toBe("sample");
+    expect(projectSlugOfRequest("/api/projects/sample", runSlug)).toBe("sample");
+  });
+
+  it("carries no slug for the bare listing — it is filtered per account", () => {
+    expect(projectSlugOfRequest("/api/projects", runSlug)).toBeNull();
+    expect(projectSlugOfRequest("/api/projects?after=1", runSlug)).toBeNull();
+  });
+
+  it("maps a run id to its project through the lookup", () => {
+    expect(projectSlugOfRequest("/api/runs/12", runSlug)).toBe("from-run");
+    expect(projectSlugOfRequest("/api/runs/12/log", runSlug)).toBe("from-run");
+    // A run nobody has: null, and the handler answers its own 404.
+    expect(projectSlugOfRequest("/api/runs/99", runSlug)).toBeNull();
+    expect(projectSlugOfRequest("/api/runs/abc", runSlug)).toBeNull();
+  });
+
+  it("concerns no project for the vault, the accounts or /api/me", () => {
+    for (const url of ["/api/secrets", "/api/credentials", "/api/users/ci/projects", "/api/me"]) {
+      expect([url, projectSlugOfRequest(url, runSlug)]).toEqual([url, null]);
+    }
+  });
+});
 
 describe("the admin list, from a builder's session", () => {
   it("covers every entry of the table with at least one request", () => {

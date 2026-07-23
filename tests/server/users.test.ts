@@ -68,9 +68,11 @@ describe("GET /api/users", () => {
     const res = await app.inject({ method: "GET", url: "/api/users", cookies: await asAdmin() });
 
     expect(res.statusCode).toBe(200);
+    // `projects` is null for an account carrying no grant list — every project,
+    // and what a hand-written config gives on upgrade.
     expect(res.json()).toEqual([
-      { name: "martin", role: "admin" },
-      { name: "ci", role: "builder" },
+      { name: "martin", role: "admin", projects: null },
+      { name: "ci", role: "builder", projects: null },
     ]);
   });
 

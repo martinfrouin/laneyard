@@ -11,6 +11,8 @@
  * changes what a build does, and nothing that reveals a credential.
  */
 
+import type { UserEntry } from "../config/schema.js";
+
 /** A method and a path, where `*` means "whatever the verb". */
 export interface RoutePattern {
   method: string;
@@ -80,4 +82,61 @@ export function requiresAdmin(method: string, url: string): boolean {
     if (parts.length < expected.length) return false;
     return expected.every((seg, i) => seg.startsWith(":") || seg === parts[i]);
   });
+}
+
+/**
+ * May this account reach that project?
+ *
+ * The other half of the auth answer, and data-driven rather than a role: it is
+ * still two roles, with the builder's reach narrowed by a list. An `admin`
+ * reaches everything — managing the server is the whole role. A `builder` with
+ * no `projects` field reaches everything too (an old config, untouched by this
+ * feature); an empty list reaches nothing; a list reaches its slugs.
+ *
+ * Named and beside `REQUIRES_ADMIN` on purpose: the reach check is a permission,
+ * and a permission expressed as an `if` inside a handler is one nobody finds
+ * during an audit.
+ */
+export function accountMayReach(
+  account: Pick<UserEntry, "role" | "projects">,
+  slug: string,
+): boolean {
+  if (account.role === "admin") return true;
+  if (account.projects === undefined) return true;
+  return account.projects.includes(slug);
+}
+
+/**
+ * The project a request concerns, or null when it concerns none.
+ *
+ * Two shapes carry a project:
+ *
+ *   `/api/projects/:slug/*` — the slug is in the path. The bare `/api/projects`
+ *     listing carries none: it is filtered in its own handler, per account.
+ *   `/api/runs/:id/*` — a run addresses a project by id, not a slug, so the id
+ *     is mapped through `runSlug`. An id that names no run yields null, and the
+ *     handler answers its own 404 for the unknown run.
+ *
+ * Everything else — the vault, the accounts, `/api/me` — concerns no single
+ * project and returns null, passing the reach check untouched.
+ *
+ * `runSlug` is handed in rather than the run store reached into, so the mapping
+ * this depends on stays a one-line lookup the caller owns and this stays a pure,
+ * testable function.
+ */
+export function projectSlugOfRequest(
+  url: string,
+  runSlug: (runId: number) => string | null,
+): string | null {
+  const parts = segments(url);
+  if (parts[0] !== "api") return null;
+
+  if (parts[1] === "projects" && parts.length >= 3) return parts[2] ?? null;
+
+  if (parts[1] === "runs" && parts.length >= 3) {
+    const id = Number(parts[2]);
+    return Number.isInteger(id) ? runSlug(id) : null;
+  }
+
+  return null;
 }

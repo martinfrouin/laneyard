@@ -64,6 +64,19 @@ export const userEntrySchema = z.object({
   name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/, "name: letters, digits, dot, dash, underscore"),
   role: userRoleSchema,
   password_hash: z.string().min(1),
+  /**
+   * Which projects a builder may reach, by slug. Three-way, and the three ways
+   * carry back-compat for free:
+   *
+   *   absent → every project. A file written before this feature has no field
+   *     on anyone, so nobody loses access on upgrade.
+   *   []     → no project. What account creation now writes, so a new builder
+   *     starts with nothing until granted.
+   *   a list → exactly those slugs.
+   *
+   * An `admin` ignores it entirely: managing the server is their whole role.
+   */
+  projects: z.array(slugSchema).optional(),
 });
 
 export const serverConfigSchema = z.object({

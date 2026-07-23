@@ -33,10 +33,21 @@ const empty = async (res: Response): Promise<void> => {
  */
 export type Role = "admin" | "builder";
 
-/** Who is signed in. The same shape the accounts listing is made of. */
+/** Who is signed in. */
 export interface Identity {
   name: string;
   role: Role;
+}
+
+/**
+ * An account as the accounts screen sees it.
+ *
+ * `projects` is the reach: the slugs a builder may see, `null` when it carries
+ * no list at all and so reaches every project (an old config, or an admin — for
+ * whom the field is ignored and the checklist not drawn).
+ */
+export interface Account extends Identity {
+  projects: string[] | null;
 }
 
 export interface ProjectSummary {
@@ -233,7 +244,16 @@ export const api = {
       body: JSON.stringify({ masked }),
     }).then(empty),
 
-  users: () => fetch("/api/users").then(json<Identity[]>),
+  users: () => fetch("/api/users").then(json<Account[]>),
+
+  // Sets which projects a builder may reach. The server refuses this for an
+  // admin — it reaches everything — and `empty` carries that sentence through.
+  setUserProjects: (name: string, projects: string[]) =>
+    fetch(`/api/users/${encodeURIComponent(name)}/projects`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projects }),
+    }).then(empty),
 
   // The refusals are sentences — the last admin, a password too short — and
   // `json` carries them to the screen rather than flattening them into a code.

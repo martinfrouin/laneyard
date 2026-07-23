@@ -103,7 +103,7 @@ server:
   bind: 0.0.0.0
   users:                         # written by `laneyard setup`, see Accounts
     - { name: martin, role: admin, password_hash: "scrypt$…" }
-    - { name: lea, role: builder, password_hash: "scrypt$…" }
+    - { name: lea, role: builder, password_hash: "scrypt$…", projects: [cartes-ios] }
   max_concurrent_runs: 1         # only 1 is accepted, see below
   retention: { runs: 50, artifact_days: 30 }
 
@@ -142,6 +142,26 @@ The interface shows a builder only what a builder can use — the secrets, fastf
 tabs are not drawn, and neither is the accounts screen. That is courtesy, not security: the
 server refuses those routes on its own, whatever the browser was shown, and the test suite
 proves it for every verb and every spelling of the address.
+
+#### Which projects a builder reaches
+
+An admin reaches every project — managing the server is the whole role. A builder reaches only the
+projects it is granted, one at a time, from the accounts screen: each builder carries a checklist
+of the projects, and ticking one grants it. A project a builder cannot reach is **invisible**, not
+shown-and-locked — absent from its project list and its navigation, and a 404 by URL, answered with
+the very body a project that does not exist gives, so the two cannot be told apart. This is enforced
+by the server, in one place, not hidden in the browser.
+
+The reach is a `projects` list on the account in `config.yml`, and its three states are deliberate:
+
+- **absent** — every project. A config written before this feature has no such field on anyone, so
+  nobody loses access on an upgrade.
+- **`[]`** — no project. This is what a newly created account is written with, so a new builder
+  starts seeing nothing until granted.
+- **a list of slugs** — exactly those projects.
+
+Removing a project strips its slug from every account, so a grant never points at a project that is
+gone, and a project re-created later under the same slug does not silently inherit an old grant.
 
 Add and remove accounts from the accounts screen, or from the command line:
 

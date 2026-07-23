@@ -44,7 +44,7 @@ async function loadedUsers(dir: string): Promise<UserEntry[]> {
 
 const accountsIn = async (dir: string) =>
   (parse(await readFile(join(dir, "config.yml"), "utf8")) as {
-    server: { users: { name: string; role: string; password_hash: string }[] };
+    server: { users: { name: string; role: string; password_hash: string; projects?: string[] }[] };
   }).server.users;
 
 describe("laneyard user add", () => {
@@ -66,6 +66,14 @@ describe("laneyard user add", () => {
     const dir = await home();
     await run(dir, ["add", "renaud"]);
     expect((await accountsIn(dir)).find((u) => u.name === "renaud")!.role).toBe("builder");
+  });
+
+  it("starts a new account reaching no project", async () => {
+    // `projects: []` is the empty grant, told apart from an absent field: a new
+    // builder sees nothing until an admin grants it a project.
+    const dir = await home();
+    await run(dir, ["add", "renaud"]);
+    expect((await accountsIn(dir)).find((u) => u.name === "renaud")!.projects).toEqual([]);
   });
 
   it("keeps the comments of a hand-written file", async () => {
