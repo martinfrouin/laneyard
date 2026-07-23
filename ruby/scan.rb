@@ -90,6 +90,11 @@ def literals_in(node, out = [])
         # heredoc from a quoted string, so the decision has to be made here.
         next if el.value.opening&.start_with?("<<")
 
+        # `start_offset` and `length` are byte offsets, and must stay that way:
+        # the caller splices them into a Buffer. Prism also offers
+        # `start_character_offset`, and swapping one in would still pass any
+        # test whose fixture is pure ASCII while putting one accent above the
+        # literal enough to land a patch mid-string in a build file.
         out << {
           action: child.name.to_s,
           arg: el.key.unescaped,

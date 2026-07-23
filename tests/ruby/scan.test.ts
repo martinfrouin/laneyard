@@ -46,6 +46,31 @@ describe("scan.rb", () => {
       .toBe('key_filepath: "./AuthKey_9K2LM4XY.p8"');
   });
 
+  it("reports offsets in bytes, not in characters", async () => {
+    // The caller splices these ranges into a Buffer. An accented comment above
+    // the literal is all it takes for character offsets to land the patch in
+    // the middle of a string, so the fixture puts several of them there and the
+    // assertions slice bytes — a JavaScript `slice` over ASCII proves nothing.
+    const source =
+      `lane :beta do\n  # clé privée de déploiement à Cupertino — accès restreint\n  app_store_connect_api_key(key_filepath: "./AuthKey_9K2LM4XY.p8")\nend\n`;
+    const dir = await projectWithFastfile(source);
+
+    const res = await scan(dir);
+    const [found] = res.literals;
+    const bytes = Buffer.from(source, "utf8");
+
+    expect(bytes.subarray(found.value_start, found.value_start + found.value_length).toString())
+      .toBe('"./AuthKey_9K2LM4XY.p8"');
+    expect(bytes.subarray(found.pair_start, found.pair_start + found.pair_length).toString())
+      .toBe('key_filepath: "./AuthKey_9K2LM4XY.p8"');
+
+    // And the same range read as characters must *not* line up, which is what
+    // makes the two assertions above a test of the byte contract rather than a
+    // restatement of the first test in this file.
+    expect(source.slice(found.value_start, found.value_start + found.value_length))
+      .not.toBe('"./AuthKey_9K2LM4XY.p8"');
+  });
+
   it("reports a keyword argument written inside braces", async () => {
     // `supply({json_key: "..."})` is a HashNode, not a KeywordHashNode, and is
     // as much a keyword argument as the braceless form.
