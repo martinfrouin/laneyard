@@ -15,13 +15,26 @@ async function projectWithFastfile(content: string): Promise<string> {
   return dir;
 }
 
-/** No fastlane environment: that is the point of this script. */
+/**
+ * Both streams, and never a throw: what this script writes where is half of
+ * its contract, and a test that only sees stdout cannot check the other half.
+ *
+ * No fastlane environment either: that is the point of this script.
+ */
+async function run(dir: string): Promise<{ stdout: string; stderr: string }> {
+  try {
+    return await exec("ruby", [SCRIPT, "--fastlane-dir", "fastlane"], {
+      cwd: dir,
+      timeout: 30_000,
+    });
+  } catch (cause) {
+    const err = cause as { stdout?: string; stderr?: string };
+    return { stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
+  }
+}
+
 async function scan(dir: string): Promise<any> {
-  const { stdout } = await exec("ruby", [SCRIPT, "--fastlane-dir", "fastlane"], {
-    cwd: dir,
-    timeout: 30_000,
-  });
-  return JSON.parse(stdout);
+  return JSON.parse((await run(dir)).stdout);
 }
 
 describe("scan.rb", () => {
@@ -125,6 +138,17 @@ describe("scan.rb", () => {
     const res = await scan(dir);
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/could not be parsed/i);
+  });
+
+  it("answers a structured error when a literal is not valid UTF-8", async () => {
+    // Serialising this literal raises inside Ruby. The contract says an error
+    // is a valid response; a trace on stderr and an empty stdout is not one.
+    const dir = await projectWithFastfile(
+      `lane :beta do\n  supply(json_key: "./key\\xFF.json")\nend\n`,
+    );
+    const { stdout, stderr } = await run(dir);
+    expect(stderr).toBe("");
+    expect(JSON.parse(stdout).ok).toBe(false);
   });
 
   it("finds literals in a method the Fastfile defines, not only in lanes", async () => {

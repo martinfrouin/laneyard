@@ -30,14 +30,30 @@ require "json"
 
 REAL_STDOUT = $stdout.dup
 
-def respond(payload)
-  REAL_STDOUT.puts JSON.generate(payload)
+# Writes the one JSON object this process produces, and stops.
+#
+# Serialisation is *not* done here, on purpose: `JSON.generate` raises on a
+# string that is not valid UTF-8, and a Fastfile may well hold one
+# (`supply(json_key: "./key\xFF.json")` is enough). Raising from inside the
+# writer put the failure outside every guard in this file, so the caller got a
+# Ruby trace on stderr and nothing at all on stdout — the one outcome the
+# contract at the top promises never to happen. Callers generate under a guard
+# and hand the finished string here.
+def emit(json)
+  REAL_STDOUT.puts json
   REAL_STDOUT.flush
   exit 0
 end
 
+def respond(payload)
+  emit(JSON.generate(payload))
+end
+
 def fail_with(message)
-  respond({ ok: false, error: message.to_s })
+  # Scrubbed, because an error message can quote the bytes that caused it:
+  # `JSON::GeneratorError` names the offending literal. An error path that
+  # raises while reporting an error leaves the caller with nothing.
+  respond({ ok: false, error: message.to_s.dup.force_encoding("UTF-8").scrub("?") })
 end
 
 dir_index = ARGV.index("--fastlane-dir")
@@ -46,8 +62,12 @@ fastfile_path = File.join(Dir.pwd, fastlane_dir, "Fastfile")
 
 fail_with("Fastfile not found: #{fastfile_path}") unless File.exist?(fastfile_path)
 
-# Anything the parser writes must not reach the real output, which carries JSON
-# and nothing else.
+# Insurance, not a fix for a known culprit: unlike `introspect.rb`, which faces
+# a fastlane that really does print banners and deprecation notices, nothing
+# here prints — Prism parses silently and the Fastfile is never executed. The
+# redirection stands so that anything which *starts* printing later (a stray
+# `puts`, a warning from some future require) lands on stderr instead of
+# corrupting the one JSON object the real output carries.
 $stdout = $stderr
 
 begin
@@ -122,9 +142,13 @@ begin
   # blobs. Raising here and answering from the `rescue` clause (which is not
   # itself guarded) is the same shape `introspect.rb` uses for this.
   raise "Fastfile could not be parsed" unless result.success?
-  literals = literals_in(result.value)
+  # Serialised here rather than at the `emit` below, so that a literal Prism
+  # read fine but JSON cannot represent — anything that is not valid UTF-8 —
+  # becomes an ordinary `{ "ok": false }` instead of a trace. Only the write
+  # stays outside the guard, for the SystemExit reason above.
+  payload = JSON.generate({ ok: true, literals: literals_in(result.value) })
 rescue Exception => e # rubocop:disable Lint/RescueException
   fail_with("Could not read the Fastfile: #{e.message}")
 end
 
-respond({ ok: true, literals: literals })
+emit(payload)
