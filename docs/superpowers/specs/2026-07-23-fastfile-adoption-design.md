@@ -80,9 +80,10 @@ The README's current sentence does not cover this and must be reworded; see
 `ruby/introspect.rb` gains a `scan` command.
 
 It requires `prism` only. `uses` must boot fastlane to reach
-`ff.runner.lanes`; `scan` needs the syntax tree and nothing else. So it runs
-under a bare `ruby`, with no `resolveRubyEnv` probe (that probe shells out to
-`require "fastlane"` with a 180-second timeout) and no `bundle exec`.
+`ff.runner.lanes`; `scan` needs the syntax tree and nothing else. So no
+`bundle exec`, and no unconditional `resolveRubyEnv` probe — but not a bare
+`ruby` either. See **Two questions, answered** below for the resolution order:
+system Ruby on a Mac is 2.6 and cannot load prism.
 
 It emits a flat list of findings:
 
@@ -263,18 +264,37 @@ it can see and not fix.
 - The refusal path: nothing written anywhere.
 - The write-order guarantee: a vault failure leaves the Fastfile untouched.
 
-## Open questions to settle while implementing
+## Two questions, answered 2026-07-23
 
-- **Can the CLI create a credential block before any server has started?**
-  Blocks are born from the web upload route today; `secret-import.ts` only ever
-  writes name→value entries. `secrets/vault.ts`, `secrets/key.ts` and
-  `db/credentials.ts` are all reachable from the CLI, but whether the database
-  is opened and migrated on a machine that has never run the server needs
-  checking before this is assumed.
-- **Does `require "prism"` succeed on a Mac's system Ruby?** Prism is a default
-  gem from Ruby 3.3; macOS has shipped 2.6 for a long time. If it does not, the
-  scan falls back to the Ruby-unavailable path more often than expected, and it
-  may be worth probing the project's bundled Ruby before the system one.
+**Can the CLI create a credential block before any server has started? Yes, with
+no new surface at all.** `openDatabase` runs `schema.sql` — all
+`CREATE TABLE IF NOT EXISTS` — on every open, so a machine that has never
+started the server gets a complete schema from the first CLI command.
+`Vault.open(home, new SecretStore(db), new CredentialStore(db))` is already the
+exact incantation `cli/secret.ts:170` uses, and `Vault.setCredential(slug, kind,
+{ fileName, fileBytes, fields, varNames })` already exists — it is what the web
+upload route calls at `routes/credentials.ts:102`. Setup calls the same method.
+Nothing in `secrets/` or `db/` needs to change.
+
+**Does `require "prism"` succeed on a Mac's system Ruby? No — and this corrects
+the section above.** Measured: `/usr/bin/ruby` is 2.6.10 and cannot load prism;
+the Homebrew Ruby beside it is 4.0.5 and can. Prism is a default gem only from
+Ruby 3.3.
+
+So **`scan` must not run under a bare `ruby`.** Which Ruby is on `PATH` when
+someone runs `laneyard setup` is an accident, and picking the wrong one turns a
+feature that works into a feature that silently never triggers. The resolution
+order is:
+
+1. `ruby -e 'require "prism"'` with `process.env` — cheap, milliseconds, and
+   right whenever the user's shell already points at a modern Ruby.
+2. Failing that, the environment `resolveRubyEnv()` recovers from the fastlane
+   launcher. That probe is slow because it loads fastlane, but it only runs when
+   step 1 already failed, and it finds the Ruby the project actually builds with.
+3. Failing both, the Ruby-unavailable path: one line, setup continues.
+
+`uses` already carries this constraint — `introspect.rb` requires prism at line
+74 — so `scan` inherits an existing limit rather than introducing one.
 
 ## The discourse
 
