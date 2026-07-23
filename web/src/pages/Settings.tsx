@@ -160,9 +160,9 @@ export function Settings() {
         </h2>
         <p className="dim">
           the <span className="bright">git remote</span> is untouched — the repository is on your
-          host and your disk, not laneyard's. the <span className="bright">credential originals</span>{" "}
-          are untouched — the <code>.p8</code> and the keystore you uploaded are wherever you keep
-          them; laneyard removed only its own encrypted copy.
+          host, not laneyard's. the <span className="bright">credential originals</span> are
+          untouched — the <code>.p8</code> and keystore you uploaded are wherever you keep them;
+          laneyard removed only its own encrypted copy.
           {globalKept > 0 && (
             <>
               {" "}
@@ -266,8 +266,8 @@ export function Settings() {
       {/* The one state change removal is refused for, said before it happens
           rather than found later as a refusal for a reason nobody asked for. */}
       <p className="dim" style={{ marginTop: 20 }}>
-        a run in flight holds the workspace: removal is refused until it finishes. a run still
-        waiting in the queue will not start — it ends as failed, saying its project is gone.
+        a run in flight holds the workspace: removal is refused until it finishes. a queued run will
+        not start — it ends as failed, saying its project is gone.
       </p>
 
       {/* Typing the name is the confirmation. A dialogue one can click through

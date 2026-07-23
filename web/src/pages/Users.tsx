@@ -75,9 +75,9 @@ export function Users() {
     <>
       <h2 className="section">accounts</h2>
       <p className="dim">
-        who can sign in to this server. an admin can do everything and reaches every project; a
-        builder starts a build, watches it, cancels it and downloads what it produced — and reaches
-        only the projects it is granted below, and never sees a secret.
+        who can sign in to this server. an admin does everything and reaches every project; a builder
+        starts, watches, cancels and downloads a build, reaches only the projects granted below, and
+        never sees a secret.
       </p>
 
       {listError && <p className="status-failed">unreadable accounts — {listError}</p>}

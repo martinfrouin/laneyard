@@ -58,12 +58,11 @@ export function Signing() {
       <h2 className="section">signing</h2>
       <p className="dim">
         the files a lane needs to sign a build or hand it to a store. only the lanes that do that
-        read them — taking screenshots, running tests and syncing certificates need nothing from this
-        screen.
+        read them — screenshots, tests and cert syncing need nothing here.
       </p>
       <p className="dim">
-        a block is a file plus the handful of fields that make it usable, stored whole and
-        encrypted. it reaches a run as a path plus the names the block exports.
+        a block is a file plus the fields that make it usable, stored whole and encrypted. it reaches
+        a run as a path plus the names the block exports.
       </p>
 
       {listError && <p className="status-failed">unreadable signing blocks — {listError}</p>}
