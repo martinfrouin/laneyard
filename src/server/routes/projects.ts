@@ -1,8 +1,6 @@
-import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../app.js";
-import { removeProjectFromConfig } from "../../cli/setup.js";
+import { removeProjectData } from "../../data/remove-project.js";
 
 export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   app.get("/api/projects", async () =>
@@ -69,55 +67,44 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
       });
     }
 
-    // Read before anything is touched. -1 is SQLite's "no limit": every run of
-    // this project, because each one names an artifact folder and a log file to
-    // remove. The global counts are read now too — the last moment anyone is
-    // looking — so the answer can say what it left alone.
-    const runs = ctx.runs.listByProject(slug, -1);
+    // The global counts are read now — the last moment anyone is looking — so
+    // the answer can say what it left alone. They are shared by every project
+    // and survive one of them going away, which is why the removal never takes
+    // them and the reply names them apart.
     const globalSecrets = ctx.vault.listGlobal().length;
     const globalSigningBlocks = ctx.vault.listGlobalCredentials().length;
 
-    // The config block first: once it is gone the project cannot be started, so
-    // nothing new begins reading the files the rest of this is about to remove.
-    const removed = await removeProjectFromConfig(ctx.config.configPath(), slug);
-    if (!removed) return reply.code(404).send({ error: "Unknown project" });
-    // The file is watched, but on a debounce: reloading here is what makes the
-    // very next request — the listing this page is about to ask for — truthful.
-    await ctx.config.load();
-
-    // The clone.
-    const workspace = ctx.workspacePath(slug);
-    const workspaceRemoved = existsSync(workspace);
-    await rm(workspace, { recursive: true, force: true });
-
-    // The artifacts and the logs, one of each per run that produced them.
-    let artifactsRemoved = 0;
-    for (const run of runs) {
-      const dir = ctx.artifactsDir(run.id);
-      if (existsSync(dir)) artifactsRemoved += 1;
-      await rm(dir, { recursive: true, force: true });
-      await ctx.logs.remove(run.id);
-    }
-
-    // The run history: the rows, and their steps and artifact records by cascade.
-    ctx.runs.removeByProject(slug);
-
-    // The project's own secrets and signing blocks. Slug-scoped only: a global
-    // secret three other projects read is not this one's to take.
-    const forgotten = ctx.vault.forget(slug);
+    // The removal itself lives in one place, shared with `laneyard remove`: the
+    // route confirms and shapes the reply, the core does the deleting.
+    const result = await removeProjectData(
+      {
+        configPath: ctx.config.configPath(),
+        // The file is watched, but on a debounce: reloading here is what makes
+        // the very next request — the listing this page is about to ask for —
+        // truthful.
+        reloadConfig: () => ctx.config.load(),
+        runs: ctx.runs,
+        logs: ctx.logs,
+        vault: ctx.vault,
+        workspacePath: ctx.workspacePath,
+        artifactsDir: ctx.artifactsDir,
+      },
+      slug,
+    );
+    if (!result.found) return reply.code(404).send({ error: "Unknown project" });
 
     // A later change will strip this slug from every account's access grants.
-    // That is one more "forget for this slug" step, and it belongs right here.
+    // That is one more "forget for this slug" step, and it belongs in the core.
 
     return reply.send({
       slug,
       name: entry.name,
       removed: {
-        runs: runs.length,
-        artifacts: artifactsRemoved,
-        workspace: workspaceRemoved,
-        secrets: forgotten.secrets,
-        signingBlocks: forgotten.credentials,
+        runs: result.runs,
+        artifacts: result.artifacts,
+        workspace: result.workspace,
+        secrets: result.secrets,
+        signingBlocks: result.signingBlocks,
       },
       // Named, not removed. The git remote and the credential originals are the
       // user's and are never touched here; the global rows are shared by every
