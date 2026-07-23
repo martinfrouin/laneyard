@@ -1,9 +1,9 @@
 import Database from "better-sqlite3";
 import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import { parse } from "yaml";
+import { OWN_FILES, OWN_FOLDERS, readLine, removePaths } from "./home.js";
 import { bad, bold, dim, field, heading, ok, warn } from "./style.js";
 
 export const UNINSTALL_USAGE = `laneyard uninstall [--dry-run]
@@ -75,10 +75,6 @@ export interface Inventory {
   /** Everything above, added up. */
   bytes: number;
 }
-
-/** What Laneyard writes into its home, and nothing else. */
-const OWN_FILES = ["config.yml", "key", "laneyard.db", "laneyard.db-wal", "laneyard.db-shm"];
-const OWN_FOLDERS = ["workspaces", "artifacts", "logs", "runs"];
 
 export async function readInventory(home: string): Promise<Inventory> {
   const empty: Inventory = {
@@ -380,17 +376,6 @@ export function renderIrreversible(inv: Inventory): string {
   );
 }
 
-/** Reads one line, which works the same whether it is typed or piped in. */
-async function readLine(stdin: Readable): Promise<string> {
-  const rl = createInterface({ input: stdin });
-  try {
-    for await (const line of rl) return line.trim();
-    return "";
-  } finally {
-    rl.close();
-  }
-}
-
 /**
  * Entry point for `laneyard uninstall`.
  *
@@ -463,13 +448,7 @@ export async function runUninstallCommand(
     return 1;
   }
 
-  const removed: string[] = [];
-  for (const name of [...OWN_FILES, ...OWN_FOLDERS]) {
-    const path = join(home, name);
-    if ((await stat(path).catch(() => null)) === null) continue;
-    await rm(path, { recursive: true, force: true });
-    removed.push(name);
-  }
+  const removed = await removePaths(home, [...OWN_FILES, ...OWN_FOLDERS]);
 
   // The folder itself only when there is nothing left in it. Anything Laneyard
   // did not write is somebody's, and this command has no business deciding
