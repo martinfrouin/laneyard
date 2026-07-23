@@ -121,7 +121,11 @@ Three kinds, differing in how sure the reading is:
   on `supply`, `upload_to_play_store` or `validate_play_store_json_key` — offered only when the path
   resolves to a file that is really on this disk. There is nothing to lift into the vault otherwise,
   and patching to a variable that nothing supplies would trade one broken build for another. The
-  question defaults to yes;
+  question defaults to yes. A `key_id:` or `issuer_id:` written as a literal beside an adopted
+  `app_store_connect_api_key` key is carried with it — rewritten to the variable the signing block
+  exports (`APP_STORE_CONNECT_API_KEY_KEY_ID`, `…_ISSUER_ID`) and used to pre-fill that block's
+  fields, since neither identifier means anything without the key it names, and only that key's own
+  block exports them;
 - **the credential's contents, written into the file** — `key_content:`, `json_key_data:` — which is
   a private key in cleartext in your repository. The question defaults to yes. The patch renames the
   keyword as well as replacing the value, because a stored block is put back on disk as a file and

@@ -42,6 +42,14 @@ On a machine with no Ruby that can load Prism — macOS's own 2.6 cannot — set
 prints one line saying the Fastfile was not analysed, and finishes as it always
 did. The scan is a service, never a gate.
 
+When the key file of an `app_store_connect_api_key` is lifted this way, a
+`key_id:` or `issuer_id:` written as a literal in the same call is lifted with
+it — rewritten to the variable the signing block exports and used to pre-fill
+that block's fields. Only then: an identifier means nothing without the key it
+names, and only that key's own block exports it, so one written where no key file
+is adopted is left exactly as it was rather than pointed at a variable nothing
+supplies.
+
 ## 0.5.0
 
 Who reaches which project, what a removal actually removes, and a `laneyard.yml`

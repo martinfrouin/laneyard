@@ -93,7 +93,7 @@ export async function runAdoption(options: AdoptionOptions): Promise<AdoptionRes
 
   const path = join(cwd, fastlaneDir, "Fastfile");
   const previous = await readFile(path, "utf8");
-  const edits = accepted.map((p) => options.editFor?.(p) ?? p.edit);
+  const edits = accepted.flatMap((p) => (options.editFor ? [options.editFor(p)] : p.edits));
   await writeFile(path, splice(previous, edits), "utf8");
 
   // Verified with Prism rather than with fastlane: setup has no server to ask
@@ -195,7 +195,7 @@ async function named(asker: Asker, proposal: Proposal): Promise<Proposal> {
   return {
     ...proposal,
     varName,
-    edit: { ...proposal.edit, replacement: `ENV.fetch("${varName}")` },
+    edits: [{ ...proposal.edits[0]!, replacement: `ENV.fetch("${varName}")` }],
   };
 }
 

@@ -20,7 +20,12 @@ export interface Proposal {
   literal: Literal;
   /** Fields the filename gave away, offered pre-filled at the prompt. */
   suggestedFields: Record<string, string>;
-  edit: Edit;
+  /**
+   * Every rewrite this proposal applies, accepted or refused as one. Usually a
+   * single edit; an `apple_asc` block that also names its Key ID or Issuer ID
+   * inline carries one per identifier alongside the file rewrite.
+   */
+  edits: Edit[];
   checked: boolean;
 }
 
@@ -65,19 +70,37 @@ const P8_KEY_ID = /(?:^|\/)AuthKey_([A-Z0-9]+)\.p8$/;
 export function proposalsFor(literals: Literal[]): Proposal[] {
   const out: Proposal[] = [];
 
+  // The App Store Connect identifiers written inline, to be carried by whatever
+  // proposal creates the `apple_asc` block. Attributed by action alone: the
+  // literals arrive as a flat list with no call identity, and the vault holds
+  // one `apple_asc` block per project — so a second `app_store_connect_api_key`
+  // call's key is already unrepresentable, and gathering both calls' identifiers
+  // here does not widen a limit the block model does not already impose.
+  const appleIdentifiers = literals.filter(
+    (l) =>
+      l.action === "app_store_connect_api_key" &&
+      (l.arg === "key_id" || l.arg === "issuer_id") &&
+      l.value.trim() !== "",
+  );
+
   for (const literal of literals) {
     if (literal.value.trim() === "") continue;
 
     const file = FILE_ARGS.find((r) => r.action.test(literal.action) && r.arg === literal.arg);
     if (file) {
       const name = defaultVarNames(file.kind)["path"]!;
+      const identifiers = file.kind === "apple_asc" ? appleIdentifierRewrites(appleIdentifiers) : EMPTY;
       out.push({
         tier: "file",
         kind: file.kind,
         varName: name,
+        // The explicit literal wins over the Key ID read from the filename.
+        suggestedFields: { ...suggestedFields(file.kind, literal.value), ...identifiers.fields },
         literal,
-        suggestedFields: suggestedFields(file.kind, literal.value),
-        edit: { start: literal.valueStart, length: literal.valueLength, replacement: `ENV.fetch("${name}")` },
+        edits: [
+          { start: literal.valueStart, length: literal.valueLength, replacement: `ENV.fetch("${name}")` },
+          ...identifiers.edits,
+        ],
         checked: true,
       });
       continue;
@@ -86,18 +109,22 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
     const inline = INLINE_ARGS.find((r) => r.action.test(literal.action) && r.arg === literal.arg);
     if (inline) {
       const name = defaultVarNames(inline.kind)["path"]!;
+      const identifiers = inline.kind === "apple_asc" ? appleIdentifierRewrites(appleIdentifiers) : EMPTY;
       out.push({
         tier: "inline",
         kind: inline.kind,
         varName: name,
+        suggestedFields: identifiers.fields,
         literal,
-        suggestedFields: {},
         // The whole pair, because the keyword changes too.
-        edit: {
-          start: literal.pairStart,
-          length: literal.pairLength,
-          replacement: `${inline.becomes}: ENV.fetch("${name}")`,
-        },
+        edits: [
+          {
+            start: literal.pairStart,
+            length: literal.pairLength,
+            replacement: `${inline.becomes}: ENV.fetch("${name}")`,
+          },
+          ...identifiers.edits,
+        ],
         checked: true,
       });
       continue;
@@ -110,7 +137,7 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
         varName: name,
         literal,
         suggestedFields: {},
-        edit: { start: literal.valueStart, length: literal.valueLength, replacement: `ENV.fetch("${name}")` },
+        edits: [{ start: literal.valueStart, length: literal.valueLength, replacement: `ENV.fetch("${name}")` }],
         // Unticked on purpose. This is the one tier where a false positive is
         // likely — a non-secret URL, a placeholder — and a patch applied by
         // default to a value that was not a secret is a silent regression in
@@ -121,6 +148,36 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
   }
 
   return out;
+}
+
+/** Neither an edit nor a field: an `apple_asc` block that names no identifier. */
+const EMPTY: { edits: Edit[]; fields: Record<string, string> } = { edits: [], fields: {} };
+
+/**
+ * The rewrites and pre-filled fields for the identifiers written beside an
+ * App Store Connect key file.
+ *
+ * The variable names come from `defaultVarNames("apple_asc")`, the same table
+ * `materialise.ts` exports the block's fields through — so the name the Fastfile
+ * is patched to read is the name the run will set. These never form a proposal
+ * of their own: an identifier is only ever lifted when the key file that anchors
+ * its block is, because nothing else exports the variable it would come to read.
+ */
+function appleIdentifierRewrites(
+  identifiers: Literal[],
+): { edits: Edit[]; fields: Record<string, string> } {
+  const defaults = defaultVarNames("apple_asc");
+  const edits: Edit[] = [];
+  const fields: Record<string, string> = {};
+  for (const id of identifiers) {
+    edits.push({
+      start: id.valueStart,
+      length: id.valueLength,
+      replacement: `ENV.fetch("${defaults[id.arg]!}")`,
+    });
+    fields[id.arg] = id.value;
+  }
+  return { edits, fields };
 }
 
 /** What the credential's filename gives away, so the prompt starts filled in. */

@@ -1,7 +1,7 @@
 # Fastfile adoption: Apple Key ID and Issuer ID
 
 Date: 2026-07-23
-Status: approved, not implemented
+Status: implemented
 
 Extends [Fastfile adoption](2026-07-23-fastfile-adoption-design.md). Read that
 first — the tiers, the scan, and the `runAdoption` flow are unchanged here.
