@@ -5,10 +5,12 @@ import { resolveSidecarScript } from "../../src/sidecar/bridge.js";
 import { tmpDir } from "../fixtures/repos.js";
 
 /** Builds a package layout with the sidecar script where the package ships it. */
-async function packageAt(): Promise<string> {
+async function packageAt(...files: string[]): Promise<string> {
   const root = await tmpDir("laneyard-pkg-");
   await mkdir(join(root, "ruby"), { recursive: true });
-  await writeFile(join(root, "ruby", "introspect.rb"), "# sidecar\n", "utf8");
+  for (const file of files.length ? files : ["introspect.rb"]) {
+    await writeFile(join(root, "ruby", file), "# sidecar\n", "utf8");
+  }
   return root;
 }
 
@@ -35,14 +37,25 @@ describe("resolveSidecarScript", () => {
     expect(resolveSidecarScript(join(root, "src", "sidecar"))).toContain("introspect.rb");
   });
 
-  it("resolves a named sidecar script in both layouts", () => {
-    // `src/sidecar/` sits two levels under the package root.
-    const fromSource = resolveSidecarScript(join(process.cwd(), "src", "sidecar"), "scan.rb");
-    expect(fromSource).toBe(join(process.cwd(), "ruby", "scan.rb"));
+  it("resolves a named sidecar script in both layouts", async () => {
+    // Both, and against a built layout rather than this repo: naming a second
+    // script is exactly where the two-levels/three-levels bug would come back,
+    // and asserting against `process.cwd()` tested the sources twice over —
+    // the half that shipped broken in every installed copy is the other one.
+    const root = await packageAt("scan.rb");
+    expect(resolveSidecarScript(join(root, "src", "sidecar"), "scan.rb")).toBe(
+      join(root, "ruby", "scan.rb"),
+    );
+    expect(resolveSidecarScript(join(root, "dist", "src", "sidecar"), "scan.rb")).toBe(
+      join(root, "ruby", "scan.rb"),
+    );
   });
 
-  it("still defaults to introspect.rb", () => {
-    const path = resolveSidecarScript(join(process.cwd(), "src", "sidecar"));
-    expect(path.endsWith(join("ruby", "introspect.rb"))).toBe(true);
+  it("still defaults to introspect.rb", async () => {
+    // With both scripts on disk, so the default is shown to be a choice.
+    const root = await packageAt("introspect.rb", "scan.rb");
+    expect(resolveSidecarScript(join(root, "src", "sidecar"))).toBe(
+      join(root, "ruby", "introspect.rb"),
+    );
   });
 });
