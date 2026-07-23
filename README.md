@@ -463,6 +463,36 @@ What it does *not* touch, said as plainly:
 Removal is refused while a run of that project is in flight — that run is using the workspace. A
 run still waiting in the queue will not start: it ends as failed, saying its project is gone.
 
+The same thing from the command line:
+
+```bash
+laneyard remove cartes-ios --dry-run   # show what would go, and stop
+laneyard remove cartes-ios             # remove it, after a typed confirmation
+```
+
+It removes exactly what the Settings tab does, leaves exactly what it leaves, and is confirmed the
+same way — by typing the project's slug back, not `y`. `--dry-run` prints the inventory and stops.
+It is refused for an unknown slug, and while a run of the project is in flight.
+
+### Resetting
+
+```bash
+laneyard reset --dry-run   # show what would go, and stop
+laneyard reset             # wipe it, after a typed confirmation
+```
+
+`laneyard reset` wipes the data and keeps you able to use Laneyard: every project, the database,
+the workspaces, the artifacts and the logs go; your accounts and the vault key stay. It is a data
+reset that does not lock you out — you sign in with the same names afterwards — and it keeps the
+key, so any older `laneyard.db` backup stays readable rather than becoming ciphertext nobody can
+open. The database comes back empty from the schema on the next start, which also clears the
+sessions, so everyone signs in again.
+
+It keeps the `server:` block of `config.yml` (accounts, port, bind, retention) and
+`~/.laneyard/key`. It never touches the git remotes or the credential originals — those were never
+Laneyard's. It reads the inventory first and, like `uninstall`, is confirmed by typing the
+folder's path, not `y`.
+
 ### Uninstalling
 
 ```bash

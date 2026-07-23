@@ -104,6 +104,29 @@ export async function removeProjectFromConfig(path: string, slug: string): Promi
   return true;
 }
 
+/**
+ * Empties the project list, leaving the `server:` block and the file's shape.
+ *
+ * What `laneyard reset` does to config.yml: every project goes, the accounts and
+ * the port stay. The same YAML-document edit as removing one project, and for
+ * the same reason — the file is hand-written, so its comments and its key order
+ * must survive being touched. The items are spliced out of the existing sequence
+ * rather than the key replaced, so `projects:` keeps its place and any comment
+ * sitting on it.
+ *
+ * Returns how many blocks were removed, so the caller can report the count.
+ */
+export async function clearProjectsInConfig(path: string): Promise<number> {
+  const doc = parseDocument(await readFile(path, "utf8"));
+  const projects = doc.getIn(["projects"]);
+  if (!(projects instanceof YAMLSeq) || projects.items.length === 0) return 0;
+
+  const removed = projects.items.length;
+  projects.items.splice(0, removed);
+  await writeFile(path, serialize(doc), "utf8");
+  return removed;
+}
+
 /** Entry point for `laneyard setup`. */
 export interface SetupOptions {
   slug?: string;

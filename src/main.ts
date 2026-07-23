@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { PromptAborted } from "./cli/prompt.js";
 import { runSetupCommand } from "./cli/setup.js";
+import { runRemoveCommand } from "./cli/remove.js";
+import { runResetCommand } from "./cli/reset.js";
 import { runSecretCommand } from "./cli/secret.js";
 import { runUninstallCommand } from "./cli/uninstall.js";
 import { runUserCommand } from "./cli/user.js";
@@ -134,6 +136,11 @@ const USAGE = `laneyard — a self-hosted web UI for fastlane
                       store a secret, its value read from standard input
   laneyard user add NAME [--role admin|builder]
                       create an account, its password read from standard input
+  laneyard remove <slug>
+                      remove one project and everything Laneyard holds for it
+                      --dry-run shows what would go and stops
+  laneyard reset      wipe the data, keeping the accounts and the vault key
+                      --dry-run shows what would go and stops
   laneyard uninstall  remove Laneyard's data folder, after showing what is in it
                       --dry-run shows the inventory and stops
   laneyard            start the server
@@ -230,6 +237,27 @@ if (invokedDirectly()) {
   if (command === "uninstall") {
     process.exit(
       await runUninstallCommand(homeDir(), rest, {
+        stdin: process.stdin,
+        out: (text) => process.stdout.write(text),
+        err: (text) => process.stderr.write(text),
+      }),
+    );
+  }
+
+  // No `mkdir` either: like `uninstall`, these read what is already there.
+  if (command === "remove") {
+    process.exit(
+      await runRemoveCommand(homeDir(), rest, {
+        stdin: process.stdin,
+        out: (text) => process.stdout.write(text),
+        err: (text) => process.stderr.write(text),
+      }),
+    );
+  }
+
+  if (command === "reset") {
+    process.exit(
+      await runResetCommand(homeDir(), rest, {
         stdin: process.stdin,
         out: (text) => process.stdout.write(text),
         err: (text) => process.stderr.write(text),
