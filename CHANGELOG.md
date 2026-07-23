@@ -1,5 +1,91 @@
 # Changelog
 
+## 0.5.0
+
+Who reaches which project, what a removal actually removes, and a `laneyard.yml`
+that a monorepo can carry one of per app.
+
+### Removing a project removes what Laneyard holds for it
+
+0.4.1 made a removed project *say* what it left behind — the clone, the
+artifacts, the runs, the secrets and blocks under its slug — and left them there,
+on the argument that destroying a keystore from a web click was worse than a
+redundant row. That argument lost. Leaving a project's data on the machine after
+the project is gone turned out to be the surprising behaviour, not the safe one,
+and the re-attachment hazard — a project set up later under the same slug finding
+an old keystore and signing with it — was too sharp to keep as a footnote.
+
+Removal now removes everything Laneyard holds for that one project: its block in
+`config.yml`, its clone, its artifacts, its run history and logs, and the secrets
+and signing blocks scoped to its slug. It is confirmed by typing the slug back,
+because it now cannot be undone. What it still does not touch, and says so: the
+git remote — the repository is on your host, not Laneyard's — the credential
+originals, of which Laneyard only ever held an encrypted copy, and the global
+secrets shared by every project. The separate "remove the vault too" step from
+0.4.1 is gone; there is one act now, and it is complete.
+
+### `laneyard remove` and `laneyard reset`
+
+The same removal, from the command line. `laneyard remove <slug>` does to one
+project exactly what the removal screen does, confirmed by typing the slug and
+with a `--dry-run` that writes nothing. `laneyard reset` clears the data — every
+project, the database, the workspaces, the artifacts, the logs — and keeps your
+accounts and the vault key, so it is a fresh start rather than a way to lock
+yourself out. The key is kept on purpose: without it, older database backups
+would be unreadable. Both share their removal core with the web route and with
+`uninstall`, so the four say and do the same thing.
+
+### Builders can be given only some projects
+
+Until now a builder saw every project on the machine. An admin can now grant a
+builder specific projects, from the accounts screen. A project a builder was not
+given is invisible — absent from their list, and answered as unknown by its URL,
+the same as a project that does not exist — because the check is in the one place
+that already decides what a request may do, not in the interface.
+
+It is off by nobody's expense: an account that carries no grant list at all
+reaches everything, so no existing installation loses access on upgrade. A newly
+created account starts with none and is given projects one at a time. An admin
+always reaches everything; there is still no third role, only a reach check on
+the builder one.
+
+### Change your own identifier
+
+Beside changing your own password, you can now change your own login name, from
+the same account page and under the same rule — it asks for your current
+password, because a session is a cookie that may have been left open. The rename
+edits your account in place, so your role and, if you have them, your project
+grants survive it, and it re-issues your session under the new name so you stay
+signed in on the page you did it on.
+
+### `laneyard.yml` can live in an app's own directory
+
+A monorepo holding two apps could not have two `laneyard.yml` files: the file was
+read only from the repository root, so there was one per repository and nowhere
+to put a second. It can now live in an app's own directory — `app/laneyard.yml` —
+and a repository of N apps carries N of them. Inside an app-level file, paths are
+relative to that file: `artifact_globs: ['**/*.aab']`, `fastlane_dir` left at its
+default, without repeating the `app/` prefix on every line. A file at the
+repository root keeps working exactly as before.
+
+### A missing fastlane directory explains itself
+
+Point Laneyard at a fastlane folder that is in your working copy but not in git —
+because it is uncommitted, or gitignored, or a local copy — and the build used to
+fail with a bare `ENOENT` naming a path in a clone, with no hint why the path was
+not there. Laneyard builds from a clone of the remote, so a folder only on your
+disk never reaches it. `laneyard setup` now warns when the fastlane directory it
+detected is not tracked by git, and a build that cannot find it says that in a
+sentence instead of an errno.
+
+### The 0.2 single-password config form is gone
+
+An installation from 0.2 stored one account as `server.password_hash` and logged
+in with a password and no name. Every release since has stored a `users` list,
+and that back-compatibility has now been removed: a `config.yml` carrying only
+`server.password_hash` is refused at load, and a login must carry a name. If you
+are still on the 0.2 form, move it to a `users:` list before upgrading.
+
 ## 0.4.1
 
 Three things a 0.4.0 installation had no way to find out: what removing a project leaves behind,
