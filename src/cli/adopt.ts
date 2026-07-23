@@ -150,7 +150,16 @@ async function readCredential(
 /** One proposal, as three lines: where, what, and why it will not survive. */
 function describe(fastlaneDir: string, proposal: Proposal): string {
   const { literal } = proposal;
-  const shown = proposal.tier === "inline" ? dim("(a key, inline in the file)") : `"${literal.value}"`;
+  // A path is shown; a secret is not. Tier 3 is a value someone called a token
+  // or a password, and setup's output is pasted into bug reports and kept in CI
+  // transcripts — printing it there would be this feature leaking the very
+  // thing it exists to put away. The file and line above say where to look.
+  const shown =
+    proposal.tier === "file"
+      ? `"${literal.value}"`
+      : proposal.tier === "inline"
+        ? dim("(a key, inline in the file)")
+        : dim("(a literal value, masked)");
   const why =
     proposal.tier === "inline"
       ? "This key is in your repository in cleartext."
