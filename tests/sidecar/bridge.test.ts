@@ -34,4 +34,15 @@ describe("resolveSidecarScript", () => {
     const root = await tmpDir("laneyard-pkg-");
     expect(resolveSidecarScript(join(root, "src", "sidecar"))).toContain("introspect.rb");
   });
+
+  it("resolves a named sidecar script in both layouts", () => {
+    // `src/sidecar/` sits two levels under the package root.
+    const fromSource = resolveSidecarScript(join(process.cwd(), "src", "sidecar"), "scan.rb");
+    expect(fromSource).toBe(join(process.cwd(), "ruby", "scan.rb"));
+  });
+
+  it("still defaults to introspect.rb", () => {
+    const path = resolveSidecarScript(join(process.cwd(), "src", "sidecar"));
+    expect(path.endsWith(join("ruby", "introspect.rb"))).toBe(true);
+  });
 });
