@@ -132,6 +132,23 @@ def literals_in(node, out = [])
   out
 end
 
+# A Fastfile that does not parse, told apart from everything else that can go
+# wrong in the block below, so each gets a sentence that is true of it.
+ParseFailure = Class.new(StandardError)
+
+# Prism's first complaint, and the line it points at.
+#
+# "Fastfile could not be parsed" on its own leaves someone opening the file and
+# hunting; a flow that is about to offer to *edit* that file owes them better
+# than that. The first error is the one worth showing — the ones behind it are
+# usually the same mistake seen again from further down.
+def parse_failure(result)
+  first = result.errors.first
+  return "Fastfile could not be parsed" unless first
+
+  "Fastfile could not be parsed, line #{first.location.start_line}: #{first.message}"
+end
+
 begin
   source = File.read(fastfile_path)
   result = Prism.parse(source)
@@ -141,14 +158,19 @@ begin
   # below and answered a second time, corrupting the output with two JSON
   # blobs. Raising here and answering from the `rescue` clause (which is not
   # itself guarded) is the same shape `introspect.rb` uses for this.
-  raise "Fastfile could not be parsed" unless result.success?
+  raise ParseFailure, parse_failure(result) unless result.success?
   # Serialised here rather than at the `emit` below, so that a literal Prism
   # read fine but JSON cannot represent — anything that is not valid UTF-8 —
   # becomes an ordinary `{ "ok": false }` instead of a trace. Only the write
   # stays outside the guard, for the SystemExit reason above.
   payload = JSON.generate({ ok: true, literals: literals_in(result.value) })
+rescue ParseFailure => e
+  # Already a whole sentence, and prefixing it produced the visible doubling
+  # this replaced: "Could not read the Fastfile: Fastfile could not be parsed",
+  # whose first half was also false — the read had succeeded.
+  fail_with(e.message)
 rescue Exception => e # rubocop:disable Lint/RescueException
-  fail_with("Could not read the Fastfile: #{e.message}")
+  fail_with("Could not scan the Fastfile: #{e.message}")
 end
 
 emit(payload)

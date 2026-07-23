@@ -138,6 +138,13 @@ describe("scan.rb", () => {
     const res = await scan(dir);
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/could not be parsed/i);
+    // With the line, because this flow is about to offer to edit that file:
+    // "could not be parsed" alone leaves someone hunting through it by hand.
+    expect(res.error).toContain("line 3");
+    expect(res.error).toContain("unexpected 'end'");
+    // And said once. The message used to carry two statements of its own
+    // failure, the first of them ("could not read") plainly untrue.
+    expect(res.error).not.toMatch(/could not read/i);
   });
 
   it("answers a structured error when a literal is not valid UTF-8", async () => {
