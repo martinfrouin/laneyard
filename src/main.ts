@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { bold, dim, field, heading } from "./cli/style.js";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
@@ -25,7 +25,28 @@ import { makeInvoke } from "./sidecar/bridge.js";
 import { LaneReader } from "./sidecar/lanes.js";
 import { UsesReader } from "./sidecar/uses.js";
 
-export const version = "0.5.0";
+/**
+ * The version, from `package.json` rather than a constant beside it. The
+ * constant this replaced was bumped by hand and drifted: a release moved
+ * `package.json` to 0.6.0 and left `laneyard --version` still saying 0.5.0.
+ *
+ * Walked up from this module so it resolves both from `dist/src` (installed) and
+ * `src` (dev under tsx), and finds the package's own `package.json` — the nearest
+ * ancestor — never a host project's when Laneyard is a dependency.
+ */
+function readVersion(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let up = 0; up < 6; up += 1, dir = dirname(dir)) {
+    try {
+      return JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).version as string;
+    } catch {
+      // Not this directory — try its parent.
+    }
+  }
+  return "0.0.0";
+}
+
+export const version = readVersion();
 
 export interface Started {
   app: FastifyInstance;
