@@ -11,6 +11,11 @@ import { acceptingAsker, terminalAsker } from "./prompt.js";
 import type { Asker } from "./prompt.js";
 import { detectProject } from "./detect.js";
 import { appRootOf } from "../heuristics/platforms.js";
+import { CredentialStore } from "../db/credentials.js";
+import { openDatabase } from "../db/open.js";
+import { SecretStore } from "../db/secrets.js";
+import { Vault } from "../secrets/vault.js";
+import { runAdoption } from "./adopt.js";
 
 const exec = promisify(execFile);
 
@@ -134,6 +139,14 @@ export interface SetupOptions {
   /** Accept every proposal without asking. For scripts. */
   yes?: boolean;
   asker?: Asker;
+  /**
+   * Laneyard's home, for the vault the second act writes to.
+   *
+   * Optional so that every existing test — and any caller that only wants a
+   * project registered — keeps working: without it, adoption is skipped
+   * entirely rather than half-run.
+   */
+  home?: string;
 }
 
 /**
@@ -384,6 +397,30 @@ export async function runSetupCommand(
         "\n" +
         dim("Already running? The configuration is watched — it appears on its own.\n"),
     );
+
+    // The second act. After the success message, never before it: declining
+    // everything here must leave exactly the project the lines above just
+    // announced. See `cli/adopt.ts`.
+    //
+    // The repository root, not `cwd`: `fastlaneDir` is measured from there, and
+    // so are the credential paths a Fastfile one directory down writes and the
+    // `git ls-files` that asks whether they are committed.
+    if (options.home !== undefined) {
+      const db = openDatabase(join(options.home, "laneyard.db"));
+      try {
+        const vault = await Vault.open(options.home, new SecretStore(db), new CredentialStore(db));
+        await runAdoption({ cwd: repoRoot(cwd, d.subPath), fastlaneDir, slug, vault, asker });
+      } catch (cause) {
+        // Adoption is a courtesy on top of a command that has already
+        // succeeded. Its failure is reported and swallowed: exiting non-zero
+        // here would say the project was not set up, and the project is set up.
+        process.stdout.write(
+          "\n" + warn(`Could not finish reading your Fastfile: ${(cause as Error).message}\n`),
+        );
+      } finally {
+        db.close();
+      }
+    }
     return 0;
   } finally {
     asker.close();

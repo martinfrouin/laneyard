@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { acceptingAsker } from "../../src/cli/prompt.js";
 import { addProjectToConfig, fastlaneDirIsTracked, runSetupCommand } from "../../src/cli/setup.js";
 import { tmpDir } from "../fixtures/repos.js";
 
@@ -394,6 +395,81 @@ describe("runSetupCommand", () => {
     });
 
     expect(out).not.toContain("not tracked by git");
+  });
+
+  /**
+   * The root-level shape, plus a credential the Fastfile names outright.
+   *
+   * `makeOriginRepo` is the wrong fixture here: it builds a repository with no
+   * `origin` remote, so `detectProject` returns a null `gitUrl` and setup
+   * refuses before reaching anything the second act adds.
+   */
+  async function repoWithHardcodedKey(): Promise<{ app: string; configPath: string; home: string }> {
+    const root = await tmpDir("laneyard-adopt-setup-");
+    await mkdir(join(root, "fastlane"), { recursive: true });
+    await writeFile(
+      join(root, "fastlane", "Fastfile"),
+      `lane :beta do\n  supply(json_key: "./play.json")\nend\n`,
+      "utf8",
+    );
+    await writeFile(join(root, "play.json"), `{"type":"service_account"}`, "utf8");
+    await mkdir(join(root, "App.xcodeproj"), { recursive: true });
+    await writeFile(join(root, "App.xcodeproj", "project.pbxproj"), "", "utf8");
+
+    const run = promisify(execFile);
+    await run("git", ["init", "-q", "-b", "main"], { cwd: root });
+    await run("git", ["remote", "add", "origin", "git@example.com:you/keyed.git"], { cwd: root });
+
+    return {
+      app: root,
+      configPath: join(await tmpDir(), "config.yml"),
+      home: await tmpDir("laneyard-home-"),
+    };
+  }
+
+  it("registers the project even when every proposal is declined", async () => {
+    // The guarantee the whole feature rests on: config.yml and laneyard.yml are
+    // exactly what they were before adoption existed.
+    const { app, configPath, home } = await repoWithHardcodedKey();
+    const declining = {
+      ...acceptingAsker,
+      async confirm(question: string, defaultYes: boolean) {
+        return question.includes("Store it here") ? false : defaultYes;
+      },
+    };
+
+    const out = await captureStdout(async () => {
+      expect(await runSetupCommand(app, configPath, { home, asker: declining })).toBe(0);
+    });
+
+    expect(out).toContain("is set up");
+    expect((parse(await readFile(configPath, "utf8")) as { projects: unknown[] }).projects).toHaveLength(1);
+    // And the Fastfile is byte-identical.
+    expect(await readFile(join(app, "fastlane", "Fastfile"), "utf8")).toContain('"./play.json"');
+  });
+
+  it("reads the Fastfile only after the project is registered", async () => {
+    const { app, configPath, home } = await repoWithHardcodedKey();
+
+    const out = await captureStdout(async () => {
+      await runSetupCommand(app, configPath, { home, asker: acceptingAsker });
+    });
+
+    expect(out).toContain("I read your Fastfile");
+    expect(out.indexOf("is set up")).toBeLessThan(out.indexOf("I read your Fastfile"));
+  });
+
+  it("skips adoption entirely when no home is given", async () => {
+    // Every existing caller and test passes no `home`; none of them may grow a
+    // vault write or a Fastfile edit by accident.
+    const { app, configPath } = await repoWithHardcodedKey();
+
+    const out = await captureStdout(async () => {
+      expect(await runSetupCommand(app, configPath, { yes: true })).toBe(0);
+    });
+
+    expect(out).not.toContain("I read your Fastfile");
+    expect(await readFile(join(app, "fastlane", "Fastfile"), "utf8")).toContain('"./play.json"');
   });
 });
 

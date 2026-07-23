@@ -189,7 +189,7 @@ if (invokedDirectly()) {
     // this before. Interactive is the default because the values are guesses.
     const yes = rest.includes("--yes") || rest.includes("-y");
     try {
-      process.exit(await runSetupCommand(process.cwd(), join(home, "config.yml"), { slug, yes }));
+      process.exit(await runSetupCommand(process.cwd(), join(home, "config.yml"), { slug, yes, home }));
     } catch (cause) {
       // Ctrl-C in the middle of the questions. Nothing is written before the
       // last confirmation, so the only thing worth saying is that it is safe to
