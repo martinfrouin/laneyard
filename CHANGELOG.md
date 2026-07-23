@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0 — unreleased
+## 0.6.0
 
 What `laneyard setup` does about a credential the Fastfile names outright, and a
 `laneyard.yml` that each project command reads from where it lives.
