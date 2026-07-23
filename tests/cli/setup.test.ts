@@ -180,22 +180,24 @@ describe("runSetupCommand", () => {
     return { app: root, configPath: join(await tmpDir(), "config.yml") };
   }
 
-  it("writes build behaviour into the repository, where it can be committed", async () => {
-    // Two bugs in one place. The path used to be measured from the current
-    // directory — run from `app/`, it was written as `fastlane` while the clone
-    // holds it at `app/fastlane`, and the lane list failed with ENOENT far from
-    // its cause. And it went into the machine's config.yml, so it was never
-    // versioned and a colleague cloning the repository got nothing.
+  it("writes build behaviour into the app's own directory, with app-relative paths", async () => {
+    // The file lives beside the app's fastlane folder, not at the repository
+    // root — so a monorepo of N apps can carry N of them. Its paths are relative
+    // to that directory: `fastlane_dir` is the plain `fastlane` the default
+    // already assumes, so it is omitted, and the globs drop the `app/` prefix
+    // the clone-root file used to carry. `store.ts` puts the prefix back at read
+    // time.
     const { app, root, configPath } = await monorepo();
     expect(await runSetupCommand(app, configPath, { yes: true })).toBe(0);
 
-    const repoConfig = parse(await readFile(join(root, "laneyard.yml"), "utf8")) as {
-      fastlane_dir: string;
+    const repoConfig = parse(await readFile(join(root, "app", "laneyard.yml"), "utf8")) as {
+      fastlane_dir?: string;
       runtime: string;
       artifact_globs: string[];
     };
-    expect(repoConfig.fastlane_dir).toBe("app/fastlane");
-    expect(repoConfig.artifact_globs).toContain("app/**/*.ipa");
+    expect(repoConfig).not.toHaveProperty("fastlane_dir");
+    expect(repoConfig.artifact_globs).toContain("**/*.ipa");
+    expect(repoConfig.artifact_globs).not.toContain("app/**/*.ipa");
   });
 
   it("writes down the platforms it detected, so nothing re-infers them later", async () => {
@@ -205,7 +207,7 @@ describe("runSetupCommand", () => {
     const { app, root, configPath } = await monorepo();
     await runSetupCommand(app, configPath, { yes: true });
 
-    const repoConfig = parse(await readFile(join(root, "laneyard.yml"), "utf8")) as {
+    const repoConfig = parse(await readFile(join(root, "app", "laneyard.yml"), "utf8")) as {
       platforms: string[];
     };
     expect(repoConfig.platforms).toEqual(["ios"]);
@@ -253,13 +255,16 @@ describe("runSetupCommand", () => {
 
   it("leaves an existing laneyard.yml alone", async () => {
     // Someone put it there, possibly with comments and choices this command
-    // knows nothing about — and its values win anyway.
+    // knows nothing about — and its values win anyway. It lives in the app's own
+    // directory, which is where setup would have written it.
     const { app, root, configPath } = await monorepo();
-    await writeFile(join(root, "laneyard.yml"), "# mine\nruntime: bundle\n", "utf8");
+    await writeFile(join(root, "app", "laneyard.yml"), "# mine\nruntime: bundle\n", "utf8");
 
     await runSetupCommand(app, configPath, { yes: true });
 
-    expect(await readFile(join(root, "laneyard.yml"), "utf8")).toBe("# mine\nruntime: bundle\n");
+    expect(await readFile(join(root, "app", "laneyard.yml"), "utf8")).toBe(
+      "# mine\nruntime: bundle\n",
+    );
   });
 
   it("names the project after the repository and the sub-directory", async () => {

@@ -10,6 +10,7 @@ import { bad, bold, dim, field, heading, ok, warn } from "./style.js";
 import { acceptingAsker, terminalAsker } from "./prompt.js";
 import type { Asker } from "./prompt.js";
 import { detectProject } from "./detect.js";
+import { appRootOf } from "../heuristics/platforms.js";
 
 const exec = promisify(execFile);
 
@@ -197,7 +198,12 @@ export async function runSetupCommand(
       );
     }
 
-    const repoConfigPath = join(repoRoot(cwd, d.subPath), LANEYARD_YML);
+    // The repository file lives in the app's own directory, so a monorepo of N
+    // apps carries N of them — one beside each app's fastlane folder. `appRoot`
+    // is the fastlane dir's parent; for a plain app whose fastlane sits at the
+    // root it is `.`, and the file lands at the repository root as it always did.
+    const appRoot = appRootOf(d.fastlaneDir);
+    const repoConfigPath = join(repoRoot(cwd, d.subPath), appRoot, LANEYARD_YML);
     if (await fileExists(repoConfigPath)) {
       process.stdout.write(
         "\n" + warn(`${LANEYARD_YML} already exists in the repository.\n`) +
@@ -325,10 +331,18 @@ export async function runSetupCommand(
     // The repository half: how it builds. This is the part that was going into
     // the machine's file and therefore never being committed — which is exactly
     // backwards, since it is the part a colleague needs.
+    //
+    // Its paths are written relative to the app's own directory, because the file
+    // lives there: `fastlane_dir` is omitted when it is the plain `fastlane` the
+    // default already assumes, and each glob is stripped of the app prefix. An
+    // app moved or duplicated keeps this file unchanged; `store.ts` puts the
+    // prefix back when it reads it.
     const wroteRepoConfig = await writeRepoConfigIfAbsent(repoConfigPath, {
-      fastlane_dir: fastlaneDir,
+      ...(appRelative(appRoot, fastlaneDir) === "fastlane"
+        ? {}
+        : { fastlane_dir: appRelative(appRoot, fastlaneDir) }),
       runtime,
-      artifact_globs: globs,
+      artifact_globs: globs.map((g) => appRelative(appRoot, g)),
       // Written down rather than re-inferred on every readiness check: a value
       // in a file can be corrected when the guess was wrong, and setup and the
       // checklist cannot end up disagreeing about the same repository.
@@ -397,8 +411,10 @@ const DEFAULT_ADMIN_NAME = "admin";
 /**
  * The repository root, from where the command ran and how deep it sits.
  *
- * `laneyard.yml` belongs at the root because that is where the server reads it:
- * the clone is the repository, not the sub-directory someone was standing in.
+ * The anchor everything else is measured against: the clone is the whole
+ * repository, not the sub-directory someone was standing in, so `config.yml`'s
+ * `fastlane_dir` and the app directory `laneyard.yml` lands in are both relative
+ * to here, whichever folder setup was run from.
  */
 function repoRoot(cwd: string, subPath: string): string {
   return subPath === "" ? cwd : join(cwd, ...subPath.split("/").map(() => ".."));
@@ -449,7 +465,7 @@ async function existingProject(configPath: string, slug: string): Promise<string
 async function writeRepoConfigIfAbsent(
   path: string,
   settings: {
-    fastlane_dir: string;
+    fastlane_dir?: string;
     runtime: string;
     artifact_globs: string[];
     platforms?: string[];
@@ -463,6 +479,21 @@ async function writeRepoConfigIfAbsent(
     " Values here win over the project's block in the server's config.yml.";
   await writeFile(path, doc.toString(), "utf8");
   return true;
+}
+
+/**
+ * A repo-root-relative path read as relative to the app directory.
+ *
+ * The inverse of what `store.ts` does when it reads an app-level file: the file
+ * lives in `<appRoot>/`, so its paths drop that prefix. `.` is the repository
+ * root — a path there is already app-relative and unchanged. A path that does
+ * not sit under the app (an unanchored glob like `**​/*.ipa`) is left as it is;
+ * it still means the same thing once the read-time prefix is applied.
+ */
+function appRelative(appRoot: string, p: string): string {
+  if (appRoot === "" || appRoot === ".") return p;
+  const prefix = `${appRoot}/`;
+  return p.startsWith(prefix) ? p.slice(prefix.length) : p;
 }
 
 /** `git@github.com:you/thing.git` reads better as `you/thing` in a sentence. */

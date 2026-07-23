@@ -1,8 +1,9 @@
 import { watch } from "node:fs";
 import { loadRepoConfig, loadServerConfig } from "./load.js";
-import { resolveProjectSettings } from "./resolve.js";
+import { normaliseAppConfig, resolveProjectSettings } from "./resolve.js";
 import type { Origin } from "./resolve.js";
-import type { ProjectEntry, ProjectSettings, ServerConfig } from "./schema.js";
+import type { ProjectEntry, ProjectSettings, RepoConfig, ServerConfig } from "./schema.js";
+import { appRootOf } from "../heuristics/platforms.js";
 import { join } from "node:path";
 
 export interface ResolvedProject {
@@ -81,13 +82,36 @@ export class ConfigStore {
    * Resolves a project's effective settings by reading its workspace's
    * laneyard.yml if it exists. The workspace may not be cloned yet: we
    * then fall back to the project's block and the defaults.
+   *
+   * The file is looked for in two places, in order:
+   *
+   * 1. `<workspace>/<appRoot>/laneyard.yml` — the app-level file, its paths
+   *    relative to the app's own directory, so a monorepo of N apps carries N
+   *    of them. Normalised back to repo-root-relative before the merge.
+   * 2. `<workspace>/laneyard.yml` — the repository-root file, repo-root-relative,
+   *    which is what existing installs have and keeps working unchanged.
+   *
+   * `appRoot` is derived from the project's `fastlane_dir` as declared in
+   * `config.yml` — the server-side anchor, present for every monorepo project by
+   * necessity and what points at the app before any repo file is read. When it is
+   * the repository root (the default `fastlane`), the two locations coincide and
+   * nothing changes.
    */
   async resolve(slug: string, workspacePath: string): Promise<ResolvedProject | null> {
     const entry = this.project(slug);
     if (!entry) return null;
 
-    const repoRes = await loadRepoConfig(join(workspacePath, "laneyard.yml"));
-    const repo = repoRes.ok ? repoRes.config : null;
+    const appRoot = appRootOf(entry.fastlane_dir);
+
+    let repo: RepoConfig | null = null;
+    if (appRoot !== ".") {
+      const appRes = await loadRepoConfig(join(workspacePath, appRoot, "laneyard.yml"));
+      if (appRes.ok) repo = normaliseAppConfig(appRes.config, appRoot);
+    }
+    if (repo === null) {
+      const rootRes = await loadRepoConfig(join(workspacePath, "laneyard.yml"));
+      repo = rootRes.ok ? rootRes.config : null;
+    }
 
     const { settings, provenance } = resolveProjectSettings(entry, repo);
     return { entry, settings, provenance };

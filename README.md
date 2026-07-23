@@ -197,6 +197,16 @@ Field by field, the repository file wins over the server block, which wins over 
 field of `laneyard.yml` may also be written in the server block, so a repository you would rather
 not touch can be configured entirely from `config.yml`.
 
+**A monorepo of several apps carries one `laneyard.yml` per app.** The file may live in the app's
+own directory — beside its fastlane folder — rather than at the repository root, so two apps on one
+git remote each describe their own build without a single root file having to speak for both.
+`laneyard setup` writes it there for you. Inside an app-level file **paths are relative to that
+file's own directory**, not to the repository: `artifact_globs: ["**/*.aab"]` and a plain
+`fastlane_dir: fastlane` (usually left out entirely), so an app moved or duplicated keeps its file
+unchanged. Laneyard finds the app from the project's `fastlane_dir` in `config.yml` and reads the
+file from there; a `laneyard.yml` at the repository root still works and keeps its paths
+repo-root-relative, exactly as before.
+
 Both files are watched: edit them by hand and Laneyard picks the change up. An invalid file is
 reported and the last valid configuration stays live — a typo never takes the server down.
 
