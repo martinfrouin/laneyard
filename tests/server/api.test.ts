@@ -18,7 +18,8 @@ async function harness() {
     configPath,
     `
 server:
-  password_hash: "${hashPassword("secret")}"
+  users:
+    - { name: admin, role: admin, password_hash: "${hashPassword("secret")}" }
 projects:
   - slug: sample
     name: Sample
@@ -47,7 +48,7 @@ async function login(app: Awaited<ReturnType<typeof harness>>["app"]): Promise<s
   const res = await app.inject({
     method: "POST",
     url: "/api/login",
-    payload: { password: "secret" },
+    payload: { name: "admin", password: "secret" },
   });
   return res.cookies[0]!.value;
 }
@@ -61,19 +62,23 @@ describe("API", () => {
 
   it("refuses a wrong password", async () => {
     const { app } = await harness();
-    const res = await app.inject({ method: "POST", url: "/api/login", payload: { password: "wrong" } });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/login",
+      payload: { name: "admin", password: "wrong" },
+    });
     expect(res.statusCode).toBe(401);
   });
 
-  it("still accepts the legacy password-only form, so a 0.2 install upgrades in place", async () => {
-    // This harness's config.yml is the old single-password form, unedited.
+  it("refuses a login that carries no name", async () => {
+    // Every account has a name, and the login form sends it. A body with only a
+    // password is refused like any other bad credential.
     const { app } = await harness();
     const res = await app.inject({ method: "POST", url: "/api/login", payload: { password: "secret" } });
-    expect(res.statusCode).toBe(200);
-    expect(res.cookies[0]!.value.length).toBeGreaterThan(0);
+    expect(res.statusCode).toBe(401);
   });
 
-  it("accepts that same account by its name", async () => {
+  it("accepts the account by its name", async () => {
     const { app } = await harness();
     const res = await app.inject({
       method: "POST",

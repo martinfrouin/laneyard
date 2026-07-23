@@ -21,7 +21,8 @@ describe("full thread", () => {
       join(root, "config.yml"),
       `
 server:
-  password_hash: "${hashPassword("secret")}"
+  users:
+    - { name: admin, role: admin, password_hash: "${hashPassword("secret")}" }
 projects:
   - slug: sample
     name: Sample
@@ -35,7 +36,11 @@ projects:
 
     const { app, db } = await createServerFromConfig(root);
     const session = (
-      await app.inject({ method: "POST", url: "/api/login", payload: { password: "secret" } })
+      await app.inject({
+        method: "POST",
+        url: "/api/login",
+        payload: { name: "admin", password: "secret" },
+      })
     ).cookies[0]!.value;
     const cookies = { laneyard_session: session };
 

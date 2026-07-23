@@ -19,7 +19,7 @@ describe("createServerFromConfig", () => {
     await mkdir(root, { recursive: true });
     await writeFile(
       join(root, "config.yml"),
-      `server: { password_hash: "${hashPassword("x")}" }\nprojects: []\n`,
+      `server: { users: [{ name: admin, role: admin, password_hash: "${hashPassword("x")}" }] }\nprojects: []\n`,
       "utf8",
     );
 
@@ -42,7 +42,7 @@ describe("createServerFromConfig", () => {
     await mkdir(root, { recursive: true });
     await writeFile(
       join(root, "config.yml"),
-      `server: { password_hash: "${hashPassword("x")}" }\nprojects: []\n`,
+      `server: { users: [{ name: admin, role: admin, password_hash: "${hashPassword("x")}" }] }\nprojects: []\n`,
       "utf8",
     );
 
@@ -66,7 +66,7 @@ describe("createServerFromConfig", () => {
     await mkdir(root, { recursive: true });
     await writeFile(
       join(root, "config.yml"),
-      `server: { password_hash: "${hashPassword("x")}" }\nprojects: []\n`,
+      `server: { users: [{ name: admin, role: admin, password_hash: "${hashPassword("x")}" }] }\nprojects: []\n`,
       "utf8",
     );
 

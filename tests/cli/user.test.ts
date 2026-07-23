@@ -35,7 +35,7 @@ async function run(dir: string, args: string[], stdin = "a long enough password"
   return { code, out: out.join(""), err: err.join("") };
 }
 
-/** The accounts as the server itself would read them — the legacy form included. */
+/** The accounts as the server itself would read them. */
 async function loadedUsers(dir: string): Promise<UserEntry[]> {
   const loaded = await loadServerConfig(join(dir, "config.yml"));
   if (!loaded.ok) throw new Error(loaded.error);
@@ -136,22 +136,6 @@ server:
     expect(code).toBe(1);
     expect(err).toMatch(/only admin/);
     expect((await accountsIn(dir))[0]!.role).toBe("admin");
-  });
-
-  it("turns a 0.2 configuration into named accounts on the way", async () => {
-    const dir = await home(`server:\n  password_hash: "${hashPassword("admin pass")}"\n`);
-    expect((await run(dir, ["add", "ci"])).code).toBe(0);
-
-    // The bare hash is gone, because a file holding both forms is the one
-    // combination the loader refuses.
-    const file = parse(await readFile(join(dir, "config.yml"), "utf8")) as {
-      server: { password_hash?: string };
-    };
-    expect(file.server.password_hash).toBeUndefined();
-    expect((await accountsIn(dir)).map((u) => [u.name, u.role])).toEqual([
-      ["admin", "admin"],
-      ["ci", "builder"],
-    ]);
   });
 
   it("sends a machine with no account to `laneyard setup`", async () => {

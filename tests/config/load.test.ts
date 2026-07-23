@@ -13,7 +13,8 @@ async function withConfig(yaml: string): Promise<string> {
 
 const minimal = `
 server:
-  password_hash: "scrypt$aaa$bbb"
+  users:
+    - { name: admin, role: admin, password_hash: "scrypt$aaa$bbb" }
 projects:
   - slug: sample-ios
     git_url: git@github.com:martin/sample.git
@@ -40,7 +41,7 @@ describe("loadServerConfig", () => {
   it("refuses two projects sharing the same slug", async () => {
     const res = await loadServerConfig(
       await withConfig(`
-server: { password_hash: "x" }
+server: { users: [{ name: admin, role: admin, password_hash: "x" }] }
 projects:
   - { slug: a, git_url: u1 }
   - { slug: a, git_url: u2 }
@@ -54,7 +55,7 @@ projects:
   it("refuses a slug that isn't usable in a path", async () => {
     const res = await loadServerConfig(
       await withConfig(`
-server: { password_hash: "x" }
+server: { users: [{ name: admin, role: admin, password_hash: "x" }] }
 projects:
   - { slug: "../evil", git_url: u }
 `),
@@ -76,14 +77,17 @@ projects:
 });
 
 describe("accounts", () => {
-  it("reads a lone password_hash as a single admin named admin", async () => {
-    // The 0.2 installation: one password, no accounts. Locking that person out
-    // of their own build server would not be an upgrade.
-    const res = await loadServerConfig(await withConfig(minimal));
-    if (!res.ok) throw new Error(res.error);
-    expect(res.config.server.users).toEqual([
-      { name: "admin", role: "admin", password_hash: "scrypt$aaa$bbb" },
-    ]);
+  it("refuses a lone password_hash — the 0.2 single-password form is no longer read", async () => {
+    const res = await loadServerConfig(
+      await withConfig(`
+server:
+  password_hash: "scrypt$aaa$bbb"
+projects: []
+`),
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/users/);
   });
 
   it("reads a list of users", async () => {
@@ -100,21 +104,6 @@ server:
       "martin:admin",
       "ci:builder",
     ]);
-  });
-
-  it("refuses saying it both ways at once", async () => {
-    const res = await loadServerConfig(
-      await withConfig(`
-server:
-  password_hash: "scrypt$a$b"
-  users:
-    - { name: martin, role: admin, password_hash: "scrypt$c$d" }
-`),
-    );
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.error).toMatch(/password_hash/);
-    expect(res.error).toMatch(/users/);
   });
 
   it("refuses two accounts sharing a name", async () => {
@@ -176,7 +165,7 @@ describe("git_auth", () => {
     // that never happens. A refusal at load time is the honest answer.
     const res = await loadServerConfig(
       await withConfig(`
-server: { password_hash: "x" }
+server: { users: [{ name: admin, role: admin, password_hash: "x" }] }
 projects:
   - slug: a
     git_url: https://example.com/a.git
@@ -195,7 +184,7 @@ describe("max_concurrent_runs", () => {
     // need a working directory per run; until then, saying no is the honest answer.
     const res = await loadServerConfig(
       await withConfig(`
-server: { password_hash: "x", max_concurrent_runs: 4 }
+server: { users: [{ name: admin, role: admin, password_hash: "x" }], max_concurrent_runs: 4 }
 projects: []
 `),
     );
@@ -209,7 +198,7 @@ projects: []
   it("accepts the one value it honours", async () => {
     const res = await loadServerConfig(
       await withConfig(`
-server: { password_hash: "x", max_concurrent_runs: 1 }
+server: { users: [{ name: admin, role: admin, password_hash: "x" }], max_concurrent_runs: 1 }
 projects: []
 `),
     );

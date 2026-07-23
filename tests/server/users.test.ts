@@ -21,12 +21,6 @@ server:
     - { name: ci, role: builder, password_hash: "${hashPassword(BUILDER_PASSWORD)}" }
 `;
 
-const LEGACY = `# a 0.2 configuration
-server:
-  port: 7890
-  password_hash: "${hashPassword(ADMIN_PASSWORD)}"   # written by laneyard setup
-`;
-
 async function harness(configContent = TWO_ACCOUNTS) {
   const root = await tmpDir("laneyard-users-");
   const configPath = join(root, "config.yml");
@@ -51,12 +45,12 @@ async function harness(configContent = TWO_ACCOUNTS) {
   };
 
   const asAdmin = async () => ({
-    laneyard_session: (await login("martin", ADMIN_PASSWORD)) ?? (await login("admin", ADMIN_PASSWORD))!,
+    laneyard_session: (await login("martin", ADMIN_PASSWORD))!,
   });
 
   const written = async () =>
     parse(await readFile(configPath, "utf8")) as {
-      server: { password_hash?: string; users?: { name: string; role: string; password_hash: string }[] };
+      server: { users?: { name: string; role: string; password_hash: string }[] };
     };
 
   /** Rewrites config.yml behind the server's back, as `laneyard user` and a text editor both do. */
@@ -263,43 +257,6 @@ describe("DELETE /api/users/:name", () => {
     const { app, asAdmin } = await harness();
     const res = await app.inject({ method: "DELETE", url: "/api/users/nobody", cookies: await asAdmin() });
     expect(res.statusCode).toBe(404);
-  });
-});
-
-describe("a 0.2 configuration", () => {
-  it("gains its second account without losing its first", async () => {
-    // The bare `password_hash` becomes `users`, because a file holding both is
-    // the one combination the loader refuses — adding a colleague must not be
-    // the thing that stops the server from reading its own configuration.
-    const { app, asAdmin, login, written } = await harness(LEGACY);
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/users",
-      cookies: await asAdmin(),
-      payload: { name: "ci", role: "builder", password: "a long enough password" },
-    });
-
-    expect(res.statusCode).toBe(201);
-    const file = await written();
-    expect(file.server.password_hash).toBeUndefined();
-    expect(file.server.users!.map((u) => [u.name, u.role])).toEqual([
-      ["admin", "admin"],
-      ["ci", "builder"],
-    ]);
-    // The original password still opens the original account.
-    expect(await login("admin", ADMIN_PASSWORD)).not.toBeNull();
-  });
-
-  it("keeps the comments of a hand-written file", async () => {
-    const { app, asAdmin, configPath } = await harness(LEGACY);
-    await app.inject({
-      method: "POST",
-      url: "/api/users",
-      cookies: await asAdmin(),
-      payload: { name: "ci", role: "builder", password: "a long enough password" },
-    });
-
-    expect(await readFile(configPath, "utf8")).toContain("# a 0.2 configuration");
   });
 });
 

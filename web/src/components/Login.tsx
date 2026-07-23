@@ -30,10 +30,6 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
             because the server answers the same for both — telling them apart
             here would undo what it takes care not to say. */}
         {failed && <p className="status-failed">incorrect name or password</p>}
-        {/* An installation upgraded from 0.2 has one account, and its name was
-            never chosen by anyone: the server reads a lone `password_hash` as
-            `admin`. Saying so is cheaper than a support thread. */}
-        <p className="dim">upgrading from 0.2? the account is called admin.</p>
       </form>
     </div>
   );

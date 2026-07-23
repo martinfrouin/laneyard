@@ -5,7 +5,6 @@ import type { FastifyInstance } from "fastify";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LEGACY_ADMIN_NAME } from "../config/load.js";
 import type { ConfigStore } from "../config/store.js";
 import type { Db } from "../db/open.js";
 import { RunStore } from "../db/runs.js";
@@ -208,14 +207,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   app.post("/api/login", async (req, reply) => {
     const { name, password } = (req.body ?? {}) as { name?: string; password?: string };
-    // A body with no name is the 0.2 login form, which knew only a password.
-    // It authenticates as `admin`, which is precisely the account a lone
-    // `server.password_hash` is loaded as — so an upgraded install keeps
-    // working, and the loader still owes nobody an answer about which form
-    // the file used.
-    const account = name ?? LEGACY_ADMIN_NAME;
 
-    const waitMs = throttle.retryAfterMs(account);
+    const waitMs = name ? throttle.retryAfterMs(name) : 0;
     if (waitMs > 0) {
       return reply
         .code(429)
@@ -224,16 +217,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     }
 
     const users = deps.config.server()?.users ?? [];
-    const identity = password ? await authenticate(users, account, password) : null;
+    const identity = name && password ? await authenticate(users, name, password) : null;
     if (!identity) {
-      throttle.recordFailure(account);
+      if (name) throttle.recordFailure(name);
       // One message for a wrong password and for a name that does not exist:
       // telling them apart is telling a stranger which accounts are worth
       // attacking.
       return reply.code(401).send({ error: "Incorrect name or password" });
     }
 
-    throttle.recordSuccess(account);
+    throttle.recordSuccess(identity.name);
     const token = ctx.sessions.issue(identity);
     return reply
       .setCookie(SESSION_COOKIE, token, COOKIE_OPTIONS)

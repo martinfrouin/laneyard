@@ -368,12 +368,7 @@ async function configuredPort(configPath: string): Promise<number> {
 /** The repository file, named once so the message and the write cannot disagree. */
 const LANEYARD_YML = "laneyard.yml";
 
-/**
- * What the first account is called when nobody says otherwise.
- *
- * The same name a lone `password_hash` is read under, so a machine set up today
- * and a machine upgraded from 0.2 sign in the same way.
- */
+/** What the first account is called when nobody says otherwise. */
 const DEFAULT_ADMIN_NAME = "admin";
 
 /**

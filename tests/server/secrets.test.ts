@@ -18,7 +18,8 @@ async function harness(options: { uses?: () => Promise<unknown> } = {}) {
     configPath,
     `
 server:
-  password_hash: "${hashPassword("secret")}"
+  users:
+    - { name: admin, role: admin, password_hash: "${hashPassword("secret")}" }
 projects:
   - slug: sample
     name: Sample
@@ -47,7 +48,7 @@ async function login(app: Awaited<ReturnType<typeof harness>>["app"]): Promise<s
   const res = await app.inject({
     method: "POST",
     url: "/api/login",
-    payload: { password: "secret" },
+    payload: { name: "admin", password: "secret" },
   });
   return res.cookies[0]!.value;
 }

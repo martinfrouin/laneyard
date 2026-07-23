@@ -4,14 +4,6 @@ import type { ZodType } from "zod";
 import { repoConfigSchema, serverConfigSchema } from "./schema.js";
 import type { RepoConfig, ServerConfig, UserEntry } from "./schema.js";
 
-/**
- * The name a lone `password_hash` is read under.
- *
- * Also the name the legacy `{ password }` login form authenticates as, which is
- * what lets a 0.2 installation upgrade without anyone editing a file.
- */
-export const LEGACY_ADMIN_NAME = "admin";
-
 export type LoadResult<T> = { ok: true; config: T } | { ok: false; error: string };
 
 /** Reads and validates a YAML file. Never fails by throwing: the caller decides. */
@@ -41,32 +33,15 @@ async function loadYamlFile<T>(path: string, schema: ZodType<T, any, any>): Prom
 }
 
 /**
- * Folds both ways of declaring accounts into the one the rest of the code sees.
+ * Validates the declared accounts.
  *
  * Every refusal here is a locked room avoided: a server with no account, or
  * with none that can administer it, is one nobody can fix from the interface.
  */
 function normaliseUsers(server: {
-  password_hash?: string | undefined;
   users?: UserEntry[] | undefined;
 }): { ok: true; users: UserEntry[] } | { ok: false; error: string } {
-  const { password_hash, users } = server;
-
-  if (password_hash !== undefined && users !== undefined) {
-    return {
-      ok: false,
-      error:
-        "server.password_hash and server.users both set — they are two ways to say the same " +
-        "thing and there is no obvious winner. Keep server.users and drop server.password_hash.",
-    };
-  }
-
-  if (password_hash !== undefined) {
-    return {
-      ok: true,
-      users: [{ name: LEGACY_ADMIN_NAME, role: "admin", password_hash }],
-    };
-  }
+  const { users } = server;
 
   if (users === undefined) {
     return {
@@ -117,11 +92,7 @@ export async function loadServerConfig(path: string): Promise<LoadResult<ServerC
   // The display name falls back to the slug rather than being optional everywhere downstream.
   const projects = res.config.projects.map((p) => ({ ...p, name: p.name ?? p.slug }));
 
-  // `password_hash` is dropped rather than carried along: it has been folded
-  // into `users`, and leaving it in place would give downstream code a second
-  // source of truth to disagree with.
-  const { password_hash: _dropped, ...server } = res.config.server;
-  return { ok: true, config: { server: { ...server, users: accounts.users }, projects } };
+  return { ok: true, config: { server: { ...res.config.server, users: accounts.users }, projects } };
 }
 
 export async function loadRepoConfig(path: string): Promise<LoadResult<RepoConfig>> {

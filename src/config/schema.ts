@@ -70,11 +70,8 @@ export const serverConfigSchema = z.object({
   server: z.object({
     port: z.number().int().positive().default(7890),
     bind: z.string().default("0.0.0.0"),
-    // Both optional in the file, exactly one required by the loader. The old
-    // single-password form is what a 0.2 installation has on disk, and it must
-    // keep working unedited; `load.ts` normalises it into `users` so that
-    // nothing downstream ever learns which of the two forms was written.
-    password_hash: z.string().min(1).optional(),
+    // Optional in the file, required by the loader: a configuration that
+    // declares no account is refused rather than started.
     users: z.array(userEntrySchema).optional(),
     // Only 1 is accepted. Runs share one working directory per project, so a
     // higher number would promise parallel builds that never happen — the
@@ -114,14 +111,13 @@ export type UserEntry = z.infer<typeof userEntrySchema>;
 /**
  * The server block once normalised.
  *
- * `password_hash` is deliberately absent from this type: after the loader has
- * folded it into `users`, no consumer has any business reading it, and a type
- * that still offered it would invite one to.
+ * `users` is required here even though the file leaves it optional: the loader
+ * refuses a configuration that declares no account, so nothing downstream has
+ * to consider a server with nobody in it.
  */
-export type ServerSettings = Omit<
-  z.infer<typeof serverConfigSchema>["server"],
-  "password_hash" | "users"
-> & { users: UserEntry[] };
+export type ServerSettings = Omit<z.infer<typeof serverConfigSchema>["server"], "users"> & {
+  users: UserEntry[];
+};
 
 export type ServerConfig = { server: ServerSettings; projects: ProjectEntry[] };
 export type RepoConfig = z.infer<typeof repoConfigSchema>;

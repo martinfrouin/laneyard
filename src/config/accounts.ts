@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { Document, parseDocument, YAMLSeq } from "yaml";
 import { hashPassword } from "../server/auth.js";
-import { LEGACY_ADMIN_NAME } from "./load.js";
 import type { UserEntry, UserRole } from "./schema.js";
 import { serializeYaml } from "./yaml.js";
 
@@ -62,27 +61,6 @@ async function open(path: string): Promise<Document.Parsed | Document> {
   return doc;
 }
 
-/**
- * Turns a lone `server.password_hash` into the `users` form, in place.
- *
- * A file holding both is the one combination the loader refuses, so adding a
- * colleague to a 0.2 installation has to migrate it — otherwise the act of
- * inviting someone is the act of breaking the server's configuration.
- *
- * The name is the one the loader already reads that hash under, so nobody's
- * password changes meaning on the way through.
- */
-function migrateLegacyHash(doc: Document.Parsed | Document): void {
-  const hash = doc.getIn(["server", "password_hash"]);
-  if (typeof hash !== "string") return;
-  doc.deleteIn(["server", "password_hash"]);
-  if (doc.hasIn(["server", "users"])) return;
-  doc.setIn(
-    ["server", "users"],
-    doc.createNode([{ name: LEGACY_ADMIN_NAME, role: "admin", password_hash: hash }]),
-  );
-}
-
 /** The accounts sequence, created if the file has none yet. */
 function usersSeq(doc: Document.Parsed | Document): YAMLSeq {
   const existing = doc.getIn(["server", "users"]);
@@ -109,7 +87,6 @@ export async function upsertUserInConfig(
   entry: { name: string; role: UserRole; password: string },
 ): Promise<{ created: boolean }> {
   const doc = await open(path);
-  migrateLegacyHash(doc);
   const seq = usersSeq(doc);
 
   const stored: UserEntry = {
@@ -134,7 +111,6 @@ export async function upsertUserInConfig(
  */
 export async function removeUserFromConfig(path: string, name: string): Promise<boolean> {
   const doc = await open(path);
-  migrateLegacyHash(doc);
   const users = doc.getIn(["server", "users"]);
   if (!(users instanceof YAMLSeq)) return false;
 
@@ -147,7 +123,7 @@ export async function removeUserFromConfig(path: string, name: string): Promise<
 }
 
 /**
- * Does this file already declare somebody, in either of the two forms?
+ * Does this file already declare somebody?
  *
  * Asked before a question is put to the user rather than after: `laneyard setup`
  * only asks for an admin's name on a machine that has none, and asking anyway
@@ -155,7 +131,7 @@ export async function removeUserFromConfig(path: string, name: string): Promise<
  */
 export async function hasAccount(path: string): Promise<boolean> {
   const doc = await open(path);
-  return doc.hasIn(["server", "password_hash"]) || doc.hasIn(["server", "users"]);
+  return doc.hasIn(["server", "users"]);
 }
 
 /**
@@ -169,12 +145,9 @@ export async function hasAccount(path: string): Promise<boolean> {
  */
 export async function ensureFirstAdmin(path: string, name: string): Promise<string | null> {
   const doc = await open(path);
-  if (doc.hasIn(["server", "password_hash"]) || doc.hasIn(["server", "users"])) return null;
+  if (doc.hasIn(["server", "users"])) return null;
 
   const password = randomBytes(9).toString("base64url");
-  // The `users` form, never a bare `password_hash`: writing the legacy shape on
-  // a fresh machine would mean every new installation immediately needs the
-  // migration above the first time someone adds a colleague.
   doc.setIn(
     ["server", "users"],
     doc.createNode([{ name, role: "admin", password_hash: hashPassword(password) }]),

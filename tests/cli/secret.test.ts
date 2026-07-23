@@ -16,7 +16,7 @@ async function home(): Promise<string> {
   const root = await tmpDir("laneyard-cli-secret-");
   await writeFile(
     join(root, "config.yml"),
-    `server: { password_hash: "${hashPassword("x")}" }\nprojects:\n  - slug: app\n    name: App\n    git_url: git@example.com:a.git\n`,
+    `server: { users: [{ name: admin, role: admin, password_hash: "${hashPassword("x")}" }] }\nprojects:\n  - slug: app\n    name: App\n    git_url: git@example.com:a.git\n`,
     "utf8",
   );
   return root;

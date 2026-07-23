@@ -166,12 +166,6 @@ Removing an account ends its sessions immediately — "remove the account" and "
 the same act. So does editing `config.yml` by hand: every request looks the account up again, so
 a demotion takes effect at once rather than at the next restart.
 
-**Upgrading from 0.2.** An existing `server.password_hash` keeps working, unedited. It is read as
-a single admin account called `admin` — sign in with that name and the password you already have.
-The first time you add someone, the file is rewritten into the `users` form above, comments and
-all. Do not write both forms: a file holding a `password_hash` *and* a `users` list is refused at
-load, because there is no obvious winner.
-
 ### `laneyard.yml` — in your repository, and committed
 
 Build behaviour belongs next to the code, so it can be versioned with it — `laneyard setup`

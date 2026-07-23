@@ -5,7 +5,7 @@ import { ConfigStore } from "../../src/config/store.js";
 import { tmpDir } from "../fixtures/repos.js";
 
 const CONFIG = (slug: string) => `
-server: { password_hash: "x" }
+server: { users: [{ name: admin, role: admin, password_hash: "x" }] }
 projects:
   - slug: ${slug}
     git_url: u

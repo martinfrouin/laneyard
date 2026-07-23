@@ -58,7 +58,8 @@ async function harness(fastlaneDir?: string) {
     configPath,
     `
 server:
-  password_hash: "${hashPassword("secret")}"
+  users:
+    - { name: admin, role: admin, password_hash: "${hashPassword("secret")}" }
 projects:
   - slug: sample
     name: Sample
@@ -86,7 +87,11 @@ ${fastlaneDir === undefined ? "" : `    fastlane_dir: "${fastlaneDir}"\n`}`,
 }
 
 async function login(app: Awaited<ReturnType<typeof harness>>["app"]): Promise<string> {
-  const res = await app.inject({ method: "POST", url: "/api/login", payload: { password: "secret" } });
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/login",
+    payload: { name: "admin", password: "secret" },
+  });
   return res.cookies[0]!.value;
 }
 

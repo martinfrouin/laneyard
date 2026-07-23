@@ -17,7 +17,8 @@ import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 const CONFIG = (origin: string) => `# My Laneyard configuration
 server:
   port: 7890
-  password_hash: "${hashPassword("secret")}"   # server password
+  users:
+    - { name: admin, role: admin, password_hash: "${hashPassword("secret")}" }   # server password
 
 projects:
   - slug: sample
@@ -74,7 +75,11 @@ async function fillVault(vault: Vault): Promise<void> {
 }
 
 async function login(app: Awaited<ReturnType<typeof harness>>["app"]): Promise<string> {
-  const res = await app.inject({ method: "POST", url: "/api/login", payload: { password: "secret" } });
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/login",
+    payload: { name: "admin", password: "secret" },
+  });
   return res.cookies[0]!.value;
 }
 
