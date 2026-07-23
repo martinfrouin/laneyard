@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { Document, parseDocument, YAMLSeq } from "yaml";
 import { VALID_NAME, ensureFirstAdmin, hasAccount } from "../config/accounts.js";
 import { loadServerConfig } from "../config/load.js";
@@ -8,6 +10,8 @@ import { bad, bold, dim, field, heading, ok, warn } from "./style.js";
 import { acceptingAsker, terminalAsker } from "./prompt.js";
 import type { Asker } from "./prompt.js";
 import { detectProject } from "./detect.js";
+
+const exec = promisify(execFile);
 
 /**
  * What the machine's config.yml holds for a project: how to reach it.
@@ -222,6 +226,21 @@ export async function runSetupCommand(
       dim("Relative to the repository root, because that is what Laneyard clones."),
     );
 
+    // A fastlane folder that is on disk but not in git will not survive the
+    // clone Laneyard builds from — the case that started this: a stray
+    // `app copie/` macOS made, detected here and absent from the remote.
+    // Warned, not refused: setup proposes and the user decides, exactly as with
+    // every value above. Silent when git cannot answer — a courtesy, not a gate.
+    if (!(await fastlaneDirIsTracked(repoRoot(cwd, d.subPath), fastlaneDir))) {
+      process.stdout.write(
+        "\n" +
+          warn(`${bold(fastlaneDir)} exists here but is not tracked by git.\n`) +
+          dim("  Laneyard builds from a clone of the remote, so a path that is not in\n") +
+          dim("  git will not be in the clone — the build will fail looking for it.\n") +
+          dim("  Commit and push it, or give a path that is in git.\n"),
+      );
+    }
+
     const useBundler = await asker.confirm(
       "\n" +
         dim("  With bundler, runs use the fastlane version pinned in the Gemfile.\n") +
@@ -365,6 +384,25 @@ const DEFAULT_ADMIN_NAME = "admin";
  */
 function repoRoot(cwd: string, subPath: string): string {
   return subPath === "" ? cwd : join(cwd, ...subPath.split("/").map(() => ".."));
+}
+
+/**
+ * Whether git tracks anything under a path in the working copy setup ran in.
+ *
+ * A folder can be on disk and absent from git — untracked, gitignored, or a
+ * stray local copy — and such a folder does not survive the clone Laneyard
+ * builds from. `git ls-files` lists nothing under an untracked path, so an
+ * empty listing is the signal. Returns true — warning nothing — when git
+ * cannot answer at all (not a repository, git missing): the check is a
+ * courtesy, and setup must not crash on its account.
+ */
+export async function fastlaneDirIsTracked(root: string, dir: string): Promise<boolean> {
+  try {
+    const { stdout } = await exec("git", ["ls-files", "--", dir], { cwd: root });
+    return stdout.trim() !== "";
+  } catch {
+    return true;
+  }
 }
 
 const fileExists = async (path: string): Promise<boolean> => {

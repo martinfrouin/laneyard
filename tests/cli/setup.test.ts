@@ -1,9 +1,27 @@
+import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { addProjectToConfig, runSetupCommand } from "../../src/cli/setup.js";
+import { addProjectToConfig, fastlaneDirIsTracked, runSetupCommand } from "../../src/cli/setup.js";
 import { tmpDir } from "../fixtures/repos.js";
+
+/** Runs `fn`, returning everything it wrote to stdout as plain text. */
+async function captureStdout(fn: () => Promise<void>): Promise<string> {
+  const original = process.stdout.write.bind(process.stdout);
+  let out = "";
+  process.stdout.write = ((chunk: unknown) => {
+    out += String(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    await fn();
+  } finally {
+    process.stdout.write = original;
+  }
+  return out;
+}
 
 const EXISTING = `# My Laneyard configuration
 server:
@@ -326,5 +344,80 @@ describe("runSetupCommand", () => {
 
     expect(code).toBe(0);
     await expect(readFile(configPath, "utf8")).rejects.toThrow();
+  });
+
+  /**
+   * The failure that started this: a `fastlane_dir` detected in a working copy
+   * that never reached the remote — a stray `app copie/` macOS made, uncommitted,
+   * or gitignored. Laneyard builds from a clone of the remote, so such a path is
+   * not in the clone and the build fails looking for it. Setup warns before
+   * writing, and — matching its whole philosophy — still lets the user proceed.
+   */
+  it("warns when the fastlane dir is not tracked by git, and writes the config anyway", async () => {
+    // `monorepo` git-inits but never commits, so `app/fastlane` is untracked.
+    const { app, configPath } = await monorepo();
+
+    let code = 1;
+    const out = await captureStdout(async () => {
+      code = await runSetupCommand(app, configPath, { yes: true });
+    });
+
+    expect(out).toContain("not tracked by git");
+    // Proposed, not refused: the config was still written.
+    expect(code).toBe(0);
+    const written = parse(await readFile(configPath, "utf8")) as { projects: { slug: string }[] };
+    expect(written.projects).toHaveLength(1);
+  });
+
+  it("says nothing when the fastlane dir is committed", async () => {
+    const { root, app, configPath } = await monorepo();
+
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const run = promisify(execFile);
+    await run("git", ["config", "user.email", "t@example.com"], { cwd: root });
+    await run("git", ["config", "user.name", "T"], { cwd: root });
+    await run("git", ["add", "-A"], { cwd: root });
+    await run("git", ["commit", "-q", "-m", "commit the app"], { cwd: root });
+
+    const out = await captureStdout(async () => {
+      await runSetupCommand(app, configPath, { yes: true });
+    });
+
+    expect(out).not.toContain("not tracked by git");
+  });
+});
+
+describe("fastlaneDirIsTracked", () => {
+  const run = promisify(execFile);
+
+  async function gitRepo(): Promise<string> {
+    const root = await tmpDir("laneyard-track-");
+    await run("git", ["init", "-q", "-b", "main"], { cwd: root });
+    await run("git", ["config", "user.email", "t@example.com"], { cwd: root });
+    await run("git", ["config", "user.name", "T"], { cwd: root });
+    await mkdir(join(root, "app", "fastlane"), { recursive: true });
+    await writeFile(join(root, "app", "fastlane", "Fastfile"), "lane :beta do\nend\n", "utf8");
+    return root;
+  }
+
+  it("is true for a committed directory", async () => {
+    const root = await gitRepo();
+    await run("git", ["add", "-A"], { cwd: root });
+    await run("git", ["commit", "-q", "-m", "in"], { cwd: root });
+    expect(await fastlaneDirIsTracked(root, "app/fastlane")).toBe(true);
+  });
+
+  it("is false for a directory on disk but never committed", async () => {
+    const root = await gitRepo();
+    expect(await fastlaneDirIsTracked(root, "app/fastlane")).toBe(false);
+  });
+
+  it("is true — swallowing the failure — when git cannot answer at all", async () => {
+    // Not a git repository: `git ls-files` fails. The check is a courtesy, so it
+    // must not crash setup — it says nothing rather than throw.
+    const root = await tmpDir("laneyard-track-nogit-");
+    await mkdir(join(root, "app", "fastlane"), { recursive: true });
+    expect(await fastlaneDirIsTracked(root, "app/fastlane")).toBe(true);
   });
 });
