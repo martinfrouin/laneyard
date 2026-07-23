@@ -25,10 +25,12 @@ the Fastfile you already have and asks *your* fastlane what it can do — plugin
 hard-codes no knowledge of fastlane at all, so upgrading fastlane or adding a plugin needs no
 change here.
 
-The adaptation goes one way. A repository that builds today keeps building unedited: signing
-credentials reach your lanes under the variable names your Fastfile already reads, and where
-Laneyard needs to know something no file can tell it, it asks on a form rather than asking you to
-change the file.
+The adaptation goes one way. Signing credentials reach your lanes under the variable names your
+Fastfile already reads, and where Laneyard needs to know something no file can tell it, it asks on
+a form rather than asking you to change the file. Where it does find something in the Fastfile that
+will not survive being cloned — a credential named by a path only your laptop has — it says so and
+offers the edit, with the diff in front of you. That is an offer: a repository that declines every
+one of them keeps building exactly as it did.
 
 ## Where it fits
 
@@ -89,6 +91,88 @@ Open it from any machine on your network, sign in, and your lanes are listed —
 asked your project's own fastlane for them.
 
 ![The project screen: lanes read from the Fastfile, with their descriptions, and the run history](https://raw.githubusercontent.com/martinfrouin/laneyard/main/docs/screenshots/project.png)
+
+### What setup does about a credential your Fastfile names outright
+
+`laneyard setup` has a second act, and it begins after `Project "x" is set up` has printed. That
+order is the guarantee rather than a presentation choice: everything below is offered to a project
+that is already registered and already works, so declining all of it costs nothing.
+
+What it looks for is a credential named by a literal value:
+
+```ruby
+upload_to_play_store(json_key: "./play-service-account.json", track: "beta")
+```
+
+That line builds on the laptop it was written on and nowhere else. Laneyard builds from a clone of
+your remote, so either that JSON is gitignored — and is therefore absent from the clone, and the run
+fails looking for it — or it is committed, and a service account key is in your repository's
+history. The second is worse than the first, and neither is something a checklist can fix later.
+
+So setup reads the Fastfile with Prism and, for each literal it recognises, offers — one at a time,
+and refusably — to lift the credential into this machine's vault and replace the literal with
+`ENV.fetch(…)`. It reads the syntax tree rather than matching text, because `json_key:` also occurs
+in comments, inside strings, and as a method somebody's Fastfile defines: a wrong patch to someone's
+build file is the worst thing this feature could do.
+
+Three kinds, differing in how sure the reading is:
+
+- **a path to a credential file** — `key_filepath:` on `app_store_connect_api_key`, and `json_key:`
+  on `supply`, `upload_to_play_store` or `validate_play_store_json_key` — offered only when the path
+  resolves to a file that is really on this disk. There is nothing to lift into the vault otherwise,
+  and patching to a variable that nothing supplies would trade one broken build for another. The
+  question defaults to yes;
+- **the credential's contents, written into the file** — `key_content:`, `json_key_data:` — which is
+  a private key in cleartext in your repository. The question defaults to yes. The patch renames the
+  keyword as well as replacing the value, because a stored block is put back on disk as a file and
+  exported as a *path*: `key_content:` becomes `key_filepath:`, and `json_key_data:` becomes
+  `json_key:`. Leaving the keyword alone would hand a filename to an argument expecting PEM text,
+  and fastlane's complaint about that would point nowhere near here;
+- **an argument whose name looks like a secret** — anything ending in `token`, `password`, `secret`,
+  `api_key` or `url`, holding a literal string. This one **defaults to no**, and its value is masked
+  on screen rather than printed. It is the only one of the three where a false positive is likely —
+  a URL that is not a secret, a placeholder token committed on purpose — and a patch applied by
+  default to a value that was never a secret is a silent regression in someone's build.
+
+The vault is written before the Fastfile, always: if lifting the credential fails, no Fastfile has
+been patched to read a variable that nothing supplies. The patch is spliced by byte offset, so
+everything outside the replaced range comes out byte-identical — no reformatting, no reordering, the
+same rule the Fastfile editor follows — and the file is parsed again before the command returns. If
+it no longer parses, the previous content is back on disk.
+
+```diff
+-  upload_to_play_store(json_key: "./play-service-account.json", track: "beta")
++  upload_to_play_store(json_key: ENV.fetch("SUPPLY_JSON_KEY"), track: "beta")
+```
+
+`ENV.fetch` rather than `ENV[]`: a variable that is missing then fails at the top of the lane and
+says which one, instead of reaching an action as `nil`.
+
+**Setup does not commit and does not push.** It prints the `git diff` command and stops. The working
+copy is yours and may be mid-branch, and a setup command that commits into someone's repository is a
+line this does not cross. Which makes the next sentence the one to read twice: **a patched Fastfile
+changes nothing until you push it.** Laneyard builds from a clone of the remote, so until that commit
+is on the remote, every run still reads the file with the path in it. Setup's closing message says
+so.
+
+It also does not take the credential out of your repository. Where `git ls-files` finds the file,
+setup says so in one line — the key is in your history, this patch does not remove it from there,
+and rotating the key is what does. That is information rather than an action: `git rm --cached`
+would not remove it from the history either, and rewriting someone's history is not setup's to do.
+
+Two things it deliberately leaves alone. A value written as a heredoc is skipped, because what the
+parser reports as the location of a `<<~` value is the marker rather than the text below it, so
+patching one would corrupt the file. And the Android keystore is not part of this at all: it is
+configured in the Gradle build script rather than the Fastfile, and Laneyard already puts it on disk
+for the length of a run, as described under Signing credentials below.
+
+Declining writes nothing — not to the repository, not to the vault. The project is registered
+exactly as the lines above it announced, and the readiness checklist goes on reporting the hardcoded
+path as *could not tell*, which is what it did before any of this existed.
+
+And where nothing on the machine can run Prism — a Mac whose only Ruby is the system's 2.6, which
+cannot load it — setup prints `Fastfile not analysed — no Ruby with Prism available. Nothing else
+changes.` and finishes as it always did. The scan is a service, never a gate.
 
 ## Configuration
 
@@ -624,6 +708,8 @@ What this does *not* cover, stated plainly:
 - `✓` remove a project from the interface — everything Laneyard holds for it, behind a typed name
 - `✓` `laneyard uninstall`: the whole inventory first, then a typed confirmation, then the folder
 - `✓` named accounts, with a builder role that never sees a credential
+- `✓` setup names the credentials a Fastfile hardcodes, and offers — refusably — to lift them into
+  the vault and patch the file
 - `○` git-triggered and scheduled builds
 
 Two things worth knowing today: listing lanes does not fetch the repository, so a lane you have

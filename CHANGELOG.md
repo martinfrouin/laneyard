@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.6.0 — unreleased
+
+What `laneyard setup` does about a credential the Fastfile names outright.
+
+### Setup offers to lift a credential your Fastfile hardcodes
+
+A Fastfile naming its credential by a literal path — `json_key:
+"./play-service-account.json"` — builds on the laptop it was written on and
+cannot build anywhere else. Laneyard builds from a clone of your remote, so
+either that file is gitignored and absent from the clone, or it is committed and
+a signing key is in your repository's history. Setup used to finish green on such
+a project and say nothing about it, and there was nothing it could have said:
+everything Laneyard has for credentials hangs off a variable name, and a Fastfile
+that reads no variable offers nothing to attach a block to.
+
+Setup now reads the Fastfile with Prism once it has finished — after `Project "x"
+is set up` has printed, which is the guarantee rather than a presentation choice
+— and offers, one credential at a time, to lift it into this machine's vault and
+replace the literal with `ENV.fetch(…)`. A path resolving to a file that is
+really on disk, and a key written into the file inline, are offered with the
+question defaulting to yes. An argument that merely looks like a secret —
+`token`, `password`, `api_key` — defaults to no and has its value masked on
+screen: it is the one case where a false positive is likely, and a patch applied
+by default to something that was never a secret is a silent regression in
+someone's build.
+
+It does not commit and does not push. It prints the `git diff` command and stops,
+so a patched Fastfile changes nothing until you push it — which the closing
+message says in those words, because Laneyard builds from the remote and that is
+the trap. It does not take the credential out of the repository either: where
+`git ls-files` finds the file, it says the key is in your history and that
+rotating it is the fix, and touches nothing.
+
+Declining every proposal writes nothing anywhere and leaves the project
+registered exactly as it was, which is the line the whole feature is bounded by.
+Laneyard may notice something about a repository and offer a correction; it may
+not make a working project depend on the correction being taken.
+
+On a machine with no Ruby that can load Prism — macOS's own 2.6 cannot — setup
+prints one line saying the Fastfile was not analysed, and finishes as it always
+did. The scan is a service, never a gate.
+
 ## 0.5.0
 
 Who reaches which project, what a removal actually removes, and a `laneyard.yml`
