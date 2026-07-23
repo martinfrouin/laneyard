@@ -60,6 +60,16 @@ describe("scan.rb", () => {
     expect((await scan(dir)).literals).toEqual([]);
   });
 
+  it("ignores a heredoc value, whose range would delimit the marker", async () => {
+    // `<<~P` is four bytes; the string it stands for lives on the lines below.
+    // Splicing the reported range would leave the heredoc body stranded after
+    // the call and produce a Fastfile that no longer parses.
+    const dir = await projectWithFastfile(
+      `lane :beta do\n  sigh(api_key_path: <<~P)\n    ./AuthKey_HEREDOC.p8\n  P\nend\n`,
+    );
+    expect((await scan(dir)).literals).toEqual([]);
+  });
+
   it("reports a Fastfile that does not parse as an error, not a crash", async () => {
     const dir = await projectWithFastfile(`lane :beta do\n  build_app(\nend\n`);
     const res = await scan(dir);

@@ -66,6 +66,15 @@ def literals_in(node, out = [])
         next unless el.is_a?(Prism::AssocNode)
         next unless el.key.is_a?(Prism::SymbolNode)
         next unless el.value.is_a?(Prism::StringNode)
+        # A heredoc's location covers its *marker* — `<<~P` is four bytes —
+        # while its value lives on the lines below. Reporting that range would
+        # have the caller splice `ENV.fetch("...")` over the marker and leave
+        # the body stranded after the call: a Fastfile that no longer parses,
+        # written silently into someone's repository. Dropping heredocs costs
+        # nothing real, because a credential path is never written as one while
+        # `changelog:` and `message:` routinely are. Only Ruby can tell a
+        # heredoc from a quoted string, so the decision has to be made here.
+        next if el.value.opening&.start_with?("<<")
 
         out << {
           action: child.name.to_s,
