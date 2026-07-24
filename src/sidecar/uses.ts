@@ -40,7 +40,7 @@ export interface FastfileUses {
  */
 async function hashFastlaneDir(root: string, fastlaneDir: string): Promise<string> {
   const dir = join(root, fastlaneDir);
-  await assertFastlaneDir(dir, fastlaneDir);
+  await assertFastlaneDir(root, fastlaneDir);
   const hash = createHash("sha256");
   // The sidecar is part of the question, not just the answer: a parser that
   // learns to read more finds more in a Fastfile that never changed, and a key

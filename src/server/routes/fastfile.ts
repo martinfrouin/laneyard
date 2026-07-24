@@ -61,7 +61,7 @@ export async function registerFastfileRoutes(app: FastifyInstance, ctx: AppConte
       // uncommitted or gitignored, or a stray local copy. `store.read` would
       // surface that as a bare ENOENT; this turns it into the same sentence the
       // sidecar gives, naming the directory and how to fix it.
-      await assertFastlaneDir(join(r.workspacePath, r.fastlaneDir), r.fastlaneDir);
+      await assertFastlaneDir(r.workspacePath, r.fastlaneDir);
       const [content, dirty, diff] = await Promise.all([
         store.read(r.workspacePath, r.fastlaneDir),
         r.workspace.isDirty(),

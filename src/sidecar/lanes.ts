@@ -19,7 +19,7 @@ export interface Lane {
  */
 async function hashFastlaneDir(root: string, fastlaneDir: string): Promise<string> {
   const dir = join(root, fastlaneDir);
-  await assertFastlaneDir(dir, fastlaneDir);
+  await assertFastlaneDir(root, fastlaneDir);
   const hash = createHash("sha256");
   // Same reason as in `uses.ts`: the reader is part of the key, so improving the
   // sidecar cannot leave an install served by what the old one concluded.
