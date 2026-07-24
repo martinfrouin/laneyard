@@ -15,6 +15,10 @@ scenario="${FAKE_FASTLANE_SCENARIO:-success}"
 report_dir="${FAKE_FASTLANE_REPORT_DIR:-$PWD/fastlane}"
 
 echo "[09:41:01]: Driving the lane '$*'"
+# Where it was started from. Real fastlane does not print this, but real
+# fastlane refuses to start at all when the folder is not here — and a fake
+# that says where it is lets a test assert the same thing without a Ruby.
+echo "[09:41:01]: working directory $PWD"
 echo "[09:41:02]: ------ Step: match ------"
 echo "[09:41:03]: Installing certificates"
 echo "[09:41:04]: ------ Step: build_app ------"

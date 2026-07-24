@@ -8,6 +8,7 @@ import type { LogStore } from "../logs/store.js";
 import { summarizeFailure } from "../heuristics/error-summary.js";
 import { appRootOf, searchDir } from "../heuristics/platforms.js";
 import { Redactor, scrub } from "../logs/redact.js";
+import { assertFastlaneDir } from "../sidecar/fastlane-dir.js";
 import { collectArtifacts } from "./artifacts.js";
 import {
   removeGradleProperties,
@@ -197,10 +198,25 @@ async function execute(
   // the next run is the first moment anything can. Its failure is not reported
   // — a leftover that resists removal is a broken disk, not a broken build, and
   // saying so here would fail a run for a file it has not needed yet.
-  const androidRoot = searchDir(opts.workspacePath, appRootOf(settings.fastlane_dir));
-  await sweepGradleProperties(androidRoot, opts.androidKeystore).catch(() => {});
+  //
+  // The app's own directory, which is the parent of the configured fastlane
+  // folder: the repository root for a plain app, `app/` for one in a monorepo.
+  // It is where the properties file goes and, below, where fastlane is started.
+  const appRoot = searchDir(opts.workspacePath, appRootOf(settings.fastlane_dir));
+
+  // Before any of that, and before fastlane: a clone without the folder is the
+  // one failure fastlane reports worst. It asks whether to set a project up,
+  // finds nobody to answer, and prints a Ruby backtrace and a list of GitHub
+  // issues over the sentence that mattered. This says it in one line instead.
   try {
-    wrote.properties = await writeGradleProperties(androidRoot, opts.androidKeystore);
+    await assertFastlaneDir(opts.workspacePath, settings.fastlane_dir);
+  } catch (cause) {
+    return fail((cause as Error).message);
+  }
+
+  await sweepGradleProperties(appRoot, opts.androidKeystore).catch(() => {});
+  try {
+    wrote.properties = await writeGradleProperties(appRoot, opts.androidKeystore);
   } catch (cause) {
     // Failing the run rather than carrying on. Carrying on is what produces the
     // artifact this whole module exists to prevent: a release build that
@@ -241,7 +257,13 @@ async function execute(
     args: useBundle
       ? ["exec", "fastlane", ...laneArgs(opts)]
       : laneArgs(opts),
-    cwd: opts.workspacePath,
+    // The app's directory, not the repository root. fastlane looks for
+    // `fastlane/` in the directory it was started from and nowhere else — no
+    // walking up, no looking down — so a project whose Fastfile sits in
+    // `app/fastlane` has to be started from `app`. Started from the root it
+    // finds nothing and offers to set fastlane up, which on a build server
+    // means a crash: there is nobody there to answer the question.
+    cwd: appRoot,
     env: {
       ...opts.env,
       ...(opts.secrets ?? {}),

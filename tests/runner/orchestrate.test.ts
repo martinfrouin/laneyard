@@ -89,6 +89,82 @@ describe("executeRun", () => {
     expect(runs.steps(runId).find((s) => s.name === "build_app")?.status).toBe("failed");
   }, 60_000);
 
+  it("launches fastlane from the directory that holds its folder", async () => {
+    // A monorepo, which is the ordinary shape: `app/fastlane/Fastfile`, and
+    // `fastlane_dir: app/fastlane` in config.yml. fastlane looks for `fastlane/`
+    // in the directory it was started from and nowhere else — started from the
+    // repository root it finds nothing, and answers with the non-interactive
+    // crash that sent this test here.
+    const origin = await makeOriginRepo({
+      "app/fastlane/Fastfile": "lane :beta do\nend\n",
+      ".gitignore": "app/build/\n",
+    });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: join(root, "workspaces", "p"),
+      artifactsDir: join(root, "artifacts", String(runId)),
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => ({
+        ...SETTINGS,
+        fastlane_dir: "app/fastlane",
+        // Repository-relative, as `resolve.ts` writes them for an app in a
+        // subdirectory — so this says nothing about where fastlane ran.
+        artifact_globs: ["app/build/**/*.ipa"],
+      }),
+      env: { PATH: `${FAKE_DIR}:${process.env["PATH"]}`, FAKE_FASTLANE_SCENARIO: "success" },
+      onChunk: () => {},
+    });
+
+    const run = runs.get(runId)!;
+    expect(run.status).toBe("success");
+    // Said outright by the run itself: everything else here is a consequence.
+    expect(await logs.read(runId)).toContain(`working directory ${join(root, "workspaces", "p", "app")}`);
+    // And the two consequences that matter. fastlane writes its report beside
+    // the Fastfile, so a report the run can read is proof of where it ran; the
+    // artifact is produced under the app, not under the repository root.
+    expect(runs.steps(runId).map((s) => s.source)).toEqual(["report", "report"]);
+    expect(runs.artifacts(runId).map((a) => a.filename)).toEqual(["Sample.ipa"]);
+  }, 60_000);
+
+  it("says the folder is missing rather than letting fastlane ask a question", async () => {
+    // The clone has no fastlane folder where the configuration says one is.
+    // Left to fastlane, this is the worst error it produces: it offers to set a
+    // project up, finds nobody to answer, and buries the one useful sentence
+    // under a Ruby backtrace and a list of GitHub issues.
+    const origin = await makeOriginRepo({ "README.md": "no fastlane here\n" });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: join(root, "workspaces", "p"),
+      artifactsDir: join(root, "artifacts", String(runId)),
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => SETTINGS,
+      env: { PATH: `${FAKE_DIR}:${process.env["PATH"]}` },
+      onChunk: () => {},
+    });
+
+    const run = runs.get(runId)!;
+    expect(run.status).toBe("failed");
+    expect(run.errorSummary).toMatch(/No fastlane\/ in the clone/);
+    // It never reached fastlane, so there is nothing of a build in the log.
+    expect(await logs.read(runId)).not.toContain("Driving the lane");
+  }, 60_000);
+
   it("fails cleanly if resolving settings throws", async () => {
     const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n" });
     const root = await tmpDir("laneyard-root-");
