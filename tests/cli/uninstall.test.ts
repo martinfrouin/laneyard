@@ -52,14 +52,14 @@ async function installed(): Promise<string> {
   const vault = await Vault.open(home, new SecretStore(db), new CredentialStore(db));
   await vault.set("cartes", "MATCH_PASSWORD", "match-password-value", true);
   await vault.set("popotes", "SENTRY_ORG", "sentry-org-value", false);
-  await vault.set(null, "GITHUB_TOKEN", "github-token-value", true);
+  await vault.set("popotes", "GITHUB_TOKEN", "github-token-value", true);
   await vault.setCredential("cartes", "android_keystore", {
     fileName: "release.jks",
     fileBytes: Buffer.from("keystore"),
     fields: { store_password: "storepass", key_alias: "release", key_password: "keypass" },
     varNames: {},
   });
-  await vault.setCredential(null, "apple_asc", {
+  await vault.setCredential("popotes", "apple_asc", {
     fileName: "AuthKey.p8",
     fileBytes: Buffer.from("-----BEGIN PRIVATE KEY-----"),
     fields: { key_id: "ABC", issuer_id: "DEF" },
@@ -79,16 +79,10 @@ async function installed(): Promise<string> {
 }
 
 describe("the inventory", () => {
-  it("counts blocks and secrets, keeping global ones apart from a project's", async () => {
+  it("counts the blocks and secrets across every project", async () => {
     const inv = await readInventory(await installed());
 
-    expect(inv.db?.vault).toEqual({
-      projectSecrets: 2,
-      globalSecrets: 1,
-      projectBlocks: 1,
-      globalBlocks: 1,
-      runs: 1,
-    });
+    expect(inv.db?.vault).toEqual({ secrets: 3, blocks: 2, runs: 1 });
     expect(inv.config?.projects).toEqual(["cartes", "popotes"]);
   });
 
@@ -141,12 +135,11 @@ describe("laneyard uninstall --dry-run", () => {
     expect(out).toMatch(/backup[\s\S]{0,60}database alone will not bring anything back/);
   });
 
-  it("says plainly that a global secret shared by other projects goes too", async () => {
+  it("says how much of the vault goes", async () => {
     const { out } = await run(await installed(), ["--dry-run"]);
 
-    expect(out).toContain("2 project secrets");
-    expect(out).toContain("1 global secret — shared by every project, removed too");
-    expect(out).toContain("1 global signing block — shared by every project, removed too");
+    expect(out).toContain("3 secrets");
+    expect(out).toContain("2 signing blocks");
   });
 
   it("names the command that removes the package, and is not it", async () => {

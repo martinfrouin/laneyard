@@ -60,7 +60,7 @@ describe("secrets API", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("lists names and scopes, never values", async () => {
+  it("lists names, never values", async () => {
     const { app } = await harness();
     const session = await login(app);
     const cookies = { laneyard_session: session };
@@ -79,7 +79,7 @@ describe("secrets API", () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body).toMatchObject([{ key: "API_TOKEN", masked: true, scope: "project" }]);
+    expect(body).toMatchObject([{ key: "API_TOKEN", masked: true }]);
     // No trace of the plaintext or of any ciphertext-shaped field anywhere in the body.
     expect(res.body).not.toContain("super-secret-value");
     expect(res.body).not.toMatch(/value/i);
@@ -203,31 +203,23 @@ describe("secrets API", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("keeps global secrets on their own route", async () => {
+  it("has no way in that does not name a project", async () => {
+    // There used to be an unscoped route for each of these, and a row stored
+    // through it was read by every project. A request that names no project now
+    // reaches nothing at all.
     const { app } = await harness();
-    const session = await login(app);
-    const cookies = { laneyard_session: session };
+    const cookies = { laneyard_session: await login(app) };
 
-    const put = await app.inject({
-      method: "PUT",
-      url: "/api/secrets/GLOBAL_TOKEN",
-      cookies,
-      payload: { value: "global-secret-value" },
-    });
-    expect(put.statusCode).toBe(204);
-
-    const global = await app.inject({ method: "GET", url: "/api/secrets", cookies });
-    expect(global.json()).toMatchObject([{ key: "GLOBAL_TOKEN", scope: "global" }]);
-
-    // A project's own listing sees it too — project scope wins, but a global
-    // secret still applies where no project-level override exists.
-    const projectList = await app.inject({
-      method: "GET",
-      url: "/api/projects/sample/secrets",
-      cookies,
-    });
-    expect(projectList.json()).toMatchObject([{ key: "GLOBAL_TOKEN", scope: "global" }]);
+    for (const [method, url] of [
+      ["GET", "/api/secrets"],
+      ["PUT", "/api/secrets/GLOBAL_TOKEN"],
+      ["DELETE", "/api/secrets/GLOBAL_TOKEN"],
+    ] as const) {
+      const res = await app.inject({ method, url, cookies, payload: { value: "global-secret-value" } });
+      expect(res.statusCode).toBe(404);
+    }
   });
+
 });
 
 /**

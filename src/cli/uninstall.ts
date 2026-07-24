@@ -43,10 +43,8 @@ export interface FolderTally {
 
 /** What the vault holds, or why it could not be read. */
 export interface VaultTally {
-  projectSecrets: number;
-  globalSecrets: number;
-  projectBlocks: number;
-  globalBlocks: number;
+  secrets: number;
+  blocks: number;
   runs: number;
 }
 
@@ -176,13 +174,8 @@ async function readVault(dbPath: string): Promise<{ vault: VaultTally | null; un
       (db!.prepare(sql).get() as { n: number }).n;
     return {
       vault: {
-        // The empty slug is how a global row is stored — the same convention
-        // `SecretStore` and `CredentialStore` use, and the reason the two are
-        // counted apart: a global secret belongs to every project.
-        projectSecrets: count("SELECT COUNT(*) AS n FROM secret WHERE project_slug != ''"),
-        globalSecrets: count("SELECT COUNT(*) AS n FROM secret WHERE project_slug = ''"),
-        projectBlocks: count("SELECT COUNT(*) AS n FROM credential WHERE project_slug != ''"),
-        globalBlocks: count("SELECT COUNT(*) AS n FROM credential WHERE project_slug = ''"),
+        secrets: count("SELECT COUNT(*) AS n FROM secret"),
+        blocks: count("SELECT COUNT(*) AS n FROM credential"),
         runs: count("SELECT COUNT(*) AS n FROM run"),
       },
       unreadable: null,
@@ -297,25 +290,8 @@ export function renderInventory(inv: Inventory): string {
         dim("               Stop the server and run this again to see what is in it.\n");
     } else {
       const v = inv.db.vault;
-      out += field("secrets", `${plural(v.projectSecrets, "project secret")}`) + "\n";
-      // Said on its own line and in words rather than folded into the number
-      // above: a global secret is read by every project on this machine, and
-      // "in scope" is the fact someone needs before they answer the question.
-      out +=
-        field(
-          "",
-          v.globalSecrets === 0
-            ? dim("no global secret")
-            : `${plural(v.globalSecrets, "global secret")} — shared by every project, ${bold("removed too")}`,
-        ) + "\n";
-      out += field("signing", `${plural(v.projectBlocks, "project signing block")}`) + "\n";
-      out +=
-        field(
-          "",
-          v.globalBlocks === 0
-            ? dim("no global signing block")
-            : `${plural(v.globalBlocks, "global signing block")} — shared by every project, ${bold("removed too")}`,
-        ) + "\n";
+      out += field("secrets", plural(v.secrets, "secret")) + "\n";
+      out += field("signing", plural(v.blocks, "signing block")) + "\n";
       out += field("history", plural(v.runs, "run")) + "\n";
     }
   }
@@ -355,7 +331,7 @@ export function renderInventory(inv: Inventory): string {
  */
 export function renderIrreversible(inv: Inventory): string {
   const v = inv.db?.vault;
-  const stored = v === undefined || v === null ? null : v.projectSecrets + v.globalSecrets + v.projectBlocks + v.globalBlocks;
+  const stored = v === undefined || v === null ? null : v.secrets + v.blocks;
 
   return (
     heading("what cannot be undone") +

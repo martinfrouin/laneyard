@@ -46,9 +46,6 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
    *    `.p8` or a keystore; the file that went in is still in the password
    *    manager or the safe it came from. The answer says so, the way
    *    `uninstall` does, so nobody is left thinking their keystore is gone.
-   *  - global secrets and global signing blocks. They are read by every project
-   *    on the machine, not this one's to take — `vault.forget` touches only
-   *    slug-scoped rows, and the answer counts the global ones it left alone.
    *
    * The confirmation is the project's own slug, sent back as `?confirm=`.
    * Without a match nothing is removed: a bare DELETE is a refusal, not a
@@ -78,13 +75,6 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
         error: `"${slug}" has a run in flight. Wait for it to finish, or cancel it, then remove the project.`,
       });
     }
-
-    // The global counts are read now — the last moment anyone is looking — so
-    // the answer can say what it left alone. They are shared by every project
-    // and survive one of them going away, which is why the removal never takes
-    // them and the reply names them apart.
-    const globalSecrets = ctx.vault.listGlobal().length;
-    const globalSigningBlocks = ctx.vault.listGlobalCredentials().length;
 
     // The removal itself lives in one place, shared with `laneyard remove`: the
     // route confirms and shapes the reply, the core does the deleting.
@@ -119,13 +109,6 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
         workspace: result.workspace,
         secrets: result.secrets,
         signingBlocks: result.signingBlocks,
-      },
-      // Named, not removed. The git remote and the credential originals are the
-      // user's and are never touched here; the global rows are shared by every
-      // project and survive one of them going away.
-      untouched: {
-        globalSecrets,
-        globalSigningBlocks,
       },
     });
   });

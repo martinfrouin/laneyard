@@ -55,18 +55,18 @@ async function harness() {
   return { app, root, configPath, vault, runs: new RunStore(db) };
 }
 
-/** A project secret, a global secret, and one signing block of each scope. */
+/** Two secrets and a signing block for the project, and a second project's own. */
 async function fillVault(vault: Vault): Promise<void> {
   await vault.set("sample", "SAMPLE_TOKEN", "sample-token-value", true);
   await vault.set("sample", "SAMPLE_ISSUER", "issuer-value", false);
-  await vault.set(null, "SHARED_TOKEN", "shared-token-value", true);
+  await vault.set("bystander", "OTHER_TOKEN", "other-token-value", true);
   await vault.setCredential("sample", "android_keystore", {
     fileName: "release.jks",
     fileBytes: Buffer.from("keystore-bytes"),
     fields: { store_password: "storepass", key_alias: "release", key_password: "keypass" },
     varNames: {},
   });
-  await vault.setCredential(null, "play_service_account", {
+  await vault.setCredential("bystander", "play_service_account", {
     fileName: "play.json",
     fileBytes: Buffer.from("{}"),
     fields: {},
@@ -177,7 +177,7 @@ describe("DELETE /api/projects/:slug", () => {
     expect(await readFile(configPath, "utf8")).toBe(before);
     expect(runs.get(id)).not.toBeNull();
     expect(existsSync(join(root, "artifacts", String(id)))).toBe(true);
-    expect(vault.ownedBy("sample").secrets).toHaveLength(2);
+    expect(vault.list("sample")).toHaveLength(2);
   });
 
   it("refuses while a run of that project is in flight, and removes nothing", async () => {
@@ -202,7 +202,7 @@ describe("DELETE /api/projects/:slug", () => {
     expect((res.json() as { error: string }).error).toMatch(/run/i);
     expect(await readFile(configPath, "utf8")).toBe(before);
     expect(runs.get(id)).not.toBeNull();
-    expect(vault.ownedBy("sample").secrets).toHaveLength(2);
+    expect(vault.list("sample")).toHaveLength(2);
   });
 
   it("removes the config block and takes the project out of the listing", async () => {
@@ -248,24 +248,21 @@ describe("DELETE /api/projects/:slug", () => {
     expect(run.statusCode).toBe(404);
   });
 
-  it("forgets the slug-scoped vault rows and leaves the global ones intact", async () => {
+  it("forgets this project's vault rows and touches no other project's", async () => {
     const { app, vault } = await harness();
     const cookies = { laneyard_session: await login(app) };
     await fillVault(vault);
 
     const res = await app.inject({ method: "DELETE", url: del("sample", "sample"), cookies });
-    expect(res.json()).toMatchObject({
-      removed: { secrets: 2, signingBlocks: 1 },
-      // Shared by every project, so named apart and left alone.
-      untouched: { globalSecrets: 1, globalSigningBlocks: 1 },
-    });
+    expect(res.json()).toMatchObject({ removed: { secrets: 2, signingBlocks: 1 } });
 
     // The project's own rows are gone.
-    expect(vault.ownedBy("sample")).toEqual({ secrets: [], credentials: [] });
-    // The global rows survive, and still resolve for another project.
-    expect(vault.listGlobal().map((s) => s.key)).toEqual(["SHARED_TOKEN"]);
-    expect(vault.listGlobalCredentials().map((c) => c.kind)).toEqual(["play_service_account"]);
-    expect(vault.resolve("other")).toMatchObject({ SHARED_TOKEN: "shared-token-value" });
+    expect(vault.list("sample")).toEqual([]);
+    expect(vault.listCredentials("sample")).toEqual([]);
+    // Another project's are exactly where they were.
+    expect(vault.list("bystander").map((s) => s.key)).toEqual(["OTHER_TOKEN"]);
+    expect(vault.listCredentials("bystander").map((c) => c.kind)).toEqual(["play_service_account"]);
+    expect(vault.resolve("bystander")).toMatchObject({ OTHER_TOKEN: "other-token-value" });
   });
 
   it("reports zero for a project with nothing behind it", async () => {
@@ -274,7 +271,6 @@ describe("DELETE /api/projects/:slug", () => {
     const res = await app.inject({ method: "DELETE", url: del("sample", "sample"), cookies });
     expect(res.json()).toMatchObject({
       removed: { runs: 0, artifacts: 0, workspace: false, secrets: 0, signingBlocks: 0 },
-      untouched: { globalSecrets: 0, globalSigningBlocks: 0 },
     });
   });
 

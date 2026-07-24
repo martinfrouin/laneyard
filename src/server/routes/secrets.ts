@@ -8,22 +8,13 @@ import { requiredSecrets } from "../required-secrets.js";
 const VALID_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
-  // A project's listing carries the values that were never declared secret; the
-  // global one carries names only. Not a judgement about global secrets — it is
-  // that `/api/secrets` answers for no project in particular, and a value is
-  // only ever decrypted in the context of the project that reads it.
-  const listRoute = (slug: string | null) =>
-    slug === null ? ctx.vault.listGlobal() : ctx.vault.listWithValues(slug);
-
-  app.get("/api/secrets", async () => listRoute(null));
-
   app.get("/api/projects/:slug/secrets", async (req, reply) => {
     const { slug } = req.params as { slug: string };
     if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
-    return listRoute(slug);
+    return ctx.vault.listWithValues(slug);
   });
 
-  const put = async (slug: string | null, key: string, body: unknown, reply: any) => {
+  const put = async (slug: string, key: string, body: unknown, reply: any) => {
     const { value, masked } = (body ?? {}) as { value?: string; masked?: boolean };
     if (!VALID_KEY.test(key)) {
       return reply.code(400).send({
@@ -46,10 +37,6 @@ export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext
     await ctx.vault.set(slug, key, value, masked !== false);
     return reply.code(204).send();
   };
-
-  app.put("/api/secrets/:key", async (req, reply) =>
-    put(null, (req.params as { key: string }).key, req.body, reply),
-  );
 
   app.put("/api/projects/:slug/secrets/:key", async (req, reply) => {
     const { slug, key } = req.params as { slug: string; key: string };
@@ -98,11 +85,6 @@ export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext
 
     const existing = ctx.vault.list(slug).find((s) => s.key === key);
     if (!existing) return reply.code(404).send({ error: "Unknown secret" });
-    if (existing.scope === "global") {
-      // The same rule the interface draws: a global secret belongs to every
-      // project, so changing it from inside one would hide that from the rest.
-      return reply.code(409).send({ error: "That is a global secret. Change it with `laneyard secret set`." });
-    }
 
     // A value too short to redact cannot be masked, the same refusal as on the
     // way in — accepting it would leave someone believing they are protected.
@@ -153,17 +135,9 @@ export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext
       workspacePath,
       fastlaneDir,
       vaultKeys: ctx.vault.list(slug).map((s) => s.key),
-      // Resolved the way a run resolves them, a project's own block shadowing a
-      // global one, so the form and the checklist cannot disagree about what is
-      // already supplied.
       blockNames: exportedVarNames(ctx.vault.listCredentials(slug)),
       serverEnv: Object.keys(process.env),
     });
-  });
-
-  app.delete("/api/secrets/:key", async (req, reply) => {
-    const removed = ctx.vault.remove(null, (req.params as { key: string }).key);
-    return removed ? reply.code(204).send() : reply.code(404).send({ error: "Unknown secret" });
   });
 
   app.delete("/api/projects/:slug/secrets/:key", async (req, reply) => {

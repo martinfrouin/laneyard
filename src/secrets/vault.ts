@@ -30,11 +30,11 @@ export class Vault {
     return new Vault(await loadOrCreateKey(home), store, credentials);
   }
 
-  async set(projectSlug: string | null, key: string, value: string, masked: boolean): Promise<void> {
+  async set(projectSlug: string, key: string, value: string, masked: boolean): Promise<void> {
     this.store.set(projectSlug, key, encrypt(value, this.key), masked);
   }
 
-  remove(projectSlug: string | null, key: string): boolean {
+  remove(projectSlug: string, key: string): boolean {
     return this.store.remove(projectSlug, key);
   }
 
@@ -77,26 +77,6 @@ export class Vault {
     });
   }
 
-  listGlobal(): SecretSummary[] {
-    return this.store.listGlobal();
-  }
-
-  /**
-   * What the vault holds under one project's own name — secrets and signing
-   * blocks — and nothing global.
-   *
-   * Its own method rather than a filter over `list`, because the question is a
-   * different one: `list` is "what would a run of this project see", and this is
-   * "what would be left behind if the project went away". A global secret is in
-   * the first answer and must never be in the second.
-   */
-  ownedBy(projectSlug: string): { secrets: SecretSummary[]; credentials: CredentialSummary[] } {
-    return {
-      secrets: this.store.listOwn(projectSlug),
-      credentials: this.credentials.listOwn(projectSlug),
-    };
-  }
-
   /**
    * Forgets everything stored under one project's name.
    *
@@ -105,13 +85,15 @@ export class Vault {
    * covers all of it. What it forgets is Laneyard's own encrypted copy — the
    * `.p8` and the keystore that went in are still wherever the user keeps them.
    *
-   * Scoped by slug, so a global secret or a global signing block survives it:
-   * those are read by every project and are never one project's to remove.
+   * There is nothing it has to leave behind. Everything a project sees is a row
+   * under its own slug, so "what would a run see" and "what would be left if the
+   * project went away" are now the same question — which is most of the point of
+   * having one scope.
    */
   forget(projectSlug: string): { secrets: number; credentials: number } {
     return {
-      secrets: this.store.removeAllOwn(projectSlug),
-      credentials: this.credentials.removeAllOwn(projectSlug),
+      secrets: this.store.removeAll(projectSlug),
+      credentials: this.credentials.removeAll(projectSlug),
     };
   }
 
@@ -126,7 +108,7 @@ export class Vault {
   }
 
   /**
-   * Every secret that applies to a project, ready to become environment variables.
+   * Every secret a project holds, ready to become environment variables.
    *
    * A row that will not decrypt is skipped rather than thrown: a key that was
    * rotated or a corrupted row should cost one variable, not the whole build.
@@ -172,7 +154,7 @@ export class Vault {
   }
 
   /** Flips whether a value is kept out of the logs, leaving the value alone. */
-  setMasked(projectSlug: string | null, key: string, masked: boolean): boolean {
+  setMasked(projectSlug: string, key: string, masked: boolean): boolean {
     return this.store.setMasked(projectSlug, key, masked);
   }
 
@@ -185,7 +167,7 @@ export class Vault {
    * not a block.
    */
   async setCredential(
-    projectSlug: string | null,
+    projectSlug: string,
     kind: CredentialKind,
     block: { fileName: string; fileBytes: Buffer; fields: Record<string, string>; varNames: Record<string, string> },
   ): Promise<void> {
@@ -198,7 +180,7 @@ export class Vault {
   }
 
   /**
-   * One block that applies to a project, in the clear, or undefined if there is none.
+   * One of a project's blocks, in the clear, or undefined if there is none.
    *
    * Unlike `resolve`, an unreadable row throws. The leniency there is earned: a
    * missing variable makes fastlane stop and say which one. A block that quietly
@@ -229,11 +211,7 @@ export class Vault {
     return this.credentials.list(projectSlug);
   }
 
-  listGlobalCredentials(): CredentialSummary[] {
-    return this.credentials.listGlobal();
-  }
-
-  removeCredential(projectSlug: string | null, kind: CredentialKind): boolean {
+  removeCredential(projectSlug: string, kind: CredentialKind): boolean {
     return this.credentials.remove(projectSlug, kind);
   }
 

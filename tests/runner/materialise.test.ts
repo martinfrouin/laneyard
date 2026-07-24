@@ -107,7 +107,7 @@ describe("materialiseCredentials", () => {
 
   it("materialises every applicable block, not only the ones a lane looks like it needs", async () => {
     const v = await vault();
-    await v.setCredential(null, "play_service_account", {
+    await v.setCredential("app", "play_service_account", {
       fileName: "play.json",
       fileBytes: Buffer.from('{"type":"service_account"}'),
       fields: {},

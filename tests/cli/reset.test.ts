@@ -47,7 +47,7 @@ async function installed(): Promise<string> {
   const db = openDatabase(join(home, "laneyard.db"));
   const vault = await Vault.open(home, new SecretStore(db), new CredentialStore(db));
   await vault.set("sample", "SAMPLE_TOKEN", "sample-token-value", true);
-  await vault.set(null, "SHARED_TOKEN", "shared-token-value", true);
+  await vault.set("sample", "SHARED_TOKEN", "shared-token-value", true);
   new RunStore(db).create({ projectSlug: "sample", lane: "beta", platform: "ios", params: {} });
   db.close();
 

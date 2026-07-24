@@ -66,16 +66,16 @@ describe("requiredSecrets", () => {
     expect(answer.missing).toEqual(["SENTRY_AUTH_TOKEN"]);
   });
 
-  it("counts a project block over a global one", async () => {
+  it("counts nothing from another project's block", async () => {
+    // The same kind stored by two projects under different names. A run of
+    // `sample` exports `PROJECT_JSON_KEY` and nothing else; answering from the
+    // other project's block would tick a name no run of this one will ever set.
     const v = await vault();
-    // The same kind stored twice under different names. A run resolves the
-    // project's own and exports `PROJECT_JSON_KEY`; anything that answered from
-    // the global block would tick a name no run will ever set.
-    await v.setCredential(null, "play_service_account", {
-      fileName: "global.json",
+    await v.setCredential("elsewhere", "play_service_account", {
+      fileName: "elsewhere.json",
       fileBytes: JSON_KEY,
       fields: {},
-      varNames: { path: "GLOBAL_JSON_KEY" },
+      varNames: { path: "ELSEWHERE_JSON_KEY" },
     });
     await v.setCredential("sample", "play_service_account", {
       fileName: "project.json",
@@ -87,21 +87,8 @@ describe("requiredSecrets", () => {
     const names = exportedVarNames(v.listCredentials("sample"));
     expect(names).toEqual(["PROJECT_JSON_KEY"]);
 
-    const answer = await ask(["PROJECT_JSON_KEY", "GLOBAL_JSON_KEY"], names);
-    expect(answer.missing).toEqual(["GLOBAL_JSON_KEY"]);
-  });
-
-  it("counts a global block where the project has none of that kind", async () => {
-    const v = await vault();
-    await v.setCredential(null, "play_service_account", {
-      fileName: "global.json",
-      fileBytes: JSON_KEY,
-      fields: {},
-      varNames: { path: "GLOBAL_JSON_KEY" },
-    });
-
-    const answer = await ask(["GLOBAL_JSON_KEY"], exportedVarNames(v.listCredentials("sample")));
-    expect(answer.missing).toEqual([]);
+    const answer = await ask(["PROJECT_JSON_KEY", "ELSEWHERE_JSON_KEY"], names);
+    expect(answer.missing).toEqual(["ELSEWHERE_JSON_KEY"]);
   });
 
   it("counts every name a block exports, not only the file's", async () => {

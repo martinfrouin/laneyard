@@ -64,14 +64,14 @@ async function installed(): Promise<{ home: string; runId: number }> {
   const vault = await Vault.open(home, new SecretStore(db), new CredentialStore(db));
   await vault.set("sample", "SAMPLE_TOKEN", "sample-token-value", true);
   await vault.set("other", "OTHER_TOKEN", "other-token-value", true);
-  await vault.set(null, "SHARED_TOKEN", "shared-token-value", true);
+  await vault.set("other", "SHARED_TOKEN", "shared-token-value", true);
   await vault.setCredential("sample", "android_keystore", {
     fileName: "release.jks",
     fileBytes: Buffer.from("keystore"),
     fields: { store_password: "storepass", key_alias: "release", key_password: "keypass" },
     varNames: {},
   });
-  await vault.setCredential(null, "apple_asc", {
+  await vault.setCredential("other", "apple_asc", {
     fileName: "AuthKey.p8",
     fileBytes: Buffer.from("-----BEGIN PRIVATE KEY-----"),
     fields: { key_id: "ABC", issuer_id: "DEF" },
@@ -126,15 +126,14 @@ describe("laneyard remove", () => {
     expect(existsSync(join(cwd, "laneyard.yml"))).toBe(false);
     expect(out).toMatch(/commit/i);
 
-    // Gone from the database, and the vault, and both scopes left intact.
+    // Gone from the database and the vault, with the other project untouched.
     const db = openDatabase(join(home, "laneyard.db"));
     expect(new RunStore(db).get(runId)).toBeNull();
     const vault = await Vault.open(home, new SecretStore(db), new CredentialStore(db));
-    expect(vault.ownedBy("sample")).toEqual({ secrets: [], credentials: [] });
-    // The other project and the global rows survive.
-    expect(vault.ownedBy("other").secrets.map((s) => s.key)).toEqual(["OTHER_TOKEN"]);
-    expect(vault.listGlobal().map((s) => s.key)).toEqual(["SHARED_TOKEN"]);
-    expect(vault.listGlobalCredentials().map((c) => c.kind)).toEqual(["apple_asc"]);
+    expect(vault.list("sample")).toEqual([]);
+    expect(vault.listCredentials("sample")).toEqual([]);
+    expect(vault.list("other").map((s) => s.key)).toEqual(["OTHER_TOKEN", "SHARED_TOKEN"]);
+    expect(vault.listCredentials("other").map((c) => c.kind)).toEqual(["apple_asc"]);
     db.close();
   });
 

@@ -98,7 +98,6 @@ describe("credential blocks API", () => {
       {
         kind: "apple_asc",
         fileName: "AuthKey_ABC123.p8",
-        scope: "project",
         varNames: { key_id: "APP_STORE_CONNECT_API_KEY_KEY_ID" },
       },
     ]);
@@ -205,52 +204,43 @@ describe("credential blocks API", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("keeps global blocks on their own route", async () => {
+  it("has no way in that does not name a project", async () => {
+    // A block used to be storable under no project and read by every one of
+    // them. A request that names no project now reaches nothing at all.
     const { app } = await harness();
     const cookies = { laneyard_session: await login(app) };
 
-    const put = await app.inject({
-      method: "PUT",
-      url: "/api/credentials/apple_asc",
-      cookies,
-      payload: appleBlock,
-    });
-    expect(put.statusCode).toBe(204);
-
-    expect((await app.inject({ method: "GET", url: "/api/credentials", cookies })).json()).toMatchObject([
-      { kind: "apple_asc", scope: "global" },
-    ]);
-    expect((await app.inject({ method: "GET", url: "/api/projects/sample/credentials", cookies })).json()).toMatchObject(
-      [{ kind: "apple_asc", scope: "global" }],
-    );
+    for (const [method, url] of [
+      ["GET", "/api/credentials"],
+      ["PUT", "/api/credentials/apple_asc"],
+      ["DELETE", "/api/credentials/apple_asc"],
+    ] as const) {
+      const res = await app.inject({ method, url, cookies, payload: appleBlock });
+      expect(res.statusCode).toBe(404);
+    }
   });
 
-  it("lets a project block shadow the global one of the same kind", async () => {
+  it("replaces a block of the same kind rather than keeping two", async () => {
     const { app } = await harness();
     const cookies = { laneyard_session: await login(app) };
 
-    await app.inject({
-      method: "PUT",
-      url: "/api/credentials/apple_asc",
-      cookies,
-      payload: { ...appleBlock, fileName: "AuthKey_GLOBAL.p8" },
-    });
-    await app.inject({
-      method: "PUT",
-      url: "/api/projects/sample/credentials/apple_asc",
-      cookies,
-      payload: { ...appleBlock, fileName: "AuthKey_SAMPLE.p8" },
-    });
+    for (const fileName of ["AuthKey_FIRST.p8", "AuthKey_SECOND.p8"]) {
+      await app.inject({
+        method: "PUT",
+        url: "/api/projects/sample/credentials/apple_asc",
+        cookies,
+        payload: { ...appleBlock, fileName },
+      });
+    }
 
     const listed = (await app.inject({ method: "GET", url: "/api/projects/sample/credentials", cookies })).json();
-    expect(listed).toMatchObject([{ kind: "apple_asc", scope: "project", fileName: "AuthKey_SAMPLE.p8" }]);
+    expect(listed).toMatchObject([{ kind: "apple_asc", fileName: "AuthKey_SECOND.p8" }]);
     expect(listed.length).toBe(1);
 
-    // Deleting the project block leaves the global one standing.
+    // Deleting it leaves the project with none of that kind — there is nothing
+    // underneath for it to fall back to.
     await app.inject({ method: "DELETE", url: "/api/projects/sample/credentials/apple_asc", cookies });
-    expect((await app.inject({ method: "GET", url: "/api/projects/sample/credentials", cookies })).json()).toMatchObject(
-      [{ scope: "global", fileName: "AuthKey_GLOBAL.p8" }],
-    );
+    expect((await app.inject({ method: "GET", url: "/api/projects/sample/credentials", cookies })).json()).toEqual([]);
   });
 
   it("takes the variable names it is given, and defaults the rest", async () => {

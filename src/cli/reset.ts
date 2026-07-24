@@ -37,8 +37,8 @@ function renderInventory(inv: Inventory): string {
   if (v === null) {
     out += field("database", inv.db === null ? dim("not there") : dim("could not be read")) + "\n";
   } else {
-    out += field("secrets", `${plural(v.projectSecrets, "project secret")}, ${plural(v.globalSecrets, "global secret")}`) + "\n";
-    out += field("signing", `${plural(v.projectBlocks, "project signing block")}, ${plural(v.globalBlocks, "global signing block")}`) + "\n";
+    out += field("secrets", plural(v.secrets, "secret")) + "\n";
+    out += field("signing", plural(v.blocks, "signing block")) + "\n";
     out += field("history", plural(v.runs, "run")) + "\n";
   }
 

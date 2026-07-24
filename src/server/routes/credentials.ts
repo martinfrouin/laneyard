@@ -27,15 +27,13 @@ interface Body {
 }
 
 export async function registerCredentialRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
-  app.get("/api/credentials", async () => ctx.vault.listGlobalCredentials());
-
   app.get("/api/projects/:slug/credentials", async (req, reply) => {
     const { slug } = req.params as { slug: string };
     if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
     return ctx.vault.listCredentials(slug);
   });
 
-  const put = async (slug: string | null, kind: string, body: unknown, reply: any) => {
+  const put = async (slug: string, kind: string, body: unknown, reply: any) => {
     const spec = CREDENTIAL_KINDS.find((k) => k.kind === kind);
     if (!spec) {
       return reply.code(400).send({
@@ -103,28 +101,12 @@ export async function registerCredentialRoutes(app: FastifyInstance, ctx: AppCon
     return reply.code(204).send();
   };
 
-  app.put("/api/credentials/:kind", async (req, reply) =>
-    put(null, (req.params as { kind: string }).kind, req.body, reply),
-  );
-
   app.put("/api/projects/:slug/credentials/:kind", async (req, reply) => {
     const { slug, kind } = req.params as { slug: string; kind: string };
     if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
     return put(slug, kind, req.body, reply);
   });
 
-  app.delete("/api/credentials/:kind", async (req, reply) => {
-    const { kind } = req.params as { kind: string };
-    const removed = ctx.vault.removeCredential(null, kind as CredentialKind);
-    return removed ? reply.code(204).send() : reply.code(404).send({ error: "Unknown credential" });
-  });
-
-  /**
-   * Removes this project's own block, and only that one. A global block that
-   * was shadowed comes back into view, which is the deletion someone asked for:
-   * they are undoing an override, not deleting everyone's key from inside one
-   * project.
-   */
   app.delete("/api/projects/:slug/credentials/:kind", async (req, reply) => {
     const { slug, kind } = req.params as { slug: string; kind: string };
     const removed = ctx.vault.removeCredential(slug, kind as CredentialKind);

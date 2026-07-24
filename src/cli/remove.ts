@@ -69,8 +69,8 @@ async function readCounts(home: string, slug: string): Promise<Counts> {
     return {
       activeRun: runs.hasActiveRun(slug),
       runs: runs.listByProject(slug, -1).length,
-      secrets: new SecretStore(db).listOwn(slug).length,
-      signingBlocks: new CredentialStore(db).listOwn(slug).length,
+      secrets: new SecretStore(db).list(slug).length,
+      signingBlocks: new CredentialStore(db).list(slug).length,
     };
   } finally {
     db?.close();
