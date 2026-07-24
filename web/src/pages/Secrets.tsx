@@ -41,7 +41,7 @@ export function Secrets() {
 
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
-  const [masked, setMasked] = useState(true);
+  const [masked, setMasked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -86,7 +86,7 @@ export function Secrets() {
       // a shoulder, and no chance of storing it twice under another name.
       setKey("");
       setValue("");
-      setMasked(true);
+      setMasked(false);
       load();
     } catch (e) {
       // The server refuses a value too short to be redacted, and explains why.
