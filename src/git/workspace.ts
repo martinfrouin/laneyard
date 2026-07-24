@@ -216,6 +216,34 @@ export class Workspace {
   }
 
   /**
+   * Commits this workspace holds that `origin/<branch>` does not.
+   *
+   * The one thing `prepare` would destroy without saying so: it moves the local
+   * branch onto origin's, and a commit only this clone had becomes reachable
+   * from the reflog and nowhere a person looks. That is not hypothetical — the
+   * Fastfile tab commits and pushes as two separate acts on purpose, so a
+   * workspace sitting one commit ahead is a state the product produces itself.
+   *
+   * Counted rather than listed: the caller refuses on any number above zero, and
+   * a list would invite showing it, which is a screen nobody asked for.
+   *
+   * Zero when the branch does not exist on the remote yet, and zero when
+   * anything about the question cannot be answered — a workspace that has never
+   * been fetched has no `origin/<branch>` to compare against, and refusing a
+   * refresh because the comparison failed would break the one case the refresh
+   * exists for.
+   */
+  async unpushedCount(branch: string): Promise<number> {
+    try {
+      const out = await this.git(["rev-list", "--count", `origin/${branch}..HEAD`]);
+      const n = Number(out.trim());
+      return Number.isInteger(n) ? n : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
    * Brings the workspace to the requested branch, up to date.
    * Clones on the first call, just fetches afterwards.
    */

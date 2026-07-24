@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../app.js";
 import { accountMayReach } from "../permissions.js";
+import { Workspace } from "../../git/workspace.js";
 import { removeProjectData } from "../../data/remove-project.js";
 
 export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
@@ -144,6 +145,70 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
       // Workspace not cloned yet, broken Fastfile, sidecar failure: the
       // interface must be able to tell the user, rather than show an empty list.
       return reply.code(503).send({ error: (cause as Error).message });
+    }
+  });
+
+  /**
+   * Brings the clone up to the remote, without building anything.
+   *
+   * Everything that reads the repository outside a run — the lanes, the
+   * checklist, the names a lane is missing — goes through `ensureCloned`, which
+   * does nothing at all once the directory exists. Only a run fetched. So a
+   * project whose first run failed early answered from that first commit
+   * indefinitely, and the screens said so with the confidence of something just
+   * looked up: a variable a Fastfile had stopped reading was still asked for,
+   * days after the commit that stopped reading it.
+   *
+   * Deliberately not a fetch hidden inside those reads. Going out to a git
+   * remote is seconds and a network, and putting it behind opening a tab would
+   * make every one of them slow and occasionally fail for a reason that has
+   * nothing to do with what was asked. It is a button, and this is what it
+   * presses.
+   *
+   * `prepare` and not a bare fetch: the point is to show what the next run would
+   * see, and `prepare` is exactly what the next run calls. It clones when there
+   * is nothing yet, which makes the button a way in for a project between
+   * `setup` and its first build rather than a refusal.
+   *
+   * Not admin-only. A builder starts runs, and a run fetches — refusing them the
+   * same fetch on its own would protect nothing.
+   */
+  app.post("/api/projects/:slug/fetch", async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    const entry = ctx.config.project(slug);
+    if (!entry) return reply.code(404).send({ error: "Unknown project" });
+
+    // A run that has begun is reading the very files this would move under it —
+    // the same reason a Fastfile write is refused while one is in flight.
+    if (ctx.runs.hasActiveRun(slug)) {
+      return reply.code(409).send({
+        error: "A run of this project is in flight. Its workspace is in use until it finishes.",
+      });
+    }
+
+    const branch = entry.default_branch;
+    const workspace = new Workspace(ctx.workspacePath(slug), entry.git_url, entry.git_auth);
+
+    // Refused rather than lost. `prepare` moves the branch onto origin's, and
+    // the Fastfile tab commits without pushing by design, so this is a state the
+    // product hands people itself.
+    const unpushed = await workspace.unpushedCount(branch);
+    if (unpushed > 0) {
+      return reply.code(409).send({
+        error:
+          `The workspace holds ${unpushed} commit${unpushed === 1 ? "" : "s"} that ${
+            unpushed === 1 ? "has" : "have"
+          } not been pushed. ` + "Push from the fastfile tab, or they would be left behind.",
+      });
+    }
+
+    try {
+      const commitSha = await workspace.prepare(branch);
+      return { branch, commitSha };
+    } catch (cause) {
+      // A dirty workspace, an unreachable remote, a branch that is not there:
+      // git's own sentence is the only thing that explains any of them.
+      return reply.code(409).send({ error: (cause as Error).message });
     }
   });
 
