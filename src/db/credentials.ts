@@ -7,7 +7,6 @@ export type CredentialKind = "apple_asc" | "android_keystore" | "play_service_ac
 export interface CredentialSummary {
   kind: CredentialKind;
   fileName: string;
-  scope: "project" | "global";
   varNames: Record<string, string>;
   updatedAt: string;
 }
@@ -18,8 +17,6 @@ export interface CredentialInput {
   fieldsEnc: string;
   varNames: Record<string, string>;
 }
-
-const GLOBAL = "";
 
 interface Row {
   project_slug: string;
@@ -36,13 +33,17 @@ interface Row {
  * usable. Knows nothing about encryption itself: it takes and returns
  * ciphertext, so a bug here cannot leak a plaintext value.
  *
- * A project credential shadows a global one of the same kind — the same
- * precedence as `SecretStore`, and the least surprising rule.
+ * One project, one block per kind. A block used to be storable under no project
+ * and read by all of them — an App Store Connect key is usually one per
+ * developer account, not one per app, so the sharing matched something real.
+ * It went anyway: it meant no screen could show what a project actually signs
+ * with. Five apps under one account now hold five copies of the key, and
+ * rotating it means replacing five.
  */
 export class CredentialStore {
   constructor(private readonly db: Db) {}
 
-  set(projectSlug: string | null, kind: CredentialKind, input: CredentialInput): void {
+  set(projectSlug: string, kind: CredentialKind, input: CredentialInput): void {
     this.db
       .prepare(
         `INSERT INTO credential (project_slug, kind, file_name, file_enc, fields_enc, var_names, updated_at)
@@ -55,7 +56,7 @@ export class CredentialStore {
                updated_at = excluded.updated_at`,
       )
       .run(
-        projectSlug ?? GLOBAL,
+        projectSlug,
         kind,
         input.fileName,
         input.fileEnc,
@@ -65,73 +66,35 @@ export class CredentialStore {
       );
   }
 
-  /** Rows that apply to a project, project scope winning over global. */
-  applicable(projectSlug: string): (CredentialSummary & { fileEnc: string; fieldsEnc: string })[] {
+  /** This project's blocks, ciphertext included. */
+  private rows(projectSlug: string): (CredentialSummary & { fileEnc: string; fieldsEnc: string })[] {
     const rows = this.db
-      .prepare("SELECT * FROM credential WHERE project_slug IN (?, ?) ORDER BY kind")
-      .all(projectSlug, GLOBAL) as Row[];
-
-    const byKind = new Map<CredentialKind, Row>();
-    for (const row of rows) {
-      const existing = byKind.get(row.kind);
-      if (!existing || row.project_slug !== GLOBAL) byKind.set(row.kind, row);
-    }
-    return [...byKind.values()]
-      .sort((a, b) => a.kind.localeCompare(b.kind))
-      .map((row) => this.toSummary(row));
+      .prepare("SELECT * FROM credential WHERE project_slug = ? ORDER BY kind")
+      .all(projectSlug) as Row[];
+    return rows.map((row) => this.toSummary(row));
   }
 
-  /** One applicable block, ciphertext included, or undefined. */
+  /** One block, ciphertext included, or undefined. */
   find(
     projectSlug: string,
     kind: CredentialKind,
   ): (CredentialSummary & { fileEnc: string; fieldsEnc: string }) | undefined {
-    return this.applicable(projectSlug).find((r) => r.kind === kind);
+    return this.rows(projectSlug).find((r) => r.kind === kind);
   }
 
   list(projectSlug: string): CredentialSummary[] {
-    return this.applicable(projectSlug).map(({ fileEnc: _fileEnc, fieldsEnc: _fieldsEnc, ...summary }) => summary);
+    return this.rows(projectSlug).map(({ fileEnc: _fileEnc, fieldsEnc: _fieldsEnc, ...summary }) => summary);
   }
 
-  /**
-   * The blocks stored under this slug, and no global one.
-   *
-   * Same distinction as `SecretStore.listOwn`, and it matters more here: a
-   * global keystore shadowed by nothing is shared by every project on the
-   * machine, and counting it as one project's would offer to delete the one
-   * credential every other project signs with.
-   */
-  listOwn(projectSlug: string): CredentialSummary[] {
-    if (projectSlug === GLOBAL) return [];
-    const rows = this.db
-      .prepare("SELECT * FROM credential WHERE project_slug = ? ORDER BY kind")
-      .all(projectSlug) as Row[];
-    return rows.map((row) => {
-      const { fileEnc: _fileEnc, fieldsEnc: _fieldsEnc, ...summary } = this.toSummary(row);
-      return summary;
-    });
-  }
-
-  /** Removes every block stored under this slug, and returns how many. */
-  removeAllOwn(projectSlug: string): number {
-    if (projectSlug === GLOBAL) return 0;
+  /** Removes every block this project holds, and returns how many. */
+  removeAll(projectSlug: string): number {
     return this.db.prepare("DELETE FROM credential WHERE project_slug = ?").run(projectSlug).changes;
   }
 
-  listGlobal(): CredentialSummary[] {
-    const rows = this.db
-      .prepare("SELECT * FROM credential WHERE project_slug = ? ORDER BY kind")
-      .all(GLOBAL) as Row[];
-    return rows.map((row) => {
-      const { fileEnc: _fileEnc, fieldsEnc: _fieldsEnc, ...summary } = this.toSummary(row);
-      return summary;
-    });
-  }
-
-  remove(projectSlug: string | null, kind: CredentialKind): boolean {
+  remove(projectSlug: string, kind: CredentialKind): boolean {
     const res = this.db
       .prepare("DELETE FROM credential WHERE project_slug = ? AND kind = ?")
-      .run(projectSlug ?? GLOBAL, kind);
+      .run(projectSlug, kind);
     return res.changes > 0;
   }
 
@@ -141,7 +104,6 @@ export class CredentialStore {
       fileName: row.file_name,
       fileEnc: row.file_enc,
       fieldsEnc: row.fields_enc,
-      scope: row.project_slug === GLOBAL ? "global" : "project",
       varNames: JSON.parse(row.var_names),
       updatedAt: row.updated_at,
     };

@@ -10,9 +10,7 @@ describe("SecretStore", () => {
     s.set("app", "MATCH_PASSWORD", "cipher-blob", true);
 
     const listed = s.list("app");
-    expect(listed).toEqual([
-      { key: "MATCH_PASSWORD", masked: true, scope: "project" },
-    ]);
+    expect(listed).toEqual([{ key: "MATCH_PASSWORD", masked: true }]);
     // The listing type has no `value` at all — this is a compile-time guarantee
     // as much as a runtime one.
     expect(JSON.stringify(listed)).not.toContain("cipher-blob");
@@ -27,27 +25,24 @@ describe("SecretStore", () => {
     expect(s.encrypted("app")["TOKEN"]).toBe("second");
   });
 
-  it("keeps global secrets and project secrets apart", () => {
+  it("keeps one project's secrets out of every other project", () => {
+    // The property the whole scope removal exists to give: what a project holds
+    // is its own, and nothing it did not store can reach its runs.
     const s = store();
-    s.set(null, "SHARED", "global-value", true);
-    s.set("app", "OWN", "project-value", true);
+    s.set("app", "TOKEN", "app-value", true);
+    s.set("other", "TOKEN", "other-value", true);
 
-    expect(s.list("app").map((x) => x.key).sort()).toEqual(["OWN", "SHARED"]);
-    expect(s.list("other").map((x) => x.key)).toEqual(["SHARED"]);
-    expect(s.list("app").find((x) => x.key === "SHARED")?.scope).toBe("global");
+    expect(s.encrypted("app")["TOKEN"]).toBe("app-value");
+    expect(s.encrypted("other")["TOKEN"]).toBe("other-value");
+    expect(s.list("elsewhere")).toEqual([]);
   });
 
-  it("lets a project secret win over a global one of the same name", () => {
+  it("finds one row by name, and nothing under another project's name", () => {
     const s = store();
-    s.set(null, "TOKEN", "global", true);
-    s.set("app", "TOKEN", "project", true);
+    s.set("app", "TOKEN", "cipher", false);
 
-    expect(s.encrypted("app")["TOKEN"]).toBe("project");
-    expect(s.encrypted("other")["TOKEN"]).toBe("global");
-    // Listed once, not twice, and attributed to the scope that actually applies.
-    const shown = s.list("app").filter((x) => x.key === "TOKEN");
-    expect(shown).toHaveLength(1);
-    expect(shown[0]!.scope).toBe("project");
+    expect(s.find("app", "TOKEN")).toEqual({ key: "TOKEN", masked: false, valueEnc: "cipher" });
+    expect(s.find("other", "TOKEN")).toBeUndefined();
   });
 
   it("removes a secret", () => {
@@ -58,33 +53,42 @@ describe("SecretStore", () => {
     expect(s.remove("app", "TOKEN")).toBe(false);
   });
 
-  it("does not let removing a project secret touch the global one", () => {
+  it("does not let removing one project's secret touch another's", () => {
     const s = store();
-    s.set(null, "TOKEN", "global", true);
-    s.set("app", "TOKEN", "project", true);
+    s.set("app", "TOKEN", "app-value", true);
+    s.set("other", "TOKEN", "other-value", true);
 
     s.remove("app", "TOKEN");
-    expect(s.encrypted("app")["TOKEN"]).toBe("global");
+    expect(s.encrypted("other")["TOKEN"]).toBe("other-value");
   });
 
-  it("lists and removes only what a project owns, never a global row", () => {
+  it("flips masking without touching the value, and reports an unknown row", () => {
     const s = store();
-    s.set(null, "SHARED", "g", true);
-    s.set("app", "OWN", "p", true);
+    s.set("app", "TOKEN", "cipher", true);
 
-    expect(s.listOwn("app").map((r) => r.key)).toEqual(["OWN"]);
-    expect(s.removeAllOwn("app")).toBe(1);
-    expect(s.listGlobal().map((r) => r.key)).toEqual(["SHARED"]);
+    expect(s.setMasked("app", "TOKEN", false)).toBe(true);
+    expect(s.list("app")).toEqual([{ key: "TOKEN", masked: false }]);
+    expect(s.encrypted("app")["TOKEN"]).toBe("cipher");
+    expect(s.setMasked("app", "ABSENT", false)).toBe(false);
   });
 
-  it("refuses the empty slug, which is the global scope's own key", () => {
-    // Not a hypothetical: "" is how a global row is stored, so a caller that
-    // passed one through would list — and then delete — every global secret
-    // while believing it was clearing one project.
+  it("names the masked keys, and only this project's", () => {
     const s = store();
-    s.set(null, "SHARED", "g", true);
-    expect(s.listOwn("")).toEqual([]);
-    expect(s.removeAllOwn("")).toBe(0);
-    expect(s.listGlobal()).toHaveLength(1);
+    s.set("app", "SECRET", "c1", true);
+    s.set("app", "PLAIN", "c2", false);
+    s.set("other", "ELSEWHERE", "c3", true);
+
+    expect([...s.maskedKeys("app")]).toEqual(["SECRET"]);
+  });
+
+  it("removes everything a project holds, and returns how many", () => {
+    const s = store();
+    s.set("app", "ONE", "c1", true);
+    s.set("app", "TWO", "c2", true);
+    s.set("other", "THREE", "c3", true);
+
+    expect(s.removeAll("app")).toBe(2);
+    expect(s.list("app")).toEqual([]);
+    expect(s.list("other")).toHaveLength(1);
   });
 });

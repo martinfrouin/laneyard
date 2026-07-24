@@ -1,15 +1,10 @@
 import type { Db } from "./open.js";
 
-export type Scope = "project" | "global";
-
 /** What a listing may expose. There is deliberately no value here. */
 export interface SecretSummary {
   key: string;
   masked: boolean;
-  scope: Scope;
 }
-
-const GLOBAL = "";
 
 interface Row {
   project_slug: string;
@@ -22,13 +17,16 @@ interface Row {
  * Stores encrypted secrets. Knows nothing about encryption itself: it takes and
  * returns ciphertext, so a bug here cannot leak a plaintext value.
  *
- * A project secret shadows a global one of the same name — the same precedence
- * as the configuration, and the least surprising rule.
+ * Every row belongs to exactly one project. There used to be a second scope —
+ * a row under no project, read by all of them, shadowed by a project's own —
+ * and it is gone: see `migrate-global-scope.ts`. What it cost was the answer to
+ * "what does this project see", which was a merge of two sets that no screen
+ * ever showed whole. It is now one query.
  */
 export class SecretStore {
   constructor(private readonly db: Db) {}
 
-  set(projectSlug: string | null, key: string, valueEnc: string, masked: boolean): void {
+  set(projectSlug: string, key: string, valueEnc: string, masked: boolean): void {
     this.db
       .prepare(
         `INSERT INTO secret (project_slug, key, value_enc, masked, updated_at)
@@ -38,34 +36,17 @@ export class SecretStore {
                masked = excluded.masked,
                updated_at = excluded.updated_at`,
       )
-      .run(projectSlug ?? GLOBAL, key, valueEnc, masked ? 1 : 0, new Date().toISOString());
+      .run(projectSlug, key, valueEnc, masked ? 1 : 0, new Date().toISOString());
   }
 
-  /** Rows that apply to a project, project scope winning over global. */
-  private applicable(projectSlug: string): Row[] {
-    const rows = this.db
-      .prepare("SELECT * FROM secret WHERE project_slug IN (?, ?) ORDER BY key")
-      .all(projectSlug, GLOBAL) as Row[];
-
-    const byKey = new Map<string, Row>();
-    for (const row of rows) {
-      const existing = byKey.get(row.key);
-      if (!existing || row.project_slug !== GLOBAL) byKey.set(row.key, row);
-    }
-    return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+  private rows(projectSlug: string): Row[] {
+    return this.db.prepare("SELECT * FROM secret WHERE project_slug = ? ORDER BY key").all(projectSlug) as Row[];
   }
 
-  /** One applicable row, ciphertext included, or undefined. */
+  /** One row, ciphertext included, or undefined. */
   find(projectSlug: string, key: string): (SecretSummary & { valueEnc: string }) | undefined {
-    const row = this.applicable(projectSlug).find((r) => r.key === key);
-    return row
-      ? {
-          key: row.key,
-          masked: row.masked === 1,
-          scope: row.project_slug === GLOBAL ? "global" : "project",
-          valueEnc: row.value_enc,
-        }
-      : undefined;
+    const row = this.rows(projectSlug).find((r) => r.key === key);
+    return row ? { key: row.key, masked: row.masked === 1, valueEnc: row.value_enc } : undefined;
   }
 
   /**
@@ -78,71 +59,42 @@ export class SecretStore {
    * Returns false when no row matches, so a caller can answer 404 rather than
    * report a change that did not happen.
    */
-  setMasked(projectSlug: string | null, key: string, masked: boolean): boolean {
+  setMasked(projectSlug: string, key: string, masked: boolean): boolean {
     return (
       this.db
         .prepare(
           `UPDATE secret SET masked = ?, updated_at = ?
            WHERE project_slug = ? AND key = ?`,
         )
-        .run(masked ? 1 : 0, new Date().toISOString(), projectSlug ?? GLOBAL, key).changes > 0
+        .run(masked ? 1 : 0, new Date().toISOString(), projectSlug, key).changes > 0
     );
   }
 
-  /**
-   * The rows stored under this slug, and no global one.
-   *
-   * `list` answers "what does this project see", which is the right question
-   * everywhere else and the wrong one when a project is going away: a global
-   * secret three other projects also read is not this one's to count, and
-   * certainly not its to remove.
-   *
-   * The empty slug is the global scope's own key, so it is refused here rather
-   * than quietly returning every global row as if one project owned them.
-   */
-  listOwn(projectSlug: string): SecretSummary[] {
-    if (projectSlug === GLOBAL) return [];
-    const rows = this.db
-      .prepare("SELECT * FROM secret WHERE project_slug = ? ORDER BY key")
-      .all(projectSlug) as Row[];
-    return rows.map((row) => ({ key: row.key, masked: row.masked === 1, scope: "project" as const }));
-  }
-
-  /** Removes every row stored under this slug, and returns how many. */
-  removeAllOwn(projectSlug: string): number {
-    if (projectSlug === GLOBAL) return 0;
+  /** Removes every row this project holds, and returns how many. */
+  removeAll(projectSlug: string): number {
     return this.db.prepare("DELETE FROM secret WHERE project_slug = ?").run(projectSlug).changes;
   }
 
   list(projectSlug: string): SecretSummary[] {
-    return this.applicable(projectSlug).map((row) => ({
-      key: row.key,
-      masked: row.masked === 1,
-      scope: row.project_slug === GLOBAL ? "global" : "project",
-    }));
-  }
-
-  listGlobal(): SecretSummary[] {
-    const rows = this.db
-      .prepare("SELECT * FROM secret WHERE project_slug = ? ORDER BY key")
-      .all(GLOBAL) as Row[];
-    return rows.map((row) => ({ key: row.key, masked: row.masked === 1, scope: "global" as const }));
+    return this.rows(projectSlug).map((row) => ({ key: row.key, masked: row.masked === 1 }));
   }
 
   /** Ciphertext by name, for the vault to decrypt. */
   encrypted(projectSlug: string): Record<string, string> {
-    return Object.fromEntries(this.applicable(projectSlug).map((row) => [row.key, row.value_enc]));
+    return Object.fromEntries(this.rows(projectSlug).map((row) => [row.key, row.value_enc]));
   }
 
-  /** Which of the applicable secrets should be kept out of the logs. */
+  /** Which of this project's secrets should be kept out of the logs. */
   maskedKeys(projectSlug: string): Set<string> {
-    return new Set(this.applicable(projectSlug).filter((r) => r.masked === 1).map((r) => r.key));
+    return new Set(
+      this.rows(projectSlug)
+        .filter((r) => r.masked === 1)
+        .map((r) => r.key),
+    );
   }
 
-  remove(projectSlug: string | null, key: string): boolean {
-    const res = this.db
-      .prepare("DELETE FROM secret WHERE project_slug = ? AND key = ?")
-      .run(projectSlug ?? GLOBAL, key);
+  remove(projectSlug: string, key: string): boolean {
+    const res = this.db.prepare("DELETE FROM secret WHERE project_slug = ? AND key = ?").run(projectSlug, key);
     return res.changes > 0;
   }
 }

@@ -21,43 +21,50 @@ describe("CredentialStore", () => {
       kind: "android_keystore",
       fileName: "release.jks",
       fileEnc: "cipher-a",
-      scope: "project",
       varNames: { path: "ANDROID_KEYSTORE_PATH" },
     });
   });
 
-  it("lets a project block shadow a global one of the same kind", () => {
+  it("keeps one project's blocks out of every other project", () => {
     const s = store();
-    s.set(null, "apple_asc", { fileName: "g.p8", fileEnc: "g", fieldsEnc: "g", varNames: {} });
     s.set("popotheque", "apple_asc", { fileName: "p.p8", fileEnc: "p", fieldsEnc: "p", varNames: {} });
 
     expect(s.find("popotheque", "apple_asc")?.fileName).toBe("p.p8");
-    expect(s.find("autre", "apple_asc")?.fileName).toBe("g.p8");
-    expect(s.applicable("popotheque")).toHaveLength(1);
+    expect(s.find("autre", "apple_asc")).toBeUndefined();
+    expect(s.list("autre")).toEqual([]);
+  });
+
+  it("overwrites a block of the same kind rather than duplicating it", () => {
+    const s = store();
+    s.set("app", "apple_asc", { fileName: "first.p8", fileEnc: "a", fieldsEnc: "a", varNames: {} });
+    s.set("app", "apple_asc", { fileName: "second.p8", fileEnc: "b", fieldsEnc: "b", varNames: {} });
+
+    expect(s.list("app")).toHaveLength(1);
+    expect(s.find("app", "apple_asc")?.fileName).toBe("second.p8");
   });
 
   it("reports whether a removal happened", () => {
     const s = store();
-    s.set(null, "play_service_account", { fileName: "a.json", fileEnc: "x", fieldsEnc: "y", varNames: {} });
-    expect(s.remove(null, "play_service_account")).toBe(true);
-    expect(s.remove(null, "play_service_account")).toBe(false);
+    s.set("app", "play_service_account", { fileName: "a.json", fileEnc: "x", fieldsEnc: "y", varNames: {} });
+    expect(s.remove("app", "play_service_account")).toBe(true);
+    expect(s.remove("app", "play_service_account")).toBe(false);
   });
 
-  it("lists and removes only what a project owns, never a global block", () => {
+  it("removes everything a project holds, and returns how many", () => {
     const s = store();
-    s.set(null, "play_service_account", { fileName: "g.json", fileEnc: "g", fieldsEnc: "g", varNames: {} });
     s.set("app", "android_keystore", { fileName: "p.jks", fileEnc: "p", fieldsEnc: "p", varNames: {} });
+    s.set("app", "apple_asc", { fileName: "p.p8", fileEnc: "p", fieldsEnc: "p", varNames: {} });
+    s.set("other", "play_service_account", { fileName: "o.json", fileEnc: "o", fieldsEnc: "o", varNames: {} });
 
-    expect(s.listOwn("app").map((r) => r.fileName)).toEqual(["p.jks"]);
-    expect(s.removeAllOwn("app")).toBe(1);
-    expect(s.listGlobal().map((r) => r.fileName)).toEqual(["g.json"]);
+    expect(s.removeAll("app")).toBe(2);
+    expect(s.list("app")).toEqual([]);
+    expect(s.list("other")).toHaveLength(1);
   });
 
-  it("refuses the empty slug, which is the global scope's own key", () => {
+  it("keeps no ciphertext in a listing", () => {
     const s = store();
-    s.set(null, "play_service_account", { fileName: "g.json", fileEnc: "g", fieldsEnc: "g", varNames: {} });
-    expect(s.listOwn("")).toEqual([]);
-    expect(s.removeAllOwn("")).toBe(0);
-    expect(s.listGlobal()).toHaveLength(1);
+    s.set("app", "apple_asc", { fileName: "a.p8", fileEnc: "file-cipher", fieldsEnc: "fields-cipher", varNames: {} });
+
+    expect(JSON.stringify(s.list("app"))).not.toContain("cipher");
   });
 });
