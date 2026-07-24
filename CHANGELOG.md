@@ -2,6 +2,32 @@
 
 ## 0.8.0
 
+### The file your build reads, in the clone for the length of a run
+
+A project's own `.env` — the one its app reads, not the one fastlane reads — is gitignored, so it
+never reaches a clone. The vault did not answer that: a stored secret becomes an environment
+variable, which is enough for fastlane and no use at all to anything that reads a *file*.
+`flutter_dotenv` bundles `.env` as an asset, `--dart-define-from-file` reads a path at compile time,
+an `.xcconfig` is a file by definition. None of them looks at the environment, and none of them fails
+loudly — they produce an app configured with nothing.
+
+Name the file in `laneyard.yml` and tick the variables that belong in it:
+
+```yaml
+env_file: .env
+```
+
+The tick is on each variable, in the Secrets tab, made where you create it rather than in a picker
+you visit later. Above the list, the file itself — rendered as the run will render it, masked values
+as dots — so a line you forgot to tick is visible rather than discovered from a shipped app.
+
+Written when the run starts, removed when it ends however it ended, marked
+`# written by laneyard, do not commit`. **A file already there without that marker is never written
+over and never removed.** Ticking decides membership of the file and nothing else: the variable still
+reaches the run through the environment like every other one.
+
+Left out of `laneyard.yml`, nothing is written and nothing changes.
+
 ### A secret belongs to one project
 
 The vault had two scopes. A secret or a signing block stored under no project applied to every one of

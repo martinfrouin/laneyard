@@ -52,6 +52,31 @@ and unmasking switch which it is without retyping the value.
 Each becomes an environment variable for every run of its project, kept out of the logs. A masked
 value must be at least four characters (see [Security](security.md)).
 
+## The environment file
+
+Some builds read a **file**, not a variable: `flutter_dotenv` bundles `.env` as an asset,
+`--dart-define-from-file=config.json` reads a path at compile time, an `.xcconfig` is a file by
+definition. That file is gitignored, Laneyard builds from a clone, so it is never there — and the
+build does not fail, it produces an app configured with nothing.
+
+Name it in `laneyard.yml` and tick the variables that belong in it:
+
+```yaml
+env_file: .env
+```
+
+The tick is on each variable, made where you create it rather than in a list you visit later — a
+variable you forget to tick is an empty value in a shipped app with no error to say so. The Secrets
+tab shows the file it will write, masked values as dots, so a missing line is visible.
+
+It is written when the run starts and removed when it ends, however it ended, and its first line is
+`# written by laneyard, do not commit`. **A file already there without that line is never written
+over and never removed** — it is yours. Ticking changes nothing else: a ticked variable still reaches
+the run as an environment variable like every other one.
+
+Nothing here is required. Leave `env_file` out and no file is written; a Fastfile that forwards
+values itself with `ENV.fetch` needs none of this.
+
 ## Signing credentials
 
 A signing credential is not a string: a keystore is bytes Gradle reads through a path, and a `.p8` is

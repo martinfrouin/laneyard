@@ -43,7 +43,12 @@ artifact_globs:
   - "build/**/*.ipa"
   - "build/**/*.app.dSYM.zip"
 platforms: [ios]                 # or `[android]`, or both
+env_file: .env                   # written for the run, see Credentials
 ```
+
+`env_file` is where to write the file your build reads from disk — a gitignored
+`.env`, a `config.json` for `--dart-define-from-file`. Leave it out and nothing is written. A path
+that climbs out of the app is refused at load.
 
 `platforms` decides which half of the [readiness checklist](readiness.md) applies: an Android project
 is never asked for an App Store Connect key. Left out, Laneyard looks **beside the Fastfile** — where
