@@ -2,52 +2,33 @@
 
 ## The Fastfile
 
-Every project has a Fastfile tab. **It is a text editor** — your file, in a box, with Ruby syntax
-highlighting and nothing between you and it. The structured view, where lanes and actions are things
-you arrange rather than type, is still to come; this first half is useful on its own: fixing a lane
-at 2am should not require an SSH session.
+Every project has a Fastfile tab: a text editor with Ruby syntax highlighting, and nothing between
+you and your file. Fixing a lane at 2am should not require an SSH session.
 
-**Every write is verified.** Saving sends the file to the server, which writes it byte-for-byte then
-asks fastlane to parse it and list its lanes. If that fails, the previous content is restored before
-the request answers, and fastlane's reason appears above the editor with your work still in the box.
-A broken Fastfile never reaches a workspace a run might build from.
+**Every write is verified.** Saving writes the file byte-for-byte, then asks fastlane to parse it and
+list its lanes. If that fails the previous content is restored before the request answers, and
+fastlane's reason appears above the editor with your work still in the box — a broken Fastfile never
+reaches a workspace a run might build from.
 
-Saving is explicit: verification is a Ruby subprocess, not a regex, and running it on every keystroke
-would be slow and dangerous. `⌘S` is another way to ask, not an autosave. Laneyard also refuses to
-write while a run of that project is in flight — that run is reading the very file the write replaces.
+Saving is explicit (`⌘S` is another way to ask, not an autosave), and refused while a run of that
+project is in flight, since that run is reading the file the write would replace.
 
-Below the editor is what git makes of the workspace: the diff, a message field, `commit` and `push`.
-A commit stages exactly the files that changed, never `git add -A` — a build scatters artifacts and
-reports around, and none belong in your history.
+Below the editor is git: the diff, a message field, `commit` and `push`. A commit stages exactly the
+files that changed, never `git add -A`.
 
 ## Removing a project
 
-Every project has a Settings tab, and the one thing on it is removal. It removes everything
-Laneyard holds for the project, in one confirmed act. It is confirmed by typing the project's
-name: it is the one destructive action in Laneyard, and a dialogue you can click through is not a
-confirmation.
+The Settings tab removes everything Laneyard holds for the project, confirmed by typing its name.
 
-What it removes:
+**Removed:** its block in `config.yml` (through the YAML document, so your comments survive), its run
+history and logs, the clone and artifacts on disk, and its own secrets and signing blocks in the
+vault. The run history is the one thing nothing can rebuild — hence the typed confirmation.
 
-- **its block in `config.yml`** — taken out through the YAML document, so your comments and your
-  key order survive;
-- **its run history and its logs.** Every build the project ran, its rows and its logs, deleted.
-  This is the one thing here nothing can rebuild, and the reason removal is behind a typed name;
-- **the clone and the artifacts on disk**, deleted;
-- **its secrets and its signing blocks in the vault** — Laneyard's own encrypted copies, forgotten.
-  The screen counts them before and after, because they are the one thing here you cannot go and look
-  at: no route ever sends a credential back.
+**Not touched:** the git remote, the credential originals you uploaded, and global secrets and
+signing blocks. The result names how many it left.
 
-What it does *not* touch:
-
-- **the git remote.** The repository is on your host and disk; Laneyard neither reads nor writes it;
-- **the credential originals.** The `.p8` and keystore you uploaded are wherever you keep them;
-  Laneyard removes only its own encrypted copy;
-- **global secrets and global signing blocks.** Read by every project, not this one's to take. The
-  result names how many it left.
-
-Removal is refused while a run of that project is in flight — that run is using the workspace. A
-queued run will not start: it ends as failed, saying its project is gone.
+Removal is refused while a run of that project is in flight. A queued run ends as failed, saying its
+project is gone.
 
 The same thing from the command line, run from the directory holding its `laneyard.yml` — the
 repository root for most projects, the app's own folder in a monorepo:
@@ -58,10 +39,8 @@ laneyard remove --dry-run   # show what would go, and stop
 laneyard remove             # remove it, after a typed confirmation
 ```
 
-No slug to give: it reads one from the `laneyard.yml` there, refusing if the file is missing or has
-no slug (run `laneyard setup` again). It deletes that file too, and says to commit the deletion.
-Otherwise it matches the Settings tab: confirmed by typing the slug back, `--dry-run` stops at the
-inventory, refused during a run.
+No slug to give: it reads one from the `laneyard.yml` there, and refuses if the file is missing or
+has no slug (run `laneyard setup` again). It deletes that file too, and says to commit the deletion.
 
 ## Resetting
 
@@ -70,14 +49,9 @@ laneyard reset --dry-run   # show what would go, and stop
 laneyard reset             # wipe it, after a typed confirmation
 ```
 
-`laneyard reset` wipes the data and keeps you able to use Laneyard: every project, the database, the
-workspaces, the artifacts and the logs go; your accounts and the vault key stay. You sign in with the
-same names afterwards, and keeping the key means an older `laneyard.db` backup stays readable. The
-database comes back empty on the next start, which also clears sessions, so everyone signs in again.
-
-It keeps the `server:` block of `config.yml` (accounts, port, bind, retention) and `~/.laneyard/key`,
-and never touches the git remotes or credential originals. It reads the inventory first and, like
-`uninstall`, is confirmed by typing the folder's path, not `y`.
+Wipes every project, the database, the workspaces, the artifacts and the logs. Your accounts, the
+`server:` block of `config.yml` and the vault key stay — so you sign in with the same names, and an
+older `laneyard.db` backup stays readable. Sessions are cleared; everyone signs in again.
 
 ## Uninstalling
 
@@ -87,17 +61,13 @@ laneyard uninstall             # remove it, after a typed confirmation
 npm uninstall -g laneyard      # remove the package itself
 ```
 
-`laneyard uninstall` removes the data folder: `config.yml`, the vault key, the database, the
-workspaces, the artifacts and the logs. It reads the whole inventory from disk first — projects,
-secret and block counts, sizes and paths — and prints it before asking.
+Removes the whole data folder: `config.yml`, the vault key, the database, the workspaces, the
+artifacts and the logs. The inventory is read from disk and printed before anything is asked.
 
-The vault key is the one loss that cannot be undone: every secret and block is encrypted under
-`~/.laneyard/key`, and once it is gone the database is ciphertext nobody can read. The originals are
-yours and untouched — the `.p8` in your downloads, the keystore in your safe — so what you agree to
-is uploading them again. Global secrets and blocks go too; the inventory says so.
+**The vault key is the one loss that cannot be undone.** Every secret and block is encrypted under
+`~/.laneyard/key`; once it is gone the database is ciphertext nobody can read. The originals are
+yours and untouched, so what you agree to is uploading them again.
 
-Confirmed by typing the folder's path, not `y`: this is the one command that destroys credentials.
-Anything in the folder Laneyard did not put there is named, left alone, and the folder kept for it.
-It does not remove the npm package — a command cannot delete the binary it runs from — and prints the
-command that does, on purpose: a package manager must not delete someone's signing keys on its own.
-
+Confirmed by typing the folder's path, not `y` — this is the one command that destroys credentials.
+Anything in the folder Laneyard did not put there is named and left alone. It does not remove the npm
+package (a command cannot delete the binary it runs from) and prints the command that does.

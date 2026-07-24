@@ -92,7 +92,8 @@ See [Credentials](docs/credentials.md).
 
 ## Documentation
 
-- **[Configuration](docs/configuration.md)** — `config.yml`, `laneyard.yml`, accounts and roles.
+- **[Configuration](docs/configuration.md)** — `config.yml` and `laneyard.yml`.
+- **[Accounts](docs/accounts.md)** — the two roles, and which projects a builder reaches.
 - **[Credentials](docs/credentials.md)** — hardcoded credentials at setup, secrets, signing blocks.
 - **[Readiness](docs/readiness.md)** — the per-project checklist, and what a tick means.
 - **[Managing a project](docs/managing.md)** — the Fastfile editor, removing, resetting, uninstalling.
