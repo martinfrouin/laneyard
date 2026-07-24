@@ -2,6 +2,15 @@
 
 ## 0.6.4
 
+### Setup adds a missing slug, so a project stays removable
+
+A `laneyard.yml` written before slugs existed has none, and `laneyard remove`
+refuses a slug-less file — telling you to run `laneyard setup` again, which left
+the file untouched. The project could not be removed from the command line at
+all. Setup now adds the `slug:` when it is missing, through the YAML document, so
+the comments, the key order and every value the file carried survive. An existing
+slug is never touched.
+
 ### Setup's last question says what it will write
 
 `Set up "popotheque"?` arrived at the end of a run of unrelated questions, with

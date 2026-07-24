@@ -273,7 +273,8 @@ export async function runSetupCommand(
     if (repoConfigExists) {
       process.stdout.write(
         "\n" + warn(`${LANEYARD_YML} already exists in the repository.\n`) +
-          dim("  Its values win over anything written here; it will be left alone.\n"),
+          dim("  Its values win over anything written here and are left alone.\n") +
+          dim("  Only a missing `slug:` is added, so this project can be removed later.\n"),
       );
     }
 
@@ -396,9 +397,14 @@ export async function runSetupCommand(
         // one line of the file just written.
         field("platforms", d.platforms.join(", ") || dim("none detected")) + "\n" +
         "\n" +
-        (wroteRepoConfig
+        (wroteRepoConfig === "written"
           ? ok(`Wrote ${bold(LANEYARD_YML)} — ${bold("commit it")} so your team builds the same way.\n`)
-          : warn(`Left the existing ${LANEYARD_YML} alone.\n`)) +
+          : wroteRepoConfig === "slug-added"
+            ? ok(
+                `Added ${bold(`slug: ${slug}`)} to the existing ${LANEYARD_YML}, and left the rest ` +
+                  `alone — ${bold("commit it")}.\n`,
+              )
+            : warn(`Left the existing ${LANEYARD_YML} alone.\n`)) +
         ok(`Registered in ${configPath}\n`) +
         // Last thing before the invitation to start the server, because it is
         // the one line here that cannot be read again anywhere: the file holds
@@ -529,15 +535,33 @@ async function writeRepoConfigIfAbsent(
     artifact_globs: string[];
     platforms?: string[];
   },
-): Promise<boolean> {
-  if (await fileExists(path)) return false;
+): Promise<"written" | "slug-added" | "left"> {
+  const existing = await readFile(path, "utf8").catch(() => null);
 
-  const doc = new Document(settings);
-  doc.commentBefore =
-    " How this project builds. Committed, so everyone builds it the same way.\n" +
-    " Values here win over the project's block in the server's config.yml.";
-  await writeFile(path, doc.toString(), "utf8");
-  return true;
+  if (existing === null) {
+    const doc = new Document(settings);
+    doc.commentBefore =
+      " How this project builds. Committed, so everyone builds it the same way.\n" +
+      " Values here win over the project's block in the server's config.yml.";
+    await writeFile(path, doc.toString(), "utf8");
+    return "written";
+  }
+
+  // The one edit an existing file gets: the slug, and only when it has none.
+  //
+  // A file written before slugs existed has no way to gain one otherwise, and
+  // `laneyard remove` refuses a slug-less file while telling you to run setup
+  // again — which left it untouched. That was a project nothing could remove.
+  //
+  // Through the YAML document, like `addProjectToConfig`: the comments, the key
+  // order and every value the file carried come back out unchanged. An existing
+  // slug is never touched, whatever it says.
+  const doc = parseDocument(existing);
+  if (doc.getIn(["slug"]) !== undefined) return "left";
+
+  doc.setIn(["slug"], settings.slug);
+  await writeFile(path, serialize(doc), "utf8");
+  return "slug-added";
 }
 
 /**

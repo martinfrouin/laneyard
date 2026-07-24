@@ -317,18 +317,37 @@ describe("runSetupCommand", () => {
     expect(repoConfig.slug).toBe("plain");
   });
 
-  it("leaves an existing laneyard.yml alone", async () => {
+  it("leaves the values in an existing laneyard.yml alone", async () => {
     // Someone put it there, possibly with comments and choices this command
-    // knows nothing about — and its values win anyway. It lives in the app's own
-    // directory, which is where setup would have written it.
+    // knows nothing about — and its values win anyway.
+    const { app, root, configPath } = await monorepo();
+    await writeFile(
+      join(root, "app", "laneyard.yml"),
+      "# mine\nslug: kept\nruntime: bundle\n",
+      "utf8",
+    );
+
+    await runSetupCommand(app, configPath, { yes: true });
+
+    expect(await readFile(join(root, "app", "laneyard.yml"), "utf8")).toBe(
+      "# mine\nslug: kept\nruntime: bundle\n",
+    );
+  });
+
+  it("adds a missing slug to an existing laneyard.yml rather than leaving it unusable", async () => {
+    // A file written before slugs existed has none, so `laneyard remove` refuses
+    // it and says to run setup again — which used to leave the file untouched,
+    // so there was no way out at all.
     const { app, root, configPath } = await monorepo();
     await writeFile(join(root, "app", "laneyard.yml"), "# mine\nruntime: bundle\n", "utf8");
 
     await runSetupCommand(app, configPath, { yes: true });
 
-    expect(await readFile(join(root, "app", "laneyard.yml"), "utf8")).toBe(
-      "# mine\nruntime: bundle\n",
-    );
+    const after = await readFile(join(root, "app", "laneyard.yml"), "utf8");
+    expect(after).toMatch(/^slug: \S+$/m);
+    // Only the slug is added: the comment and the value it carried survive.
+    expect(after).toContain("# mine");
+    expect(after).toContain("runtime: bundle");
   });
 
   it("names the project after the repository and the sub-directory", async () => {
