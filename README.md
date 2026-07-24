@@ -484,11 +484,11 @@ What it does *not* touch:
 Removal is refused while a run of that project is in flight — that run is using the workspace. A
 queued run will not start: it ends as failed, saying its project is gone.
 
-The same thing from the command line, run from the app's directory — the one holding its
-`laneyard.yml`:
+The same thing from the command line, run from the directory holding its `laneyard.yml` — the
+repository root for most projects, the app's own folder in a monorepo:
 
 ```bash
-cd apps/cartes-ios
+cd ~/code/cartes            # where laneyard.yml is
 laneyard remove --dry-run   # show what would go, and stop
 laneyard remove             # remove it, after a typed confirmation
 ```

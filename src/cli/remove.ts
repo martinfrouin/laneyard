@@ -17,7 +17,8 @@ import { bad, bold, dim, field, heading, ok, warn } from "./style.js";
 
 export const REMOVE_USAGE = `laneyard remove [--dry-run]
 
-Run from your app's directory — the one that holds laneyard.yml. Removes
+Run from the directory that holds laneyard.yml — the repository root for most
+projects, the app's own folder in a monorepo. Removes
 everything Laneyard holds for that project: its block in config.yml, its clone,
 its artifacts, its run history and logs, and its own secrets and signing blocks
 in the vault. It also removes the repository's laneyard.yml, which you then
@@ -106,7 +107,9 @@ function renderInventory(
 }
 
 /**
- * Entry point for `laneyard remove`, run from the app's own directory.
+ * Entry point for `laneyard remove`, run from wherever the project's
+ * `laneyard.yml` sits — the repository root unless the app is one folder of a
+ * monorepo.
  *
  * The project is the one whose `laneyard.yml` sits in `cwd`; the slug is read
  * from that file rather than given as an argument, so the command names what the
@@ -138,7 +141,7 @@ export async function runRemoveCommand(
     io.err(
       "\n" +
         bad("No laneyard.yml here.") +
-        " Run `laneyard remove` from your app's directory — the one that holds it.\n",
+        " Run `laneyard remove` from the directory that holds it — usually the repository root.\n",
     );
     return 1;
   }
