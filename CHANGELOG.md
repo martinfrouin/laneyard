@@ -2,6 +2,13 @@
 
 ## 0.6.4
 
+### `laneyard remove <slug>`, for a project with no file to read
+
+Reading the slug from `./laneyard.yml` left no way to remove a project whose file
+was never written, lost its slug, or whose repository is not on this machine any
+more — only the web could. A slug given outright overrides the file. One naming a
+different project is left where it is.
+
 ### Setup adds a missing slug, so a project stays removable
 
 A `laneyard.yml` written before slugs existed has none, and `laneyard remove`

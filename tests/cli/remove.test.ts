@@ -138,6 +138,32 @@ describe("laneyard remove", () => {
     db.close();
   });
 
+  it("takes a slug when there is no laneyard.yml to read one from", async () => {
+    // The way out of a project whose file was never written, lost its slug, or
+    // whose repository is simply not on this machine any more.
+    const { home, runId } = await installed();
+    const cwd = await tmpDir("laneyard-bare-");
+
+    const { code } = await run(home, cwd, ["sample"], "sample");
+    expect(code).toBe(0);
+
+    const parsed = parse(await readFile(join(home, "config.yml"), "utf8")) as { projects: { slug: string }[] };
+    expect(parsed.projects.map((p) => p.slug)).toEqual(["other"]);
+    expect(existsSync(join(home, "workspaces", "sample"))).toBe(false);
+    expect(existsSync(join(home, "artifacts", String(runId)))).toBe(false);
+  });
+
+  it("leaves a laneyard.yml that names another project alone", async () => {
+    // Given a slug explicitly, the file in this directory is somebody else's:
+    // removing `sample` must not delete the file that says `other`.
+    const { home } = await installed();
+    const cwd = await appDir("other");
+
+    const { code } = await run(home, cwd, ["sample"], "sample");
+    expect(code).toBe(0);
+    expect(existsSync(join(cwd, "laneyard.yml"))).toBe(true);
+  });
+
   it("refuses when the directory has no laneyard.yml", async () => {
     const { home } = await installed();
     const cwd = await tmpDir("laneyard-bare-");

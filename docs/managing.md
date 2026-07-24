@@ -39,8 +39,12 @@ laneyard remove --dry-run   # show what would go, and stop
 laneyard remove             # remove it, after a typed confirmation
 ```
 
-No slug to give: it reads one from the `laneyard.yml` there, and refuses if the file is missing or
-has no slug (run `laneyard setup` again). It deletes that file too, and says to commit the deletion.
+No slug to give: it reads one from the `laneyard.yml` there. It deletes that file too, and says to
+commit the deletion.
+
+Where there is no such file — never written, or a repository no longer on this machine — name the
+project instead: `laneyard remove cartes-ios`. A `laneyard.yml` naming a *different* project is then
+left alone.
 
 ## Resetting
 
