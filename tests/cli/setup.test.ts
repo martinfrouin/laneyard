@@ -256,29 +256,31 @@ describe("runSetupCommand", () => {
     expect(written.projects[0]).not.toHaveProperty("runtime");
   });
 
-  it("says which files it will write before asking to confirm", async () => {
-    // The last question used to be a bare `Set up "x"?` after a run of unrelated
-    // ones — nothing on screen said what pressing Return would do.
-    const { app, configPath } = await monorepo();
+  it("asks no rubber-stamp confirmation at the end", async () => {
+    // Every value has been proposed and accepted one at a time by then, so the
+    // answer was always yes. What was written is reported afterwards instead.
+    const { app, root, configPath } = await monorepo();
     const asked: string[] = [];
 
-    await runSetupCommand(app, configPath, {
-      asker: {
-        ask: async (_label, proposed) => proposed,
-        confirm: async (question) => {
-          asked.push(question);
-          return true;
+    const out = await captureStdout(async () => {
+      await runSetupCommand(app, configPath, {
+        asker: {
+          ask: async (_label, proposed) => proposed,
+          confirm: async (question) => {
+            asked.push(question);
+            return true;
+          },
+          close: () => {},
         },
-        close: () => {},
-      },
+      });
     });
 
-    const final = asked.at(-1);
-    // What answering yes does, and to which files — `Set up "x"?` said neither.
-    expect(final).toContain("Nothing has been written yet");
-    expect(final).toContain("config.yml");
-    expect(final).toContain(LANEYARD_YML_NAME);
-    expect(final).toMatch(/Register this project as .*popotheque/);
+    expect(asked.some((q) => /Set up "|and write those\?/.test(q))).toBe(false);
+    // And it still says what it wrote, and where.
+    expect(out).toContain("is set up");
+    expect(out).toContain(LANEYARD_YML_NAME);
+    expect(out).toContain(configPath);
+    expect(await readFile(join(root, "app", LANEYARD_YML_NAME), "utf8")).toContain("slug:");
   });
 
   it("offers the fastlane directory as you would write it from where you are", async () => {
@@ -426,7 +428,10 @@ describe("runSetupCommand", () => {
     expect(written.server.users[0]!.password_hash).toBe("scrypt$a$b");
   });
 
-  it("writes nothing when the user declines", async () => {
+  it("registers the project even when every confirm is refused", async () => {
+    // There is no confirmation to decline for the write itself any more: each
+    // value was accepted as it was asked. Refusing the questions that remain —
+    // bundler, and each adoption proposal — changes what is written, not whether.
     const { app, configPath } = await monorepo();
     const code = await runSetupCommand(app, configPath, {
       asker: {
@@ -437,7 +442,12 @@ describe("runSetupCommand", () => {
     });
 
     expect(code).toBe(0);
-    await expect(readFile(configPath, "utf8")).rejects.toThrow();
+    const written = parse(await readFile(configPath, "utf8")) as {
+      projects: { slug: string; runtime?: string }[];
+    };
+    expect(written.projects).toHaveLength(1);
+    // Refusing bundler is the one thing that answer still decides.
+    expect(written.projects[0]!.runtime).toBe("system");
   });
 
   /**

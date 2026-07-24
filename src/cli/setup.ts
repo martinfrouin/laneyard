@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { Document, parseDocument, YAMLSeq } from "yaml";
 import { VALID_NAME, ensureFirstAdmin, hasAccount } from "../config/accounts.js";
@@ -307,30 +307,14 @@ export async function runSetupCommand(
     // right, and the file is there to be edited when they are not.
     const globs = d.artifactGlobs;
 
-    // What pressing Return does, named right above the question. It used to be a
-    // bare `Set up "x"?` at the end of a run of unrelated questions, with the two
-    // files it writes explained far enough up the screen to have scrolled off.
-    const writes =
-      "\n" +
-      dim("  Nothing has been written yet. Answering yes writes:\n") +
-      dim(`    ${configPath}\n`) +
-      dim(`      this machine's registry${adminName === null ? "" : ", and your account"}\n`) +
-      dim(`    ${relative(cwd, repoConfigPath) || LANEYARD_YML}\n`) +
-      dim(
-        `      how this project builds — ${
-          repoConfigExists ? "already there, kept as it is" : "commit it"
-        }\n`,
-      );
-
-    if (
-      !(await asker.confirm(
-        `${writes}\n  Register this project as ${bold(slug)} and write those?`,
-        true,
-      ))
-    ) {
-      process.stdout.write(dim("Nothing written.") + "\n");
-      return 0;
-    }
+    // No final "and write those?" here, on purpose. It was a rubber stamp: by
+    // this line every value has been proposed and accepted one at a time, so the
+    // answer was always yes — and a question nobody ever says no to teaches
+    // people to press Return without reading the ones that matter. Nothing here
+    // destroys anything either: the project block is additive and `laneyard
+    // remove` undoes it, an existing `laneyard.yml` keeps its values, and the
+    // report below says exactly what was written and where. Ctrl-C still works
+    // at every prompt above.
 
     // The account first, so the server block is written before the project list
     // it sits above. `null` when this machine already has one, and then nothing
@@ -394,8 +378,6 @@ export async function runSetupCommand(
       ...(d.platforms.length > 0 ? { platforms: d.platforms } : {}),
     });
 
-    const port = await configuredPort(configPath);
-
     process.stdout.write(
       heading(`Project "${slug}" is set up`) +
         field("repository", `${gitUrl} (${branch})`) + "\n" +
@@ -428,11 +410,14 @@ export async function runSetupCommand(
             "\n" +
             warn("Write the password down — it is not shown again, and it is not stored.\n") +
             dim("  Add a colleague later with `laneyard user add <name> --role builder`.\n")) +
-        heading("Start Laneyard") +
+        // An instruction, not a status. `Start Laneyard` over a command and a URL
+        // read as "started, and here is the address" — the URL especially, which
+        // nothing was serving yet. The verb says who does it, and the address is
+        // the server's to print once it is listening.
+        heading("The server is not running yet — start it with") +
         `  ${bold("laneyard")}\n` +
-        `  ${dim(`http://localhost:${port}`)}\n` +
         "\n" +
-        dim("Already running? The configuration is watched — it appears on its own.\n"),
+        dim("Already running? The configuration is watched — this project appears on its own.\n"),
     );
 
     // The second act. After the success message, never before it: declining
@@ -462,18 +447,6 @@ export async function runSetupCommand(
   } finally {
     asker.close();
   }
-}
-
-/**
- * The port the server will actually listen on.
- *
- * Read back from the file rather than assumed: telling someone to open a port
- * their configuration does not use is the kind of small wrongness that makes a
- * tool feel unreliable on first contact.
- */
-async function configuredPort(configPath: string): Promise<number> {
-  const res = await loadServerConfig(configPath);
-  return res.ok ? res.config.server.port : 7890;
 }
 
 /** The repository file, named once so the message and the write cannot disagree. */
