@@ -16,6 +16,8 @@ import { ConfigStore } from "./config/store.js";
 import { CacheStore } from "./db/cache.js";
 import { openDatabase } from "./db/open.js";
 import type { Db } from "./db/open.js";
+import { migrateGlobalScope } from "./db/migrate-global-scope.js";
+import type { GlobalScopeMigration } from "./db/migrate-global-scope.js";
 import { RunStore } from "./db/runs.js";
 import { CredentialStore } from "./db/credentials.js";
 import { SecretStore } from "./db/secrets.js";
@@ -52,6 +54,8 @@ export interface Started {
   app: FastifyInstance;
   db: Db;
   config: ConfigStore;
+  /** What became of the rows that used to belong to every project. */
+  migration: GlobalScopeMigration;
 }
 
 /** Assembles the server from a data folder. */
@@ -61,6 +65,14 @@ export async function createServerFromConfig(root: string): Promise<Started> {
   if (!loaded.ok) throw new Error(`Unreadable configuration: ${loaded.error}`);
 
   const db = openDatabase(join(root, "laneyard.db"));
+
+  // Before anything reads the vault: the two scopes are gone, and every query
+  // below names a project. Reported rather than returned quietly — see
+  // `migrate-global-scope.ts` for why a user has to be told.
+  const migration = migrateGlobalScope(
+    db,
+    config.projects().map((p) => p.slug),
+  );
 
   // No run that had begun can survive the shutdown of the process that carried
   // it. Queued runs never began, so they stay queued for the next start.
@@ -90,13 +102,40 @@ export async function createServerFromConfig(root: string): Promise<Started> {
   // runs queued before a restart would wait for someone to trigger a fourth.
   app.queue.wake();
 
-  return { app, db, config };
+  return { app, db, config, migration };
+}
+
+/**
+ * The upgrade notice for a vault that had a global scope.
+ *
+ * Empty for every start but the one that migrates, so it costs nothing to leave
+ * in. It matters on that one start: someone who stored a signing key once now
+ * has a copy per project, and rotating it means replacing each of them. Finding
+ * that out from a build that uploaded with a key they thought they had replaced
+ * would be far worse than a paragraph on a terminal.
+ */
+function migrationNotice(migration: GlobalScopeMigration): string {
+  const { copied, dropped } = migration;
+  if (copied.length === 0 && dropped.length === 0) return "";
+
+  const lines = [
+    ...copied.map(({ what, name, slugs }) => `  ${bold(name)} — ${what}, now in ${slugs.join(", ")}`),
+    ...dropped.map(({ what, name }) => `  ${bold(name)} — ${what}, ${dim("removed: no project read it")}`),
+  ];
+
+  return (
+    "\n" +
+    dim("  A secret and a signing block now belong to one project. What was shared\n") +
+    dim("  has been copied into each project that read it — delete any you do not want.\n\n") +
+    lines.join("\n") +
+    "\n"
+  );
 }
 
 /** Real startup, outside tests. */
 async function main(): Promise<void> {
   const root = process.env["LANEYARD_HOME"] ?? join(homedir(), ".laneyard");
-  const { app, config } = await createServerFromConfig(root);
+  const { app, config, migration } = await createServerFromConfig(root);
 
   config.watch((ok) => {
     if (!ok) console.error(`Invalid configuration, the previous one stays active: ${config.lastError()}`);
@@ -126,6 +165,7 @@ async function main(): Promise<void> {
           dim("  No project yet. From a folder that already uses fastlane:\n") +
           `  ${bold("laneyard setup")}\n`
         : "") +
+      migrationNotice(migration) +
       "\n",
   );
 }
