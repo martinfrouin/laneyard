@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.7.0
+
+### fastlane starts from the app's directory, not the repository root
+
+A project whose Fastfile sits in `app/fastlane` could not build. fastlane looks for `fastlane/` in
+the directory it was started from and nowhere else, found nothing, offered to set the project up,
+and — with nobody to answer — printed a Ruby backtrace over the sentence that mattered. A clone with
+no fastlane folder now fails with that sentence instead of reaching fastlane at all.
+
+### Refresh, beside the names a lane is missing
+
+The screens read the clone, and only a run ever fetched it. A project whose first run failed early
+kept answering from that commit. Refresh brings the clone up to the remote without building
+anything. Refused while a run is in flight, or when the workspace holds a commit that was never
+pushed.
+
+### Run again, from the run screen
+
+The run screen carries the project's tabs now, and a button that starts the same lane with the same
+parameters. It was a dead end: no way back but a link that looked like a label, and no way to retry.
+
+### Stored values on screen
+
+A variable stored in the clear is printed in every log its lane produces, so it is shown here too. A
+secret is never in a listing, and `show` fetches it by name when you want to check one. Nothing is
+masked while you type it.
+
+### Less text
+
+Every tab opened with a paragraph explaining what it was. They are gone, along with the sentence
+under half the rows and most of the readiness prose. What is left on a screen is what is true of
+this moment.
+
 ## 0.6.4
 
 ### `laneyard remove <slug>`, for a project with no file to read

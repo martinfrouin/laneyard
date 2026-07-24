@@ -119,9 +119,9 @@ See [Credentials](docs/credentials.md).
   the vault and patch the file
 - `○` git-triggered and scheduled builds
 
-Two things worth knowing: listing lanes does not fetch the repository, so a lane you just pushed
-appears after the next run; and runs execute one at a time across all projects. A queued run survives
-a server restart and starts on its own.
+Two things worth knowing: the screens read the clone rather than the remote, so a lane you just
+pushed appears after the next run — or after pressing refresh; and runs execute one at a time across
+all projects. A queued run survives a server restart and starts on its own.
 
 ## Changelog
 
