@@ -73,12 +73,10 @@ export function Users() {
 
   return (
     <>
+      {/* No preamble. Each row carries its own role, and the one thing the
+          paragraph said that a row does not — what a builder may do — is
+          answered by the project checkboxes sitting under every builder. */}
       <h2 className="section">accounts</h2>
-      <p className="dim">
-        who can sign in to this server. an admin does everything and reaches every project; a builder
-        starts, watches, cancels and downloads a build, reaches only the projects granted below, and
-        never sees a secret.
-      </p>
 
       {listError && <p className="status-failed">unreadable accounts — {listError}</p>}
       {loading && <p className="dim">reading configuration…</p>}
@@ -151,17 +149,12 @@ export function Users() {
           create
         </button>
       </form>
-      <p className="dim">
-        the account is written to this machine's config.yml, its password hashed. an existing name
-        is replaced — and its open sessions end. a new builder starts reaching no project until you
-        grant it one.
-      </p>
-      <p className="dim">
-        removing an account ends its sessions at once. the last admin can be neither removed nor
-        demoted: a server nobody can administer cannot be repaired from here. your own row leads to
-        your account, where you change your password — nobody's password is changed from this page,
-        and another admin is the one who removes you.
-      </p>
+      {/* One line, and only the part that is a surprise: a new builder is
+          created reaching nothing. The rest of what these two paragraphs said —
+          that the last admin cannot be removed, that an existing name is
+          replaced — is a refusal or a fact you meet at the moment it applies,
+          with the server's own sentence attached. */}
+      <p className="dim">a new builder reaches no project until you grant it one.</p>
 
       {formError && <p className="status-failed">refused — {formError}</p>}
     </>

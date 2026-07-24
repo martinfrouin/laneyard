@@ -78,10 +78,11 @@ export function Account() {
   return (
     <>
       <h2 className="section">your account</h2>
+      {/* Who you are, and nothing about what the page is for: the two headings
+          under it are "change password" and "change your identifier". */}
       <p className="dim">
         signed in as <span className="bright">{me?.name}</span>{" "}
-        <span className="dim">{me?.role}</span>. your password and your name are the two things this
-        page changes, and the two things nobody else can change for you.
+        <span className="dim">{me?.role}</span>
       </p>
 
       <h2 className="section" style={{ marginTop: 20 }}>
@@ -122,16 +123,11 @@ export function Account() {
 
       {mismatch && <p className="status-failed">the two new passwords are not the same.</p>}
 
-      {/* Said before it happens rather than discovered as a phone that went
-          back to the login form for no reason anyone can explain. */}
-      <p className="dim">
-        the new password is hashed into this machine's config.yml. every other session this account
-        has ends at once — a phone, another browser — and this page stays signed in.
-      </p>
-      <p className="dim">
-        the current password is asked for even though you are already signed in: a session is a
-        cookie in a browser that may have been left open.
-      </p>
+      {/* One line, and the one thing that happens off this screen: a phone that
+          drops back to the login form for no visible reason is a bug report.
+          Why the current password is asked for is answered by the field itself
+          being there — nobody reads a paragraph to find out. */}
+      <p className="dim">every other session ends.</p>
 
       {done && (
         <p>
@@ -168,18 +164,10 @@ export function Account() {
         </button>
       </form>
 
-      {/* Said before it happens, like the password: renaming ends every other
-          session too, since the server matches a session's name against a live
-          account and after this there is none by the old name. */}
-      <p className="dim">
-        your name is what you type into the login form. changing it here edits this machine's
-        config.yml and keeps your role and your project access exactly as they were. every other
-        session ends, and this page stays signed in under the new name.
-      </p>
-      <p className="dim">
-        the current password is asked for here too: a session is a cookie in a browser that may have
-        been left open.
-      </p>
+      {/* Same one line as the password, for the same reason: the server matches
+          a session's name against a live account, and after this there is none
+          by the old name. */}
+      <p className="dim">every other session ends.</p>
 
       {nameDone && (
         <p>

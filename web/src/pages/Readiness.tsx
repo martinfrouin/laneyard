@@ -79,11 +79,11 @@ export function Readiness() {
 
   return (
     <>
+      {/* No preamble: the tally below says how many lines need a look, and each
+          line says what it is. A paragraph explaining that a checklist is a
+          checklist is the sort of thing that teaches people to skip the top of
+          a screen — including the tally. */}
       <h2 className="section">readiness</h2>
-      <p className="dim">
-        what stands between this project and a build that runs while nobody watches. nothing here
-        blocks a run — every line is a warning you decide what to do about.
-      </p>
 
       <p className="dim">
         {loading ? "running the checks…" : report ? `checked at ${at(report.checkedAt)}` : "not checked yet"}{" "}

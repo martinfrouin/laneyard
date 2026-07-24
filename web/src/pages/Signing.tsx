@@ -55,15 +55,10 @@ export function Signing() {
 
   return (
     <>
+      {/* No preamble. The two groups, their names and each card's own fields
+          say what this screen is; two paragraphs of it above were read once by
+          nobody. What each block exports is on the card that exports it. */}
       <h2 className="section">signing</h2>
-      <p className="dim">
-        the files a lane needs to sign a build or hand it to a store. only the lanes that do that
-        read them — screenshots, tests and cert syncing need nothing here.
-      </p>
-      <p className="dim">
-        a block is a file plus the fields that make it usable, stored whole and encrypted. it reaches
-        a run as a path plus the names the block exports.
-      </p>
 
       {listError && <p className="status-failed">unreadable signing blocks — {listError}</p>}
       {loading && <p className="dim">reading vault…</p>}

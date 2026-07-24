@@ -164,11 +164,11 @@ export function Fastfile() {
 
   return (
     <>
+      {/* No preamble: an editor with a save button beside it is a thing anyone
+          recognises, and the bar under this heading already says whether there
+          is anything unsaved. That the server parses before it counts is worth
+          knowing exactly once — when it refuses, which it says at that moment. */}
       <h2 className="section">fastfile</h2>
-      <p className="dim">
-        the file every run of this project builds from. this is a text editor — saving is explicit,
-        and the server parses what you send before it counts.
-      </p>
 
       {loadError && <p className="status-failed">unreadable fastfile — {loadError}</p>}
 

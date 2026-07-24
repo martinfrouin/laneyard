@@ -169,15 +169,13 @@ const META = {
 export async function checkRepository(probe: () => Promise<unknown>): Promise<Check> {
   try {
     await probe();
-    return { ...META.repository, ...ok("the remote answers without asking for credentials.") };
+    return { ...META.repository, ...ok("the remote answers without a password.") };
   } catch (cause) {
     return {
       ...META.repository,
       ...warn(
         reasonOf(cause),
-        "Give the project a key it can use without a passphrase — " +
-          "`git_auth: {kind: ssh_key, ref: /path/to/key}` in config.yml — or a URL that needs no password. " +
-          "A run that meets a credentials prompt does not fail: it waits.",
+        "Point `git_auth` at a passphrase-less SSH key in config.yml. A run that meets a prompt waits.",
       ),
     };
   }
@@ -201,11 +199,11 @@ export async function checkDependencies(input: DependenciesInput): Promise<Check
   if (workspace.value.hasGemfile) {
     try {
       await input.bundleCheck();
-      return { ...META.dependencies, ...ok("the Gemfile's bundle is installed.") };
+      return { ...META.dependencies, ...ok("the bundle is installed.") };
     } catch (cause) {
       return {
         ...META.dependencies,
-        ...warn(reasonOf(cause), "Run `bundle install` in the project's workspace."),
+        ...warn(reasonOf(cause), "Run `bundle install` in the workspace."),
       };
     }
   }
@@ -220,17 +218,14 @@ export async function checkDependencies(input: DependenciesInput): Promise<Check
   if (fastlane !== null) {
     // Not a failure, but a fact worth stating: a system fastlane can be
     // upgraded underneath a project that was working yesterday.
-    return {
-      ...META.dependencies,
-      ...ok(`no Gemfile — runs use ${fastlane}, whose version nothing pins.`),
-    };
+    return { ...META.dependencies, ...ok(`no Gemfile — runs use ${fastlane}, unpinned.`) };
   }
 
   return {
     ...META.dependencies,
     ...warn(
-      "no Gemfile, and no fastlane on the PATH: a run has nothing to execute.",
-      'Add a Gemfile with `gem "fastlane"` and run `bundle install`, or install fastlane system-wide.',
+      "no Gemfile and no fastlane on the PATH: a run has nothing to execute.",
+      'Add a Gemfile with `gem "fastlane"`, or install fastlane system-wide.',
     ),
   };
 }
@@ -253,10 +248,8 @@ const API_KEY = /^APP_STORE_CONNECT_API_KEY/;
 const DEAD_API_KEY = /^APP_STORE_CONNECT_API_KEY_P8$/;
 
 const STORE_API_KEY =
-  "Upload the `.p8` as an App Store Connect key block from the signing tab, with its key id and " +
-  "issuer id. Laneyard writes the file for the length of a run and exports the three of them under " +
-  "the names the block carries, so nothing in the project has to change. " +
-  "An API key does not expire on its own.";
+  "Upload the `.p8` as an App Store Connect key block on the signing tab, with its key id and " +
+  "issuer id. Nothing in the project has to change.";
 
 /** The action whose whole job is to load a `.p8`, under both of its names. */
 const ASC_KEY_ACTIONS = new Set(["app_store_connect_api_key", "asc_api_key"]);
@@ -338,17 +331,11 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
   const blocks = input.blocks ?? [];
 
   if (blocks.includes("apple_asc")) {
-    return {
-      ...META.appStoreConnect,
-      ...ok(
-        "an App Store Connect key block is in the vault: the `.p8` is written for the length of a " +
-          "run, with its key id and issuer id exported beside it.",
-      ),
-    };
+    return { ...META.appStoreConnect, ...ok("a key block is in the vault.") };
   }
 
   if (secretKeys.some((key) => API_KEY.test(key) && !DEAD_API_KEY.test(key))) {
-    return { ...META.appStoreConnect, ...ok("an App Store Connect API key is in the vault.") };
+    return { ...META.appStoreConnect, ...ok("an API key is in the vault.") };
   }
 
   // The one place on this checklist where somebody is asked to redo work — and
@@ -357,9 +344,8 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
     return {
       ...META.appStoreConnect,
       ...warn(
-        "`APP_STORE_CONNECT_API_KEY_P8` is in the vault, and no action in fastlane reads a variable " +
-          "of that name: the value is stored, and no lane can see it. An earlier version of this " +
-          "interface asked for it.",
+        "`APP_STORE_CONNECT_API_KEY_P8` is stored, and no fastlane action reads that name: no lane " +
+          "can see it.",
         STORE_API_KEY,
         "signing",
       ),
@@ -382,8 +368,8 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
     return {
       ...META.appStoreConnect,
       ...undetermined(
-        `${nameList(inLanes.map((l) => l.lane))} supplies its own API key: whether the \`.p8\` it ` +
-          "names is on this machine is not something a Fastfile says.",
+        `${nameList(inLanes.map((l) => l.lane))} supplies its own key — whether the \`.p8\` it names ` +
+          "is on this machine is not something a Fastfile says.",
         STORE_API_KEY,
       ),
     };
@@ -406,13 +392,10 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
     if (blind) {
       return {
         ...META.appStoreConnect,
-        ...undetermined(`no lane seen to sign in to App Store Connect — but ${blind}.`, STORE_API_KEY),
+        ...undetermined(`no lane seen signing in to App Store Connect — but ${blind}.`, STORE_API_KEY),
       };
     }
-    return {
-      ...META.appStoreConnect,
-      ...ok("no lane signs in to App Store Connect: nothing here needs a key."),
-    };
+    return { ...META.appStoreConnect, ...ok("no lane signs in to App Store Connect.") };
   }
 
   const p8 = keyFilesInRepo.ok ? keyFilesInRepo.value : [];
@@ -420,8 +403,7 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
     return {
       ...META.appStoreConnect,
       ...undetermined(
-        `the repository carries ${nameList(p8)}: a key is arranged, but nothing here says a lane ` +
-          "loads it, or that it is the one App Store Connect expects.",
+        `the repository carries ${nameList(p8)}: arranged, but nothing here says a lane loads it.`,
         STORE_API_KEY,
       ),
     };
@@ -431,8 +413,7 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
     return {
       ...META.appStoreConnect,
       ...warn(
-        "only a FASTLANE_SESSION: Apple sessions expire, and the run that finds it expired " +
-          "stops and asks for a verification code.",
+        "only a FASTLANE_SESSION: it expires, and the run that finds it expired asks for a code.",
         STORE_API_KEY,
         "signing",
       ),
@@ -446,8 +427,7 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
     return {
       ...META.appStoreConnect,
       ...warn(
-        "the Appfile names an Apple ID and nothing else: a lane that uploads signs in as that " +
-          "account, and two-factor authentication stops the run to ask for a code.",
+        "the Appfile names an Apple ID and nothing else: two-factor stops the run to ask for a code.",
         STORE_API_KEY,
         "signing",
       ),
@@ -461,8 +441,7 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
     return {
       ...META.appStoreConnect,
       ...undetermined(
-        `no App Store Connect credential in the vault or in the repository, and none seen in the ` +
-          `lanes — but ${blind}.`,
+        `no credential in the vault, the lanes or the repository — but ${blind}.`,
         STORE_API_KEY,
       ),
     };
@@ -471,8 +450,8 @@ export function checkAppStoreConnect(input: AppStoreConnectInput): Check {
   return {
     ...META.appStoreConnect,
     ...warn(
-      "no App Store Connect credential in the vault, in the lanes, or in the repository: " +
-        "a lane that uploads will ask for an Apple ID.",
+      "no credential in the vault, the lanes or the repository: a lane that uploads will ask for " +
+        "an Apple ID.",
       STORE_API_KEY,
       "signing",
     ),
@@ -506,9 +485,9 @@ export function checkMatch(uses: Known<LaneUses[]>, secretKeys: string[]): Check
     return {
       ...META.match,
       ...warn(
-        `${nameList(calls.map((c) => c.lane))} calls match, but MATCH_PASSWORD is not in the vault: ` +
-          "match asks for the passphrase and waits for it.",
-        "Store `MATCH_PASSWORD` from the secrets tab.",
+        `${nameList(calls.map((c) => c.lane))} calls match, and MATCH_PASSWORD is not in the vault: ` +
+          "match asks for the passphrase and waits.",
+        "Store `MATCH_PASSWORD` on the secrets tab.",
         "secrets",
       ),
     };
@@ -519,9 +498,9 @@ export function checkMatch(uses: Known<LaneUses[]>, secretKeys: string[]): Check
     return {
       ...META.match,
       ...warn(
-        `${nameList(writable.map((c) => c.lane))} calls match with \`readonly: false\`: it may try to ` +
-          "create certificates, which needs an Apple account interactively.",
-        "Pass `readonly: true` so it only fetches what already exists.",
+        `${nameList(writable.map((c) => c.lane))} calls match with \`readonly: false\`: creating a ` +
+          "certificate needs an Apple account interactively.",
+        "Pass `readonly: true`.",
       ),
     };
   }
@@ -535,8 +514,8 @@ export function checkMatch(uses: Known<LaneUses[]>, secretKeys: string[]): Check
       ...META.match,
       ...undetermined(
         `MATCH_PASSWORD is stored, but \`readonly\` is not a literal in ` +
-          `${nameList(undecided.map((c) => c.lane))}: Laneyard reads literal arguments only, and will not guess.`,
-        "Pass `readonly: true` in the call itself if that is what you mean.",
+          `${nameList(undecided.map((c) => c.lane))}: Laneyard reads literals only, and will not guess.`,
+        "Pass `readonly: true` in the call itself.",
       ),
     };
   }
@@ -561,10 +540,7 @@ export function checkBlockingActions(
     if (blind) {
       return {
         ...META.blockingActions,
-        ...undetermined(
-          `no lane seen to call an action known to stop and ask — but ${blind}, so a lane that ` +
-            "waits could be out of sight from here.",
-        ),
+        ...undetermined(`no lane seen calling an action known to stop and ask — but ${blind}.`),
       };
     }
     return { ...META.blockingActions, ...ok("no lane calls an action known to stop and ask.") };
@@ -604,9 +580,8 @@ const KEYSTORE_PASSWORD = /(^|_)(KEYSTORE|STORE)_PASSWORD$/;
  * together, and a run gets both without the project knowing anything about it.
  */
 const STORE_KEYSTORE =
-  "Upload the keystore as an android keystore block from the signing tab, with its alias and its " +
-  "two passphrases. Laneyard writes the file for the length of a run and exports the names the " +
-  "block carries, so no lane has to be changed to find it.";
+  "Upload the keystore as an android keystore block on the signing tab, with its alias and its two " +
+  "passphrases. No lane has to change.";
 
 export function checkAndroidKeystore(
   uses: Known<LaneUses[]>,
@@ -618,13 +593,7 @@ export function checkAndroidKeystore(
   // anything will stop and ask for a passphrase, and a block means nothing can —
   // whichever lane, and whether or not gradle is called by name.
   if (blocks.includes("android_keystore")) {
-    return {
-      ...META.androidKeystore,
-      ...ok(
-        "an android keystore block is in the vault: the keystore is written for the length of a " +
-          "run and its passphrases exported with it, so nothing stops to ask for one.",
-      ),
-    };
+    return { ...META.androidKeystore, ...ok("a keystore block is in the vault.") };
   }
 
   if (!uses.ok) {
@@ -650,9 +619,8 @@ export function checkAndroidKeystore(
       ...undetermined(
         "no lane seen handing gradle a keystore" +
           (blind ? ` — and ${blind}` : "") +
-          ". This project builds for Android, so signing is configured somewhere a Fastfile does " +
-          "not show: `build.gradle`, `key.properties`, or a build driven through flutter or " +
-          "react-native.",
+          ". Signing is configured somewhere a Fastfile does not show: `build.gradle`, " +
+          "`key.properties`, or a build driven through flutter or react-native.",
         STORE_KEYSTORE,
       ),
     };
@@ -670,7 +638,7 @@ export function checkAndroidKeystore(
     // invisible from here, and claiming it is absent would be a guess.
     return {
       ...META.androidKeystore,
-      ...ok("no lane passes `storeFile` or `storePassword` to gradle: nothing here needs unlocking."),
+      ...ok("no lane passes `storeFile` or `storePassword` to gradle."),
     };
   }
 
@@ -678,10 +646,7 @@ export function checkAndroidKeystore(
   if (withoutPassphrase.length === 0) {
     return {
       ...META.androidKeystore,
-      ...ok(
-        `${nameList(signing.map((c) => c.lane))} passes \`storePassword\` in the call itself: ` +
-          "gradle has what it needs.",
-      ),
+      ...ok(`${nameList(signing.map((c) => c.lane))} passes \`storePassword\` in the call itself.`),
     };
   }
 
@@ -692,8 +657,8 @@ export function checkAndroidKeystore(
   return {
     ...META.androidKeystore,
     ...warn(
-      `${nameList(withoutPassphrase.map((c) => c.lane))} hands gradle a keystore, but no keystore ` +
-        "passphrase is in the vault: gradle asks for it and waits.",
+      `${nameList(withoutPassphrase.map((c) => c.lane))} hands gradle a keystore, and no passphrase ` +
+        "is in the vault: gradle asks for it and waits.",
       STORE_KEYSTORE,
       "signing",
     ),
@@ -711,15 +676,11 @@ const PLAY_KEY_ARGS = ["json_key", "json_key_data"];
 
 /** Named once: three outcomes of the environment check point at the same thing. */
 const DECLARE_SECRETS =
-  "A variable read by a tool the lane shells out to — `sentry-cli` and its " +
-  "`SENTRY_AUTH_TOKEN`, say — is not something a Fastfile mentions. List those under " +
-  "`required_secrets` in laneyard.yml and they are checked like the rest.";
+  "A variable a shelled-out tool reads — `sentry-cli` and its `SENTRY_AUTH_TOKEN` — is not in the " +
+  "Fastfile. List those under `required_secrets` in laneyard.yml.";
 
 const STORE_PLAY_KEY =
-  "Upload the service account JSON as a Play Store service account block from the signing tab. " +
-  "Laneyard writes the file for the length of a run and exports its path under the name the block " +
-  "carries — `SUPPLY_JSON_KEY`, which supply reads by itself, unless the block says otherwise. " +
-  "A service account does not expire on its own.";
+  "Upload the service account JSON as a Play Store block on the signing tab.";
 
 export function checkPlayStore(
   uses: Known<LaneUses[]>,
@@ -745,11 +706,7 @@ export function checkPlayStore(
     if (blind) {
       return {
         ...META.playStore,
-        ...undetermined(
-          `no lane seen to upload to the Play Store — but ${blind}, so this is not the same ` +
-            "as no lane uploading.",
-          STORE_PLAY_KEY,
-        ),
+        ...undetermined(`no lane seen uploading to the Play Store — but ${blind}.`, STORE_PLAY_KEY),
       };
     }
     return { ...META.playStore, ...ok("no lane uploads to the Play Store.") };
@@ -758,17 +715,11 @@ export function checkPlayStore(
   // Either route answers: the block, or the loose variable a project stored
   // before blocks existed and which fastlane still reads exactly as it did.
   if (blocks.includes("play_service_account")) {
-    return {
-      ...META.playStore,
-      ...ok(
-        "a Play Store service account block is in the vault: the JSON is written for the length of " +
-          "a run and its path exported.",
-      ),
-    };
+    return { ...META.playStore, ...ok("a service account block is in the vault.") };
   }
 
   if (secretKeys.some((key) => PLAY_JSON_KEY.test(key))) {
-    return { ...META.playStore, ...ok("a Play Store service account is in the vault.") };
+    return { ...META.playStore, ...ok("a service account is in the vault.") };
   }
 
   // Named in the call, whether or not the value could be read. `json_key:
@@ -784,7 +735,7 @@ export function checkPlayStore(
     return {
       ...META.playStore,
       ...undetermined(
-        `${nameList(named.map((c) => c.lane))} supplies its own service account: whether the file ` +
+        `${nameList(named.map((c) => c.lane))} supplies its own service account — whether the file ` +
           "it names is on this machine is not something a Fastfile says.",
         STORE_PLAY_KEY,
       ),
@@ -801,7 +752,7 @@ export function checkPlayStore(
         ...META.playStore,
         ...undetermined(
           "the Appfile sets `json_key_data`: the credential travels with the repository, and " +
-            "whether it is still valid is not something a file says.",
+            "nothing says it is still valid.",
           STORE_PLAY_KEY,
         ),
       };
@@ -810,8 +761,8 @@ export function checkPlayStore(
       return {
         ...META.playStore,
         ...undetermined(
-          `the Appfile points \`json_key_file\` at ${jsonKeyFile.value}: whether that file is on ` +
-            "this machine is not something an Appfile says.",
+          `the Appfile points \`json_key_file\` at ${jsonKeyFile.value} — whether that file is on ` +
+            "this machine is another matter.",
           STORE_PLAY_KEY,
         ),
       };
@@ -820,8 +771,7 @@ export function checkPlayStore(
       return {
         ...META.playStore,
         ...undetermined(
-          "the Appfile sets `json_key_file` to something it computes — an environment variable, " +
-            "most likely — which a run only resolves once it is running.",
+          "the Appfile computes `json_key_file`: only a run resolves it.",
           STORE_PLAY_KEY,
         ),
       };
@@ -831,8 +781,8 @@ export function checkPlayStore(
   return {
     ...META.playStore,
     ...warn(
-      `${nameList(calls.map((c) => c.lane))} uploads to the Play Store, but no service account is in ` +
-        "the vault: supply stops and asks which credentials to use.",
+      `${nameList(calls.map((c) => c.lane))} uploads to the Play Store, and no service account is ` +
+        "in the vault: supply stops and asks which credentials to use.",
       STORE_PLAY_KEY,
       "signing",
     ),
@@ -851,11 +801,10 @@ function platformNote(platforms: Known<Platform[]>): Check {
     ...META.platforms,
     ...undetermined(
       platforms.ok
-        ? "no platform detected: no Xcode project and no Gradle build in the repository, " +
-            "and laneyard.yml names none. Only the checks above apply."
+        ? "no Xcode project and no Gradle build in the repository, and laneyard.yml names none. " +
+            "Only the checks above apply."
         : `could not tell: ${platforms.reason}. Only the checks above apply.`,
-      "Add `platforms: [ios]`, `[android]` or both to laneyard.yml in the repository, " +
-        "and the checks for that platform appear here.",
+      "Add `platforms: [ios]`, `[android]` or both to laneyard.yml.",
     ),
   };
 }
@@ -885,8 +834,7 @@ export interface KeystoreSetting {
  * here, answered there, and no file in the repository is touched either way.
  */
 const SET_PROPERTIES_PATH =
-  "Set the properties file path on the keystore block, relative to the app, and Laneyard writes " +
-  "the file there for the length of a run.";
+  "Set the properties file path on the keystore block, relative to the app.";
 
 export interface ReleaseSigningInput {
   /** The android build script, or why it could not be read. */
@@ -956,10 +904,7 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
   }
 
   if (!gradle.value.releaseCanUseDebugKey) {
-    return {
-      ...META.releaseSigning,
-      ...ok("the release build type never takes the debug signing config."),
-    };
+    return { ...META.releaseSigning, ...ok("the release build never takes the debug config.") };
   }
 
   const { conditionalOn } = gradle.value;
@@ -973,28 +918,21 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
     // convention — the Flutter documentation's — and the one thing between a
     // signed artifact and a debug-signed one that nobody read out of the script.
     if (writes !== null && keystore !== null) {
-      const keys = nameList(keystore.propertyNames);
       const supplied =
-        `Laneyard writes ${name}${writes} for the length of a run, from the keystore block, with ` +
-        `the keys ${keys}. Those names come from the block's settings rather than something the ` +
-        "build script states — what a script reads out of that file is not written anywhere this " +
-        "can see — so the setting starts from the Flutter documentation's four, and a build that " +
-        "reads others is corrected there.";
+        `Laneyard writes ${name}${writes} for each run, with the keys ` +
+        `${nameList(keystore.propertyNames)}.`;
 
       if (!conditionalFilePresent) {
         return {
           ...META.releaseSigning,
-          ...ok(
-            `the release build falls back to the debug signing config when ${name} is missing, and ` +
-              `${name} is not in the clone. ${supplied}`,
-          ),
+          ...ok(`${name} is not in the clone, so the debug config would apply. ${supplied}`),
         };
       }
       return {
         ...META.releaseSigning,
         ...ok(
-          `${name} is present${where(conditionalOn)}, so the release key is used — and that file is ` +
-            `the project's own, which Laneyard leaves alone. Were it ever to go missing, ${supplied}`,
+          `${name} is present${where(conditionalOn)}, so the release key is used. Were it to go ` +
+            `missing: ${supplied}`,
         ),
       };
     }
@@ -1008,10 +946,9 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
       return {
         ...META.releaseSigning,
         ...undetermined(
-          `the release build falls back to the debug signing config when ${name} is missing, and ` +
-            `${name} is not in the clone. A keystore block is in the vault, but the build script ` +
-            `names ${name} without saying which directory it resolves against, so Laneyard will ` +
-            "not guess where to write it.",
+          `${name} is not in the clone, so the debug config would apply. A keystore block is in ` +
+            `the vault, but the build script names ${name} without saying which directory it ` +
+            "resolves against.",
           SET_PROPERTIES_PATH,
           "signing",
         ),
@@ -1023,15 +960,13 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
       return {
         ...META.releaseSigning,
         ...warn(
-          `the release build falls back to the debug signing config when ${name} is missing, and ` +
-            `${name} is not in the clone` +
-            (looksIn === "" ? "" : ` — the build looks for it${looksIn}`) +
-            ". The build will not fail: it will produce an artifact signed with the debug key, and " +
-            "the store will reject it.",
-          `${name} is gitignored by the same documentation that recommends it, so it never reaches ` +
-            "a clone. Upload the keystore as an android keystore block from the signing tab: " +
-            `Laneyard then writes ${name} itself for the length of a run, and removes it ` +
-            "afterwards. Nothing in the build script changes.",
+          `${name} is not in the clone` +
+            (looksIn === "" ? "" : `, and the build looks for it${looksIn}`) +
+            ". The build will not fail: it produces an artifact signed with the debug key, and the " +
+            "store rejects it.",
+          `${name} is gitignored, so it never reaches a clone. Upload the keystore as an android ` +
+            `keystore block and Laneyard writes ${name} for each run. Nothing in the build script ` +
+            "changes.",
           "signing",
         ),
       };
@@ -1040,9 +975,8 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
     return {
       ...META.releaseSigning,
       ...undetermined(
-        `${conditionalOn.name} is present${where(conditionalOn)}, so the release key is ` +
-          "used — but the build falls back to the debug signing config if it ever goes missing, " +
-          "and does so without failing.",
+        `${conditionalOn.name} is present${where(conditionalOn)}, so the release key is used — but ` +
+          "the build falls back to the debug config if it goes missing, without failing.",
         keystore === null ? STORE_KEYSTORE : SET_PROPERTIES_PATH,
       ),
     };
@@ -1051,8 +985,8 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
   return {
     ...META.releaseSigning,
     ...undetermined(
-      "the release build type can take the debug signing config; whether it does is decided by " +
-        "something this cannot read.",
+      "the release build can take the debug config; whether it does is decided somewhere this " +
+        "cannot read.",
     ),
   };
 }
@@ -1118,10 +1052,7 @@ export function checkEnvironment(input: EnvironmentInput): Check {
     if (blind) {
       return {
         ...META.environment,
-        ...undetermined(
-          `no lane seen to read an environment variable — but ${blind}.`,
-          DECLARE_SECRETS,
-        ),
+        ...undetermined(`no lane seen reading an environment variable — but ${blind}.`, DECLARE_SECRETS),
       };
     }
     return { ...META.environment, ...ok("no lane reads an environment variable.") };
@@ -1139,10 +1070,8 @@ export function checkEnvironment(input: EnvironmentInput): Check {
       ...META.environment,
       ...warn(
         `${nameList(missing)} ${missing.length === 1 ? "is" : "are"} needed by a lane and in ` +
-          "neither the vault nor this server's environment: a run stops at the first one, or " +
-          "builds with it empty.",
-        "Store them from the secrets tab. A `fastlane/.env` does not travel — it is almost " +
-          "always gitignored, so it never reaches the clone a build runs from.",
+          "neither the vault nor this server's environment: a run stops at the first one.",
+        "Store them on the secrets tab. A `fastlane/.env` is gitignored, so it never reaches the clone.",
         "secrets",
       ),
     };
@@ -1153,17 +1082,15 @@ export function checkEnvironment(input: EnvironmentInput): Check {
     return {
       ...META.environment,
       ...ok(
-        `every variable the lanes need is available — though ${nameList(borrowed)} ` +
-          `${borrowed.length === 1 ? "comes" : "come"} from this server's own environment rather ` +
-          `than the vault, so another machine would not find ${borrowed.length === 1 ? "it" : "them"}.`,
+        `every variable is available — though ${nameList(borrowed)} ` +
+          `${borrowed.length === 1 ? "comes" : "come"} from this server's environment, not the ` +
+          "vault, so another machine would not find " +
+          `${borrowed.length === 1 ? "it" : "them"}.`,
       ),
     };
   }
 
-  return {
-    ...META.environment,
-    ...ok(`every variable the lanes need is in the vault: ${nameList(required)}.`),
-  };
+  return { ...META.environment, ...ok(`every variable is in the vault: ${nameList(required)}.`) };
 }
 
 export interface ReadinessInput {

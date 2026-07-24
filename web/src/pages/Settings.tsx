@@ -107,7 +107,7 @@ export function Settings() {
         </p>
 
         <h2 className="section" style={{ marginTop: 20 }}>
-          what was removed
+          removed
         </h2>
         <ul className="rows consequences">
           <li>
@@ -156,20 +156,12 @@ export function Settings() {
         </ul>
 
         <h2 className="section" style={{ marginTop: 20 }}>
-          what was not touched
+          left alone
         </h2>
         <p className="dim">
-          the <span className="bright">git remote</span> is untouched — the repository is on your
-          host, not laneyard's. the <span className="bright">credential originals</span> are
-          untouched — the <code>.p8</code> and keystore you uploaded are wherever you keep them;
-          laneyard removed only its own encrypted copy.
-          {globalKept > 0 && (
-            <>
-              {" "}
-              {globalSentence(removed)} shared by every project on this machine,{" "}
-              <span className="bright">left alone</span>.
-            </>
-          )}
+          the <span className="bright">git remote</span>, the{" "}
+          <span className="bright">credential originals</span>
+          {globalKept > 0 && <>, and {globalSentence(removed)}</>}.
         </p>
 
         <p className="dim" style={{ marginTop: 20 }}>
@@ -188,31 +180,32 @@ export function Settings() {
       {/* The one sentence somebody about to press the button needs to have
           read, in the page's brightest text and before anything else. */}
       <p className="irreversible">
-        <span className="mark">!</span> this removes everything laneyard holds for{" "}
-        <span className="bright">{name ?? slug}</span> and cannot be undone. its run history is the
-        one thing nothing can rebuild.
+        <span className="mark">!</span> this cannot be undone. its run history is the one thing
+        nothing can rebuild.
       </p>
 
-      <p className="dim">what removal takes:</p>
+      {/* Two lists of nouns, and no sentences after them. Every bullet used to
+          carry a clause explaining itself — why a clone is safe to delete, what
+          "the originals" means — and a screen someone reaches once, about to do
+          something irreversible, is the last place to spend their attention on
+          prose. What removal takes and what it leaves is the whole question,
+          and the counts are the part that is actually specific to them. */}
+      <p className="dim">removed:</p>
 
       <ul className="rows consequences">
         <li>
           <span className="mark dim">○</span>
           <span className="grow dim">
-            its{" "}
             <span className="bright">
-              {runs === null
-                ? "run history"
-                : `${runs} ${runs === 1 ? "run" : "runs"}`}
-            </span>{" "}
-            — the rows, their logs and their artifacts. removing a project destroys its past here,
-            and only here.
+              {runs === null ? "its run history" : `${runs} ${runs === 1 ? "run" : "runs"}`}
+            </span>
+            , with their logs and artifacts
           </span>
         </li>
         <li>
           <span className="mark dim">○</span>
           <span className="grow dim">
-            the <span className="bright">clone on disk</span>, if it was ever cloned.
+            the <span className="bright">clone on disk</span>
           </span>
         </li>
         {/* Counted, not merely mentioned. A signing block cannot be shown by
@@ -221,54 +214,42 @@ export function Settings() {
         <li>
           <span className="mark dim">○</span>
           <span className="grow dim">
-            its{" "}
             <span className="bright">
               {owned === null
-                ? "secrets and signing blocks"
+                ? "its secrets and signing blocks"
                 : `${owned.secrets} ${owned.secrets === 1 ? "secret" : "secrets"} and ${owned.blocks} ${
                     owned.blocks === 1 ? "signing block" : "signing blocks"
                   }`}
             </span>{" "}
-            in the vault — laneyard's own encrypted copies, forgotten. the originals you uploaded
-            are untouched.
+            in the vault
           </span>
         </li>
       </ul>
 
       <p className="dim" style={{ marginTop: 16 }}>
-        what it does not touch:
+        left alone:
       </p>
       <ul className="rows consequences">
         <li>
           <span className="mark dim">○</span>
           <span className="grow dim">
-            the <span className="bright">git remote</span> — the repository is on your host and your
-            disk. laneyard neither reads nor writes it.
+            the <span className="bright">git remote</span>
           </span>
         </li>
         <li>
           <span className="mark dim">○</span>
           <span className="grow dim">
             the <span className="bright">credential originals</span> — the <code>.p8</code>, the
-            keystore. laneyard removes its copy; you would upload them again from wherever you keep
-            them.
+            keystore
           </span>
         </li>
         <li>
           <span className="mark dim">○</span>
           <span className="grow dim">
-            any <span className="bright">global secrets and signing blocks</span> — shared by every
-            project on this machine, not this one's to take.
+            <span className="bright">global secrets and signing blocks</span>
           </span>
         </li>
       </ul>
-
-      {/* The one state change removal is refused for, said before it happens
-          rather than found later as a refusal for a reason nobody asked for. */}
-      <p className="dim" style={{ marginTop: 20 }}>
-        a run in flight holds the workspace: removal is refused until it finishes. a queued run will
-        not start — it ends as failed, saying its project is gone.
-      </p>
 
       {/* Typing the name is the confirmation. A dialogue one can click through
           is not a confirmation, and this is the one action in the product that

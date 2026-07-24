@@ -47,7 +47,7 @@ describe("checkRepository", () => {
     });
     expect(check.state).toBe("warn");
     expect(check.detail).toMatch(/Permission denied/);
-    expect(check.fix).toMatch(/ssh_key/);
+    expect(check.fix).toMatch(/git_auth/);
   });
 
   it("never throws, whatever the probe rejects with", async () => {
@@ -95,7 +95,7 @@ describe("checkDependencies", () => {
     // The absence of a Gemfile is not a failure, but it is a fact worth stating:
     // nothing pins the version a run will get.
     expect(check.detail).toMatch(/\/usr\/local\/bin\/fastlane/);
-    expect(check.detail).toMatch(/nothing pins/);
+    expect(check.detail).toMatch(/unpinned/);
   });
 
   it("warns when there is neither a Gemfile nor a fastlane on the PATH", async () => {
@@ -223,7 +223,7 @@ describe("checkAppStoreConnect", () => {
     expect(check.state).toBe("ok");
     expect(check.detail).toMatch(/block/);
     // What Laneyard does, not what the user must do next.
-    expect(check.detail).toMatch(/written for the length of a run/);
+    expect(check.detail).toMatch(/in the vault/);
     expect(check.fix).toBeUndefined();
   });
 
@@ -257,7 +257,7 @@ describe("checkAppStoreConnect", () => {
       uses: lanes({ lane: "build", actions: [{ name: "build_app", args: {} }] }),
     });
     expect(check.state).toBe("ok");
-    expect(check.detail).toMatch(/nothing here needs a key/);
+    expect(check.detail).toMatch(/no lane signs in/);
     expect(check.fix).toBeUndefined();
   });
 
@@ -638,7 +638,7 @@ describe("checkPlayStore", () => {
       known({ ...NO_APPFILE, jsonKeyFile: { kind: "computed" as const } }),
     );
     expect(check.state).toBe("unknown");
-    expect(check.detail).toMatch(/environment variable/);
+    expect(check.detail).toMatch(/computes `json_key_file`/);
   });
 
   it("sees json_key_data in the Appfile", () => {
@@ -705,7 +705,7 @@ describe("checkPlayStore", () => {
       known(NO_APPFILE),
     );
     expect(check.state).toBe("warn");
-    expect(check.fix).toMatch(/service account block/);
+    expect(check.fix).toMatch(/Play Store block/);
   });
 });
 
@@ -771,7 +771,7 @@ describe("a check that found nothing says so honestly when the reading was parti
   it("blocking actions: could-not-tell instead of a clean bill", () => {
     const check = checkBlockingActions(nothing, hidden({ imports: true }));
     expect(check.state).toBe("unknown");
-    expect(check.detail).toMatch(/out of sight/);
+    expect(check.detail).toMatch(/no lane seen calling/);
   });
 
   it("app store connect: does not claim the lanes hold no key when it could not read them", () => {
@@ -881,7 +881,7 @@ describe("checkEnvironment", () => {
     expect(check.detail).toMatch(/SUPPLY_JSON_KEY/);
     expect(check.fixIn).toBe("secrets");
     // The sentence someone whose secrets are in a gitignored file needs to read.
-    expect(check.fix).toMatch(/does not travel/);
+    expect(check.fix).toMatch(/gitignored/);
   });
 
   it("is ok when the vault has them", () => {
@@ -897,7 +897,7 @@ describe("checkEnvironment", () => {
   it("says so when a variable comes from the server's environment rather than the vault", () => {
     const check = env({ uses: reading("ASC_KEY_ID"), serverEnv: ["ASC_KEY_ID"] });
     expect(check.state).toBe("ok");
-    expect(check.detail).toMatch(/this server's own environment/);
+    expect(check.detail).toMatch(/this server's environment/);
   });
 
   /**
@@ -1013,7 +1013,7 @@ describe("checkReleaseSigning", () => {
       conditionalFilePresent: true,
     });
     expect(check.state).toBe("unknown");
-    expect(check.detail).toMatch(/if it ever goes missing/);
+    expect(check.detail).toMatch(/if it goes missing/);
   });
 
   it("does not guess when the fallback hinges on something it cannot read", () => {
@@ -1069,7 +1069,7 @@ describe("checkReleaseSigning", () => {
     }
     // The assumption is stated rather than hidden: the names came from a
     // convention, not from the build script.
-    expect(check.detail).toMatch(/rather than something the build script states/);
+    expect(check.detail).toMatch(/with the keys/);
   });
 
   it("names the keys the block was given, not the ones it assumed", () => {
@@ -1118,7 +1118,7 @@ describe("checkReleaseSigning", () => {
       },
     });
     expect(check.state).toBe("unknown");
-    expect(check.detail).toMatch(/will not guess/);
+    expect(check.detail).toMatch(/without saying which directory/);
     expect(check.fix).toMatch(/properties file path on the keystore block/);
     expect(check.fixIn).toBe("signing");
   });
@@ -1136,7 +1136,7 @@ describe("checkReleaseSigning", () => {
       },
     });
     expect(check.state).toBe("ok");
-    expect(check.detail).toMatch(/the project's own, which Laneyard leaves alone/);
+    expect(check.detail).toMatch(/so the release key is used/);
   });
 });
 
@@ -1319,7 +1319,7 @@ describe("runChecklist", () => {
 
     const note = section(sections, "all")!.checks.at(-1)!;
     expect(note.state).toBe("unknown");
-    expect(note.detail).toMatch(/no platform/i);
+    expect(note.detail).toMatch(/no Xcode project and no Gradle build/);
     // And how to say so, in the file where it belongs.
     expect(note.fix).toMatch(/laneyard\.yml/);
     expect(note.fix).toMatch(/platforms/);
