@@ -291,6 +291,14 @@ export const api = {
 
   envFile: (slug: string) => fetch(`/api/projects/${slug}/env-file`).then(json<EnvFile>),
 
+  /** Turns the file on, moves it, or — with null — turns it off. */
+  setEnvFile: (slug: string, path: string | null) =>
+    fetch(`/api/projects/${slug}/env-file`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path }),
+    }).then(empty),
+
   users: () => fetch("/api/users").then(json<Account[]>),
 
   // Sets which projects a builder may reach. The server refuses this for an

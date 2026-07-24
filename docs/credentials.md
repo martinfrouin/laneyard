@@ -59,15 +59,13 @@ Some builds read a **file**, not a variable: `flutter_dotenv` bundles `.env` as 
 definition. That file is gitignored, Laneyard builds from a clone, so it is never there — and the
 build does not fail, it produces an app configured with nothing.
 
-Name it in `laneyard.yml` and tick the variables that belong in it:
+Tick **write one** in the Secrets tab, give it a path, and tick the variables that belong in it. The
+tick is on each variable, made where you create it rather than in a list you visit later — a variable
+you forget to tick is an empty value in a shipped app with no error to say so. The block shows the
+file it will write, masked values as dots, so a missing line is visible.
 
-```yaml
-env_file: .env
-```
-
-The tick is on each variable, made where you create it rather than in a list you visit later — a
-variable you forget to tick is an empty value in a shipped app with no error to say so. The Secrets
-tab shows the file it will write, masked values as dots, so a missing line is visible.
+`env_file: .env` in the repository's `laneyard.yml` does the same thing and wins: where one is set
+there, the block reports it rather than offering to fight it.
 
 It is written when the run starts and removed when it ends, however it ended, and its first line is
 `# written by laneyard, do not commit`. **A file already there without that line is never written

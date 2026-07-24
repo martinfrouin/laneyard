@@ -4,6 +4,7 @@ import { MIN_LENGTH as MIN_REDACTABLE } from "../../logs/redact.js";
 import { exportedVarNames } from "../../credentials/kinds.js";
 import { requiredSecrets } from "../required-secrets.js";
 import { dotenvLine } from "../../runner/env-file.js";
+import { envFileProblem, setEnvFileSetting } from "../../config/env-file-setting.js";
 
 /** POSIX environment variable names. Anything else would never reach fastlane. */
 const VALID_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -154,6 +155,52 @@ export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext
       .join("");
 
     return { path, provenance, body };
+  });
+
+  /**
+   * Turns the environment file on, moves it, or turns it off.
+   *
+   * Writes `config.yml`, because that is where configuration lives — and it is
+   * written from here because a setting reachable only by editing YAML by hand
+   * is a feature nobody finds. The accounts screen already writes that file for
+   * the same reason.
+   *
+   * Refused where the repository's own `laneyard.yml` names the path: that file
+   * wins for every setting, and a screen that appeared to change it while the
+   * next run ignored what it wrote would be worse than one that says who decides.
+   */
+  app.put("/api/projects/:slug/env-file", async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
+
+    const { path } = (req.body ?? {}) as { path?: unknown };
+    if (path !== null && typeof path !== "string") {
+      return reply.code(400).send({ error: "`path` is a path, or null to write no file." });
+    }
+
+    const resolved = await ctx.config.resolve(slug, ctx.workspacePath(slug));
+    if (resolved?.provenance.env_file === "repo") {
+      return reply.code(409).send({
+        error: "The repository's laneyard.yml sets env_file. Change it there, and commit it.",
+      });
+    }
+
+    if (typeof path === "string") {
+      const problem = envFileProblem(path.trim());
+      if (problem) return reply.code(400).send({ error: problem });
+    }
+
+    const found = await setEnvFileSetting(
+      ctx.config.configPath(),
+      slug,
+      typeof path === "string" ? path.trim() : null,
+    );
+    if (!found) return reply.code(404).send({ error: "Unknown project" });
+
+    // The file is watched, but on a debounce: reloading here is what makes the
+    // very next request — the one this screen is about to send — truthful.
+    await ctx.config.load();
+    return reply.code(204).send();
   });
 
   /**

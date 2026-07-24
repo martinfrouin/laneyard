@@ -164,6 +164,34 @@ export function Secrets() {
     }
   };
 
+  /** The path being typed, kept apart from the stored one until it is saved. */
+  const [pathDraft, setPathDraft] = useState("");
+  useEffect(() => setPathDraft(envFile?.path ?? ""), [envFile?.path]);
+
+  /**
+   * Turns the file on, moves it, or turns it off.
+   *
+   * Writes `config.yml` on the server. A `laneyard.yml` in the repository wins
+   * over that file for every setting, so where one names the path this is read
+   * only — offering a control whose effect the next run would ignore is worse
+   * than saying who decides.
+   */
+  const fromRepo = envFile?.provenance === "repo";
+
+  const saveEnvFile = async (event: React.FormEvent | null, path?: string | null) => {
+    event?.preventDefault();
+    setFormError(null);
+    const next = path === undefined ? pathDraft : path;
+    if (next === envFile?.path) return;
+    try {
+      await api.setEnvFile(slug, next === null ? null : next.trim());
+      load();
+    } catch (e) {
+      setFormError((e as Error).message);
+      setPathDraft(envFile?.path ?? "");
+    }
+  };
+
   const remove = async (secret: SecretSummary) => {
     setFormError(null);
     try {
@@ -314,24 +342,46 @@ export function Secrets() {
           you that one is missing; this can, which is the whole reason the choice
           is a box on each row and not a picker in here.
 
-          Absent entirely for a project that names no file: an empty state would
-          be a thing to explain to everyone who does not want one. */}
-      {envFile?.path && (
-        <>
-          <h2 className="section" style={{ marginTop: 20 }}>
-            environment file
-          </h2>
-          <p className="dim">
-            <span className="bright">{envFile.path}</span>
-            {envFile.provenance && <> · from {envFile.provenance === "repo" ? "laneyard.yml" : "config.yml"}</>}
-          </p>
-          {envFile.body === "" ? (
-            <p className="dim">nothing ticked — the file would be written empty.</p>
-          ) : (
-            <pre className="env-file-preview">{envFile.body}</pre>
-          )}
-        </>
-      )}
+          Shown even when there is no file, and that is not decoration. The path
+          is a setting in `laneyard.yml`, so there is nothing here to switch on —
+          and a section that appeared only once it was already configured would
+          be a feature nobody could find in order to configure it. The empty
+          state is the one line to write, which is the whole of what is missing. */}
+      <h2 className="section" style={{ marginTop: 20 }}>
+        environment file
+      </h2>
+
+      <form className="secret-form" onSubmit={(e) => void saveEnvFile(e)}>
+        <label className="row-flag">
+          <input
+            type="checkbox"
+            checked={envFile?.path !== null && envFile?.path !== undefined}
+            disabled={fromRepo}
+            onChange={(e) => void (e.target.checked ? saveEnvFile(null, ".env") : saveEnvFile(null, null))}
+          />
+          write one
+        </label>
+        {envFile?.path && (
+          <input
+            type="text"
+            value={pathDraft}
+            onChange={(e) => setPathDraft(e.target.value)}
+            onBlur={() => void saveEnvFile(null, pathDraft)}
+            disabled={fromRepo}
+            spellCheck={false}
+            autoComplete="off"
+            aria-label="path"
+          />
+        )}
+        {fromRepo && <span className="dim">set by laneyard.yml</span>}
+      </form>
+
+      {envFile?.path &&
+        (envFile.body === "" ? (
+          <p className="dim">nothing ticked.</p>
+        ) : (
+          <pre className="env-file-preview">{envFile.body}</pre>
+        ))}
 
       {/* Before the free-form form, because it is the reason most people open
           this page — and because a name that is already on screen is a name

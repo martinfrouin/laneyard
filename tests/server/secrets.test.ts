@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { hashPassword } from "../../src/server/auth.js";
@@ -682,5 +682,75 @@ describe("the environment file", () => {
 
     const res = await app.inject({ method: "GET", url: "/api/projects/sample/env-file", cookies });
     expect(res.json()).toMatchObject({ path: null, provenance: null });
+  });
+});
+
+describe("turning the environment file on", () => {
+  const configOf = async (root: string): Promise<string> => readFile(join(root, "config.yml"), "utf8");
+
+  it("writes the setting into config.yml, and clears it again", async () => {
+    const { app, root } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+
+    const on = await app.inject({
+      method: "PUT",
+      url: "/api/projects/sample/env-file",
+      cookies,
+      payload: { path: ".env" },
+    });
+    expect(on.statusCode).toBe(204);
+    expect(await configOf(root)).toContain("env_file: .env");
+    expect((await app.inject({ method: "GET", url: "/api/projects/sample/env-file", cookies })).json())
+      .toMatchObject({ path: ".env", provenance: "server" });
+
+    const off = await app.inject({
+      method: "PUT",
+      url: "/api/projects/sample/env-file",
+      cookies,
+      payload: { path: null },
+    });
+    expect(off.statusCode).toBe(204);
+    expect(await configOf(root)).not.toContain("env_file");
+    expect((await app.inject({ method: "GET", url: "/api/projects/sample/env-file", cookies })).json())
+      .toMatchObject({ path: null });
+  });
+
+  it("leaves every other line of the file alone", async () => {
+    // It is hand-written and holds password hashes. A screen that reflowed it
+    // would be one nobody dares press twice. Compared line by line rather than
+    // byte for byte: `serializeYaml` drops a leading blank line, here and in
+    // every other place this file is written, and that is not this route's doing.
+    const { app, root } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    const lines = (text: string): string[] => text.split("\n").filter((l) => l.trim() !== "");
+    const before = lines(await configOf(root));
+
+    await app.inject({ method: "PUT", url: "/api/projects/sample/env-file", cookies, payload: { path: ".env" } });
+    expect(lines(await configOf(root))).toEqual([...before, "    env_file: .env"]);
+
+    await app.inject({ method: "PUT", url: "/api/projects/sample/env-file", cookies, payload: { path: null } });
+    expect(lines(await configOf(root))).toEqual(before);
+  });
+
+  it("refuses a path that climbs out of the app", async () => {
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+
+    for (const path of ["../.env", "/etc/passwd", "a/../../b/.env", ""]) {
+      const res = await app.inject({ method: "PUT", url: "/api/projects/sample/env-file", cookies, payload: { path } });
+      expect(res.statusCode).toBe(400);
+    }
+  });
+
+  it("404s a project nobody carries", async () => {
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/projects/nope/env-file",
+      cookies,
+      payload: { path: ".env" },
+    });
+    expect(res.statusCode).toBe(404);
   });
 });

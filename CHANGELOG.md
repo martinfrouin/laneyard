@@ -11,22 +11,20 @@ variable, which is enough for fastlane and no use at all to anything that reads 
 an `.xcconfig` is a file by definition. None of them looks at the environment, and none of them fails
 loudly — they produce an app configured with nothing.
 
-Name the file in `laneyard.yml` and tick the variables that belong in it:
+Tick **write one** in the Secrets tab, give it a path, and tick the variables that belong in it. The
+tick is on each variable, made where you create it rather than in a picker you visit later. Under the
+block, the file itself — rendered as the run will render it, masked values as dots — so a line you
+forgot to tick is visible rather than discovered from a shipped app.
 
-```yaml
-env_file: .env
-```
-
-The tick is on each variable, in the Secrets tab, made where you create it rather than in a picker
-you visit later. Above the list, the file itself — rendered as the run will render it, masked values
-as dots — so a line you forgot to tick is visible rather than discovered from a shipped app.
+`env_file: .env` in the repository's `laneyard.yml` does the same and wins, as it does for every
+setting.
 
 Written when the run starts, removed when it ends however it ended, marked
 `# written by laneyard, do not commit`. **A file already there without that marker is never written
 over and never removed.** Ticking decides membership of the file and nothing else: the variable still
 reaches the run through the environment like every other one.
 
-Left out of `laneyard.yml`, nothing is written and nothing changes.
+Left off, nothing is written and nothing changes.
 
 ### A secret belongs to one project
 
