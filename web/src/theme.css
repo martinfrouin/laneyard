@@ -316,6 +316,21 @@ code { color: var(--text-bright); }
   cursor: pointer;
 }
 
+/* The environment file as it will be written. A block rather than a list,
+   because what is being checked is the file — a missing line is visible in
+   something that looks like a file, and invisible in a set of tick boxes. It
+   scrolls sideways rather than wrapping: a value cut across two lines would
+   read as two variables. */
+.env-file-preview {
+  margin: 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  white-space: pre;
+  font: inherit;
+  color: var(--text-dim);
+  border-left: 2px solid var(--border);
+}
+
 /* A row a signing block has overtaken, or one that never did anything. The
    same edge the readiness list draws beside a check that needs reading, in the
    same colour and at the same width: it is the one row on this page asking for

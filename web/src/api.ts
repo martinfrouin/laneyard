@@ -123,7 +123,22 @@ export interface ProjectRemoval {
 export interface SecretSummary {
   key: string;
   masked: boolean;
+  /** Whether this variable is also written into the file the build reads. */
+  inEnvFile: boolean;
   value?: string;
+}
+
+/**
+ * The environment file a project will write, before it writes it.
+ *
+ * `path` is null when the project names none, which is most projects. `body` is
+ * the file as the run will render it, with every masked value already replaced
+ * by dots on the server — no browser ever holds one.
+ */
+export interface EnvFile {
+  path: string | null;
+  provenance: "repo" | "server" | "default" | null;
+  body: string;
 }
 
 /**
@@ -265,6 +280,16 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ masked }),
     }).then(empty),
+
+  /** The other flag on the same row, sent alone so it cannot disturb `masked`. */
+  setSecretInEnvFile: (slug: string, key: string, inEnvFile: boolean) =>
+    fetch(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ inEnvFile }),
+    }).then(empty),
+
+  envFile: (slug: string) => fetch(`/api/projects/${slug}/env-file`).then(json<EnvFile>),
 
   users: () => fetch("/api/users").then(json<Account[]>),
 

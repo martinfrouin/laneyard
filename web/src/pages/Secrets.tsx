@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
-import type { CredentialSummary, SecretSummary } from "../api";
+import type { CredentialSummary, EnvFile, SecretSummary } from "../api";
 import { NeededByLanes } from "../components/NeededByLanes";
 
 /**
@@ -33,6 +33,7 @@ export function Secrets() {
   const { slug = "" } = useParams();
   const [secrets, setSecrets] = useState<SecretSummary[]>([]);
   const [credentials, setCredentials] = useState<CredentialSummary[]>([]);
+  const [envFile, setEnvFile] = useState<EnvFile | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   /** Bumped whenever the vault changed, so the needed list can shrink with it. */
@@ -54,6 +55,13 @@ export function Secrets() {
       })
       .catch((e: Error) => setListError(e.message))
       .finally(() => setLoading(false));
+
+    // The file this project writes, if it writes one. Quiet on failure for the
+    // same reason as the blocks below: it decorates this page, it is not it.
+    api
+      .envFile(slug)
+      .then(setEnvFile)
+      .catch(() => setEnvFile(null));
 
     // Read, never shown: the blocks live on their own tab now, and the only
     // thing this page has to say about them is which stored rows they overtook.
@@ -131,6 +139,25 @@ export function Secrets() {
       // A value that has just become secret must not stay on screen because it
       // happened to be revealed a moment ago.
       hide(secret.key);
+      load();
+    } catch (e) {
+      setFormError((e as Error).message);
+    }
+  };
+
+  /**
+   * Whether this variable is also written into the file the build reads.
+   *
+   * Flipped here, on the row, rather than picked from a list inside the file's
+   * own panel. The choice is made while whoever made it still knows what the
+   * variable is for — a picker visited later is where one gets forgotten, and a
+   * variable missing from the file is an empty value in a shipped app, with no
+   * error anywhere to say so.
+   */
+  const toggleInEnvFile = async (secret: SecretSummary) => {
+    setFormError(null);
+    try {
+      await api.setSecretInEnvFile(slug, secret.key, !secret.inEnvFile);
       load();
     } catch (e) {
       setFormError((e as Error).message);
@@ -225,6 +252,15 @@ export function Secrets() {
           secret
         </label>
 
+        {/* Only where there is a file to be in. Offering the choice to a project
+            that writes none would be a control with nothing behind it. */}
+        {envFile?.path && (
+          <label className="row-flag" title={`written into ${envFile.path} for the length of a run`}>
+            <input type="checkbox" checked={s.inEnvFile} onChange={() => void toggleInEnvFile(s)} />
+            in file
+          </label>
+        )}
+
         {/* Only on a masked row: an unmasked value is already there, and a
             button that hid it again would be a control whose whole effect is to
             show you less. */}
@@ -273,6 +309,29 @@ export function Secrets() {
       </h2>
       {!loading && !listError && kept.length === 0 && <p className="dim">no secrets yet.</p>}
       <ul className="rows">{kept.map(row)}</ul>
+
+      {/* The file, shown rather than described. A row of tick boxes cannot tell
+          you that one is missing; this can, which is the whole reason the choice
+          is a box on each row and not a picker in here.
+
+          Absent entirely for a project that names no file: an empty state would
+          be a thing to explain to everyone who does not want one. */}
+      {envFile?.path && (
+        <>
+          <h2 className="section" style={{ marginTop: 20 }}>
+            environment file
+          </h2>
+          <p className="dim">
+            <span className="bright">{envFile.path}</span>
+            {envFile.provenance && <> · from {envFile.provenance === "repo" ? "laneyard.yml" : "config.yml"}</>}
+          </p>
+          {envFile.body === "" ? (
+            <p className="dim">nothing ticked — the file would be written empty.</p>
+          ) : (
+            <pre className="env-file-preview">{envFile.body}</pre>
+          )}
+        </>
+      )}
 
       {/* Before the free-form form, because it is the reason most people open
           this page — and because a name that is already on screen is a name
