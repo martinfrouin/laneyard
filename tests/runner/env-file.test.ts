@@ -1,10 +1,17 @@
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { removeEnvFile, renderDotenv, sweepEnvFile, writeEnvFile } from "../../src/runner/env-file.js";
 import { LANEYARD_MARKER } from "../../src/runner/gradle-properties.js";
-import { tmpDir } from "../fixtures/repos.js";
+import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
+import { openDatabase } from "../../src/db/open.js";
+import { RunStore } from "../../src/db/runs.js";
+import { SecretStore } from "../../src/db/secrets.js";
+import { CredentialStore } from "../../src/db/credentials.js";
+import { LogStore } from "../../src/logs/store.js";
+import { executeRun } from "../../src/runner/orchestrate.js";
+import { Vault } from "../../src/secrets/vault.js";
 
 /**
  * A small dotenv reader, written here on purpose.
@@ -165,5 +172,113 @@ describe("sweepEnvFile", () => {
 
     await expect(sweepEnvFile(join(root, "never-cloned"), ".env")).resolves.toBeUndefined();
     await expect(sweepEnvFile(root, undefined)).resolves.toBeUndefined();
+  });
+});
+
+describe("a run that needs the file", () => {
+  const FAKE_DIR = join(process.cwd(), "tests", "fixtures", "fake-fastlane");
+  const SETTINGS = {
+    fastlane_dir: "fastlane",
+    runtime: "system" as const,
+    timeout_minutes: 5,
+    interactive_default: false,
+    artifact_globs: [],
+    required_secrets: [],
+  };
+
+  /**
+   * A whole run, with the fake fastlane printing the file the build would read
+   * and echoing one variable back out of its environment.
+   */
+  async function run(
+    over: { noFile?: boolean; scenario?: string; theirs?: string } = {},
+  ): Promise<{ log: string; workspace: string; status: string }> {
+    const origin = await makeOriginRepo({
+      "fastlane/Fastfile": "lane :beta do\nend\n",
+      ".gitignore": "build/\n",
+      // A `.env` that arrives with the clone stands in for one the user put
+      // there: what matters to `writeEnvFile` is that it carries no marker.
+      ...(over.theirs === undefined ? {} : { ".env": over.theirs }),
+    });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    const db = openDatabase(":memory:");
+    const vault = await Vault.open(root, new SecretStore(db), new CredentialStore(db));
+    // Unmasked, so the log can show it: what is being asserted is where the
+    // value went, and redaction is asserted where it belongs.
+    await vault.set("p", "API_URL", "https://api.example.com", false, true);
+    await vault.set("p", "MATCH_PASSWORD", "not-in-the-file", false, false);
+
+    const workspace = join(root, "workspaces", "p");
+
+    const result = await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: workspace,
+      artifactsDir: join(root, "artifacts", String(runId)),
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => ({ ...SETTINGS, ...(over.noFile ? {} : { env_file: ".env" }) }),
+      env: {
+        PATH: `${FAKE_DIR}:${process.env["PATH"]}`,
+        FAKE_FASTLANE_CAT: join(workspace, ".env"),
+        FAKE_FASTLANE_ECHO: "API_URL",
+        ...(over.scenario ? { FAKE_FASTLANE_SCENARIO: over.scenario } : {}),
+      },
+      secrets: vault.resolve("p"),
+      envFileValues: vault.envFileValues("p"),
+      maskedValues: vault.maskedValues("p"),
+      onChunk: () => {},
+    });
+
+    const log = await logs.read(runId);
+    await rm(origin, { recursive: true, force: true });
+    return { log, workspace, status: result.status };
+  }
+
+  it("puts the file in the clone for the build, and takes it away again", async () => {
+    const { log, workspace } = await run();
+
+    // Printed from inside the run: the marker and the line the build read.
+    expect(log).toContain(LANEYARD_MARKER);
+    expect(log).toContain("API_URL=https://api.example.com");
+    // The variable that was not ticked is not in the file.
+    expect(log).not.toContain("MATCH_PASSWORD");
+
+    expect(existsSync(join(workspace, ".env"))).toBe(false);
+  });
+
+  it("also hands a ticked variable to the run as an environment variable", async () => {
+    // The tick decides membership of the file and nothing else. Without this,
+    // a project that reads the variable through ENV would break the day it
+    // started writing the file too.
+    const { log } = await run();
+    expect(log).toContain("[09:41:06]: API_URL=https://api.example.com");
+  });
+
+  it("takes the file away after a run that failed", async () => {
+    const { workspace, status } = await run({ scenario: "failure" });
+
+    expect(status).toBe("failed");
+    expect(existsSync(join(workspace, ".env"))).toBe(false);
+  });
+
+  it("writes nothing into a project that names no file", async () => {
+    const { log, workspace } = await run({ noFile: true });
+
+    expect(existsSync(join(workspace, ".env"))).toBe(false);
+    expect(log).toContain("absent");
+  });
+
+  it("leaves a file the user put in the clone exactly where it is", async () => {
+    const theirs = "API_URL=http://localhost:3000\n";
+    const { log, workspace } = await run({ theirs });
+
+    expect(log).toContain("API_URL=http://localhost:3000");
+    expect(await readFile(join(workspace, ".env"), "utf8")).toBe(theirs);
   });
 });

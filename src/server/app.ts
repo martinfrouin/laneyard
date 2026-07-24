@@ -172,6 +172,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       },
       env: process.env,
       secrets: ctx.vault.resolve(slug),
+      // A subset of the line above, not a second source. The tick decides which
+      // variables are also written into the file the build reads from disk;
+      // every one of them still reaches the run through the environment.
+      envFileValues: ctx.vault.envFileValues(slug),
       credentialEnv: credentials.env,
       androidKeystore: credentials.keystore,
       cleanup: credentials.cleanup,

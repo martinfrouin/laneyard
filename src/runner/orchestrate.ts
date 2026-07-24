@@ -16,6 +16,7 @@ import {
   writeGradleProperties,
 } from "./gradle-properties.js";
 import type { KeystoreBlock } from "./gradle-properties.js";
+import { removeEnvFile, sweepEnvFile, writeEnvFile } from "./env-file.js";
 import { LiveStepTracker } from "./live-steps.js";
 import { startPty } from "./pty.js";
 import { readReport } from "./report.js";
@@ -53,6 +54,16 @@ export interface ExecuteRunOptions {
    * prepared it. See `gradle-properties.ts` for why that is worth doing at all.
    */
   androidKeystore?: KeystoreBlock;
+  /**
+   * The variables that also go into the environment file, in the clear.
+   *
+   * A subset of `secrets`, never a replacement for it: the tick decides
+   * membership of the file, and a ticked variable still reaches the run through
+   * the environment like every other one. Here for the same reason
+   * `androidKeystore` is — the file goes into a clone that does not exist until
+   * this function has prepared it.
+   */
+  envFileValues?: Record<string, string>;
   /**
    * Removes whatever was written for this run, called on every way out.
    * Its owner is the caller, but its timing is not: only this function knows
@@ -93,12 +104,13 @@ export interface ExecuteRunResult {
  * inside the run and has to be visible to a `finally` wrapped around all of it.
  */
 export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
-  const wrote: { properties: string | null } = { properties: null };
+  const wrote: Written = { properties: null, envFile: null };
   try {
     return await execute(opts, wrote);
   } finally {
     // Guarded by the marker, so a file the user replaced mid-run survives.
     await removeGradleProperties(wrote.properties).catch(() => {});
+    await removeEnvFile(wrote.envFile).catch(() => {});
     // Deliberately swallowed: by now the log writer is closed and the run's
     // verdict is recorded, so there is nowhere left to report this without
     // rewriting a finished run's outcome as a failure it did not have. A
@@ -107,10 +119,19 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunRes
   }
 }
 
-async function execute(
-  opts: ExecuteRunOptions,
-  wrote: { properties: string | null },
-): Promise<ExecuteRunResult> {
+/**
+ * The files this run wrote into the clone, carried out to the `finally`.
+ *
+ * Both are written somewhere the run does not own — the clone is kept between
+ * runs — and both are decided deep inside `execute`, so a holder is how their
+ * paths reach the cleanup wrapped around all of it.
+ */
+interface Written {
+  properties: string | null;
+  envFile: string | null;
+}
+
+async function execute(opts: ExecuteRunOptions, wrote: Written): Promise<ExecuteRunResult> {
   const { runId, runs, logs } = opts;
   const writer = await logs.open(runId);
   const tracker = new LiveStepTracker();
@@ -215,6 +236,7 @@ async function execute(
   }
 
   await sweepGradleProperties(appRoot, opts.androidKeystore).catch(() => {});
+  await sweepEnvFile(appRoot, settings.env_file).catch(() => {});
   try {
     wrote.properties = await writeGradleProperties(appRoot, opts.androidKeystore);
   } catch (cause) {
@@ -222,6 +244,16 @@ async function execute(
     // artifact this whole module exists to prevent: a release build that
     // succeeds, signed with the debug key, rejected by the store days later.
     return fail(`Could not write the signing properties file: ${(cause as Error).message}`);
+  }
+
+  try {
+    wrote.envFile = await writeEnvFile(appRoot, settings.env_file, opts.envFileValues ?? {});
+  } catch (cause) {
+    // Failing for the same reason, and it is the same shape of failure. A build
+    // that carries on without the file it was configured to read does not stop:
+    // it produces an app pointed at nothing, which is discovered by a person
+    // opening it rather than by this run.
+    return fail(`Could not write the environment file: ${(cause as Error).message}`);
   }
 
   // Cancelled during preparation: fastlane never gets to start.
