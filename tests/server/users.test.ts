@@ -282,7 +282,7 @@ server:
   it("carries the role the file gives today, not the one it gave at login", async () => {
     const { app, login, rewrite } = await harness();
     const cookies = { laneyard_session: (await login("martin", ADMIN_PASSWORD))! };
-    expect((await app.inject({ method: "GET", url: "/api/secrets", cookies })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/api/users", cookies })).statusCode).toBe(200);
 
     await rewrite(`
 server:
@@ -295,7 +295,7 @@ server:
       name: "martin",
       role: "builder",
     });
-    expect((await app.inject({ method: "GET", url: "/api/secrets", cookies })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: "/api/users", cookies })).statusCode).toBe(403);
   });
 });
 

@@ -279,9 +279,8 @@ export async function registerReadinessRoutes(app: FastifyInstance, ctx: AppCont
       },
       // Names only: the vault never hands a value to anything but a run.
       secretKeys: ctx.vault.list(slug).map((s) => s.key),
-      // Which blocks apply, resolved the way a run resolves them — a project's
-      // own shadowing a global one — so the checklist and the run cannot
-      // disagree about whether a credential exists.
+      // Which blocks this project holds, read the way a run reads them, so the
+      // checklist and the run cannot disagree about whether a credential exists.
       blocks: ctx.vault.listCredentials(slug).map((c) => c.kind),
       // And the names those blocks will export, which the environment check
       // counts as supplied — Laneyard writes the file and sets the variable

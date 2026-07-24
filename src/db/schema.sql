@@ -50,11 +50,11 @@ CREATE TABLE IF NOT EXISTS introspection_cache (
   PRIMARY KEY (project_slug, kind)
 );
 
--- A global secret is stored with an empty project_slug rather than NULL:
--- SQLite considers two NULLs distinct in a UNIQUE index, so NULL would let the
--- same global name be inserted twice.
+-- Every secret belongs to one project. There was a second scope once — the
+-- empty slug, read by every project — and `migrate-global-scope.ts` is what
+-- became of the rows written under it.
 CREATE TABLE IF NOT EXISTS secret (
-  project_slug TEXT    NOT NULL DEFAULT '',
+  project_slug TEXT    NOT NULL,
   key          TEXT    NOT NULL,
   value_enc    TEXT    NOT NULL,
   masked       INTEGER NOT NULL DEFAULT 1,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS secret (
 -- `var_names` is NOT encrypted. It holds variable names, never values, and the
 -- interface has to display them.
 CREATE TABLE IF NOT EXISTS credential (
-  project_slug TEXT NOT NULL DEFAULT '',
+  project_slug TEXT NOT NULL,
   kind         TEXT NOT NULL,
   file_name    TEXT NOT NULL,
   file_enc     TEXT NOT NULL,

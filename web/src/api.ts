@@ -91,9 +91,8 @@ export interface RunDetail {
  * What removing a project removed, and what it left alone.
  *
  * `removed` is everything Laneyard held for the project — the one confirmed act
- * clears it all. `untouched` counts the global vault rows it is not allowed to
- * take; the git remote and the credential originals are untouched too, said in
- * prose rather than as a number because there is nothing here to count.
+ * clears it all. The git remote and the credential originals are untouched, said
+ * in prose rather than as a number because there is nothing here to count.
  */
 export interface ProjectRemoval {
   slug: string;
@@ -105,15 +104,10 @@ export interface ProjectRemoval {
     artifacts: number;
     /** Whether the clone was on disk and is now gone. */
     workspace: boolean;
-    /** Slug-scoped secrets forgotten from the vault. */
+    /** Secrets forgotten from the vault. */
     secrets: number;
-    /** Slug-scoped signing blocks forgotten from the vault. */
+    /** Signing blocks forgotten from the vault. */
     signingBlocks: number;
-  };
-  /** Shared by every project, so never this removal's to take. */
-  untouched: {
-    globalSecrets: number;
-    globalSigningBlocks: number;
   };
 }
 
@@ -129,7 +123,6 @@ export interface ProjectRemoval {
 export interface SecretSummary {
   key: string;
   masked: boolean;
-  scope: "project" | "global";
   value?: string;
 }
 
@@ -141,7 +134,6 @@ export interface SecretSummary {
 export interface CredentialSummary {
   kind: CredentialKind;
   fileName: string;
-  scope: "project" | "global";
   varNames: Record<string, string>;
   updatedAt: string;
 }
@@ -359,9 +351,6 @@ export const api = {
       body: JSON.stringify(block),
     }).then(empty),
 
-  // Removes this project's own block and only that one, so a global block it
-  // was shadowing comes back into view — undoing an override, not deleting
-  // everyone's key from inside one project.
   deleteCredential: (slug: string, kind: CredentialKind) =>
     fetch(`/api/projects/${slug}/credentials/${kind}`, { method: "DELETE" }).then(empty),
 

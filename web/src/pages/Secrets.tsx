@@ -220,12 +220,10 @@ export function Secrets() {
         {/* A checkbox, not a verb: this is a property of the value, and it is
             the only control on the row that changes what is on screen beside
             it. One word, and the same word the form uses. */}
-        {s.scope !== "global" && (
-          <label className="row-flag" title="kept out of the build logs, and never shown here">
-            <input type="checkbox" checked={s.masked} onChange={() => void toggleMasked(s)} />
-            secret
-          </label>
-        )}
+        <label className="row-flag" title="kept out of the build logs, and never shown here">
+          <input type="checkbox" checked={s.masked} onChange={() => void toggleMasked(s)} />
+          secret
+        </label>
 
         {/* Only on a masked row: an unmasked value is already there, and a
             button that hid it again would be a control whose whole effect is to
@@ -241,20 +239,12 @@ export function Secrets() {
             </button>
           ))}
 
-        {s.scope === "global" ? (
-          // A global secret belongs to every project. Editing it from inside
-          // one would hide that, so from here it is only ever reported.
-          <span className="dim" title="set for every project — laneyard secret set">
-            global
-          </span>
-        ) : (
-          // The word rather than the mark on a superseded row: ✗ is the same
-          // three pixels everywhere on this page, and the one row worth removing
-          // should not need the same look as the rows worth keeping.
-          <button onClick={() => void remove(s)} title={note ? "remove this row" : "remove"}>
-            {note ? "remove" : "✗"}
-          </button>
-        )}
+        {/* The word rather than the mark on a superseded row: ✗ is the same
+            three pixels everywhere on this page, and the one row worth removing
+            should not need the same look as the rows worth keeping. */}
+        <button onClick={() => void remove(s)} title={note ? "remove this row" : "remove"}>
+          {note ? "remove" : "✗"}
+        </button>
       </li>
     );
   };

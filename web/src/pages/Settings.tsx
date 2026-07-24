@@ -55,18 +55,11 @@ export function Settings() {
       .catch(() => setName(slug));
 
     // Counted here so the warning below carries numbers rather than "some".
-    // Only the rows this project owns: `scope` tells a project secret from a
-    // global one it merely reads, and a global one is not this removal's to
-    // touch. Failing quietly is right — the counts sharpen the sentences, they
-    // are not the sentences, and a page about removal must not refuse to load
-    // over them.
+    // Everything this project holds is its own, so the listings are the counts.
+    // Failing quietly is right — the counts sharpen the sentences, they are not
+    // the sentences, and a page about removal must not refuse to load over them.
     void Promise.all([api.secrets(slug), api.listCredentials(slug)])
-      .then(([secrets, credentials]) =>
-        setOwned({
-          secrets: secrets.filter((s) => s.scope === "project").length,
-          blocks: credentials.filter((c) => c.scope === "project").length,
-        }),
-      )
+      .then(([secrets, credentials]) => setOwned({ secrets: secrets.length, blocks: credentials.length }))
       .catch(() => setOwned(null));
 
     void api
@@ -96,7 +89,6 @@ export function Settings() {
   if (removed) {
     const r = removed.removed;
     const vaultGone = r.secrets + r.signingBlocks;
-    const globalKept = removed.untouched.globalSecrets + removed.untouched.globalSigningBlocks;
     return (
       <>
         <h2 className="section">removed</h2>
@@ -160,8 +152,7 @@ export function Settings() {
         </h2>
         <p className="dim">
           the <span className="bright">git remote</span>, the{" "}
-          <span className="bright">credential originals</span>
-          {globalKept > 0 && <>, and {globalSentence(removed)}</>}.
+          <span className="bright">credential originals</span>.
         </p>
 
         <p className="dim" style={{ marginTop: 20 }}>
@@ -288,17 +279,6 @@ function vaultSentence(removed: ProjectRemoval["removed"]): string {
     plural(removed.secrets, "secret"),
     plural(removed.signingBlocks, "signing block"),
   ]);
-}
-
-/** The same, for the global rows this removal was not allowed to touch. */
-function globalSentence(removed: ProjectRemoval): string {
-  const parts = join([
-    plural(removed.untouched.globalSecrets, "global secret"),
-    plural(removed.untouched.globalSigningBlocks, "global signing block"),
-  ]);
-  const one =
-    removed.untouched.globalSecrets + removed.untouched.globalSigningBlocks === 1;
-  return `${parts} ${one ? "is" : "are"}`;
 }
 
 const plural = (n: number, noun: string): string | null =>

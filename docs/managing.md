@@ -24,8 +24,7 @@ The Settings tab removes everything Laneyard holds for the project, confirmed by
 history and logs, the clone and artifacts on disk, and its own secrets and signing blocks in the
 vault. The run history is the one thing nothing can rebuild — hence the typed confirmation.
 
-**Not touched:** the git remote, the credential originals you uploaded, and global secrets and
-signing blocks. The result names how many it left.
+**Not touched:** the git remote, and the credential originals you uploaded.
 
 Removal is refused while a run of that project is in flight. A queued run ends as failed, saying its
 project is gone.

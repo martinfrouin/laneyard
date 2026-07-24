@@ -41,8 +41,9 @@ service, never a gate.
 
 ## Secrets
 
-The variables your lanes read go into an encrypted vault, from a project's Secrets tab. Global
-secrets apply everywhere; a project's own win over them.
+The variables your lanes read go into an encrypted vault, from a project's Secrets tab. Everything
+there belongs to that project alone — nothing is shared with another, and nothing reaches a run that
+project did not store.
 
 A secret is write-only: the server never sends a masked value back, so no browser holds one. What you
 did not mark secret — `APP_VERSION`, an issuer id — is shown on request, one key at a time. Masking
@@ -65,7 +66,8 @@ that make it usable, taken whole or refused.
 
 They live in the **signing** part of the Secrets tab, encrypted at rest, and never come back out to a
 browser: a stored block shows its file name and nothing more, so replacing one means giving it again
-in full. A block on a project beats a global one of the same kind; both are admin-only.
+in full. A block belongs to one project, and is admin-only. Five apps under one developer account
+each hold their own copy of the key: rotating it means replacing five.
 
 **A block becomes real files for the length of a run**, written to
 `~/.laneyard/runs/<run id>/secrets/` (mode `600` in a `700` directory) and removed when the run ends,

@@ -154,6 +154,20 @@ describe("migrateGlobalScope", () => {
     expect(secrets(d)).toHaveLength(2);
   });
 
+  it("ignores an empty slug, which is the sentinel it is deleting", () => {
+    // A configuration cannot produce one. If it did, copying into it would land
+    // on the row about to be deleted and take the data with it.
+    const d = db();
+    putSecret(d, "", "TOKEN", "global-cipher");
+
+    const report = migrateGlobalScope(d, ["", "alpha"]);
+
+    expect(secrets(d)).toEqual([
+      { project_slug: "alpha", key: "TOKEN", value_enc: "global-cipher", masked: 1 },
+    ]);
+    expect(report.copied).toEqual([{ what: "secret", name: "TOKEN", slugs: ["alpha"] }]);
+  });
+
   it("does nothing at all to a database that never held a global row", () => {
     const d = db();
     putSecret(d, "alpha", "TOKEN", "own-cipher");

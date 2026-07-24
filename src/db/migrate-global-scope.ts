@@ -39,8 +39,14 @@ const TABLES = [
  * deleted rather than left: every query names a slug now, so the empty one is
  * unreachable — not shared, just invisible and forever unread.
  */
-export function migrateGlobalScope(db: Db, slugs: string[]): GlobalScopeMigration {
+export function migrateGlobalScope(db: Db, allSlugs: string[]): GlobalScopeMigration {
   const report: GlobalScopeMigration = { copied: [], dropped: [] };
+
+  // The empty slug is the sentinel this function is deleting. A configuration
+  // cannot produce one — `slugSchema` refuses it — but if one ever arrived, the
+  // copy would land on the row about to be deleted and the data would go with
+  // it, silently. That is the one input worth refusing by hand.
+  const slugs = allSlugs.filter((slug) => slug !== "");
 
   const run = db.transaction(() => {
     for (const { table, column, what } of TABLES) {

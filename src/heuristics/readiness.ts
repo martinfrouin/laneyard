@@ -1124,9 +1124,8 @@ export interface ReadinessInput {
   /** Whether the properties file signing is conditional on is in the clone. */
   signingFilePresent: boolean;
   /**
-   * The signing blocks that apply to this project, by kind — a project's own
-   * shadowing a global one, exactly as a run resolves them. Names of kinds, and
-   * nothing else: no file, no field, no variable name.
+   * The signing blocks this project holds, by kind. Names of kinds, and nothing
+   * else: no file, no field, no variable name.
    */
   blocks?: CredentialKind[];
   /**

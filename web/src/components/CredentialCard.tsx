@@ -145,7 +145,6 @@ export function CredentialCard({
           <span className="bright">{spec.what}</span>{" "}
           <span className="dim">
             {stored ? stored.fileName : "nothing stored"}
-            {stored?.scope === "global" && " — set for every project"}
           </span>
         </span>
         {/* A word rather than a wedge: everything else on this screen says what
@@ -272,20 +271,11 @@ export function CredentialCard({
             <button type="button" onClick={() => setReplacing(true)} title="upload it again">
               replace
             </button>
-            {stored.scope === "global" ? (
-              // A global block belongs to every project. Replacing it from here
-              // stores this project's own, which is an override and reads as one;
-              // deleting it from here would be a deletion for everybody.
-              <span className="dim" title="set for every project, so not removed from inside one">
-                global
-              </span>
-            ) : (
-              // The word, not the mark: ✗ belongs at the end of a row, and this
-              // sits inside an opened block beside another verb.
-              <button onClick={() => void remove()} title="remove this block">
-                remove
-              </button>
-            )}
+            {/* The word, not the mark: ✗ belongs at the end of a row, and this
+                sits inside an opened block beside another verb. */}
+            <button onClick={() => void remove()} title="remove this block">
+              remove
+            </button>
           </div>
         )}
       </div>
