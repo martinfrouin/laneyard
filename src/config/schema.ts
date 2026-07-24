@@ -1,4 +1,18 @@
+import { isAbsolute, normalize } from "node:path";
 import { z } from "zod";
+
+/**
+ * Whether a relative path leaves the directory it is relative to.
+ *
+ * `normalize` collapses `a/../../b` to `../b`, so one check after it catches
+ * both the obvious `../.env` and the roundabout spelling. An absolute path is
+ * refused outright: it does not mean "inside the app" under any reading.
+ */
+function escapesApp(p: string): boolean {
+  if (isAbsolute(p)) return true;
+  const clean = normalize(p);
+  return clean === ".." || clean.startsWith(`..${"/"}`) || clean.startsWith("..\\");
+}
 
 /** A slug is used as a folder name and a URL segment. */
 const slugSchema = z
@@ -19,6 +33,21 @@ export const projectSettingsSchema = z.object({
   interactive_default: z.boolean().default(false),
   artifact_globs: z.array(z.string()).default([]),
   required_secrets: z.array(z.string()).default([]),
+  // Where to write the file the build reads from disk — a gitignored `.env`, a
+  // `config.json` for `--dart-define-from-file`. No default: absent means the
+  // project wants no such file, which is almost every project, and an empty
+  // string would be a path to interpret rather than an absence to respect.
+  //
+  // Relative to the app directory, like `fastlane_dir`. A path that climbs out
+  // of it is refused here rather than at write time: the file holds the values
+  // the vault exists to protect, and a configuration must never be able to drop
+  // one anywhere on the server. Refusing at load also means the last valid
+  // configuration stays live, which is what every other bad value gets.
+  env_file: z
+    .string()
+    .min(1, "env_file: a path, or leave it out")
+    .refine((p) => !escapesApp(p), "env_file: a path inside the app, not one that climbs out of it")
+    .optional(),
   // What this project builds for. No default: absent means "nobody said", and
   // the readiness checklist falls back to looking at the repository. Setting it
   // is how a repository that happens to carry an Xcode project it never builds

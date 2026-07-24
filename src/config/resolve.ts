@@ -25,13 +25,13 @@ function underApp(appRoot: string, p: string): string {
  * duplicated keeps its file unchanged. But everything downstream resolves paths
  * as repo-root-relative (`join(workspacePath, …)`, globs with `cwd:
  * workspacePath`). So the app-relativity is collapsed here, once, at the
- * boundary: the two path fields are prefixed with the app directory before the
+ * boundary: the path fields are prefixed with the app directory before the
  * merge ever sees them, and nothing past this point learns a new rule.
  *
- * Only the path fields move. `platforms`, `runtime`, `timeout_minutes`,
- * `interactive_default`, `required_secrets` and `retention` are not paths and
- * pass through untouched. A root-level file is never handed here: its paths are
- * already repo-root-relative.
+ * Only the path fields move — `fastlane_dir`, `artifact_globs` and `env_file`.
+ * `platforms`, `runtime`, `timeout_minutes`, `interactive_default`,
+ * `required_secrets` and `retention` are not paths and pass through untouched. A
+ * root-level file is never handed here: its paths are already repo-root-relative.
  */
 export function normaliseAppConfig(repo: RepoConfig, appRoot: string): RepoConfig {
   const out: RepoConfig = { ...repo };
@@ -40,6 +40,9 @@ export function normaliseAppConfig(repo: RepoConfig, appRoot: string): RepoConfi
   }
   if (repo.artifact_globs !== undefined) {
     out.artifact_globs = repo.artifact_globs.map((g) => underApp(appRoot, g));
+  }
+  if (repo.env_file !== undefined) {
+    out.env_file = underApp(appRoot, repo.env_file);
   }
   return out;
 }

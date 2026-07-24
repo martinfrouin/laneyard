@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveProjectSettings } from "../../src/config/resolve.js";
+import { normaliseAppConfig, resolveProjectSettings } from "../../src/config/resolve.js";
 import type { ProjectEntry } from "../../src/config/schema.js";
 
 const entry = (over: Partial<ProjectEntry> = {}): ProjectEntry => ({
@@ -47,5 +47,31 @@ describe("resolveProjectSettings", () => {
   it("treats an empty array as a defined value, not as an absence", () => {
     const r = resolveProjectSettings(entry(), { artifact_globs: [] });
     expect(r.provenance.artifact_globs).toBe("repo");
+  });
+
+  it("resolves env_file like every other setting, and leaves it unset by default", () => {
+    // No default: absent means the project wants no file at all, and an empty
+    // string would be a path to interpret rather than an absence to respect.
+    expect(resolveProjectSettings(entry(), null).settings.env_file).toBeUndefined();
+
+    const fromServer = resolveProjectSettings(entry({ env_file: ".env" }), null);
+    expect(fromServer.settings.env_file).toBe(".env");
+    expect(fromServer.provenance.env_file).toBe("server");
+
+    const fromRepo = resolveProjectSettings(entry({ env_file: "server.env" }), { env_file: ".env" });
+    expect(fromRepo.settings.env_file).toBe(".env");
+    expect(fromRepo.provenance.env_file).toBe("repo");
+  });
+});
+
+describe("normaliseAppConfig", () => {
+  it("makes an app-relative env_file repo-root-relative, like the other paths", () => {
+    const out = normaliseAppConfig({ env_file: ".env", fastlane_dir: "fastlane" }, "apps/cartes");
+    expect(out.env_file).toBe("apps/cartes/.env");
+    expect(out.fastlane_dir).toBe("apps/cartes/fastlane");
+  });
+
+  it("leaves a root-level file's path alone", () => {
+    expect(normaliseAppConfig({ env_file: ".env" }, ".").env_file).toBe(".env");
   });
 });
