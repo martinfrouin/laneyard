@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.9.0
+
+### A signing block you can read, and correct a piece at a time
+
+A stored block showed the word `stored` for every field it held. That is the same word for a right
+key alias and one missing a character — and a store password one character short is `keystore
+password was incorrect`, after a Gradle run, from a screen that was claiming everything was in place.
+
+A block now shows what you typed. The fields that are not secret come with the listing; a password
+comes on `show`, one field per request, the way a masked secret already did. `hide` puts any of them
+back.
+
+And each part changes on its own. `edit` a field or an exported variable name; `replace` swaps the
+file and keeps the fields beside it — a `.p8` is rotated far more often than the key id and issuer id
+next to it, and re-supplying those to upload a new file was one more chance to get right what was
+already right. A block arriving for the first time is still taken whole or refused: a keystore with
+no alias is not a partial success. A required field can be corrected, never emptied.
+
+The keystore's two settings — where the properties file goes, and the keys inside it — now carry
+their label beside the box instead of inside it, where it read `Properties file, rel…` and answered
+nothing.
+
+### A properties path that is not where your build reads
+
+That field wins outright at run time: it exists because detection cannot always tell, and a setting
+someone corrected must not be second-guessed by the guess it corrected. The cost was a path one
+directory off — written, read by nobody, and the release build falls back to the debug config. It
+does not fail. The store rejects the artifact, hours later, saying nothing about a path.
+
+The field now arrives pre-filled with the place this project's build actually reads, resolved from
+the clone, so a wrong value is visible as a value that differs. Where a stored one disagrees, the
+block says so on the signing screen and the readiness checklist turns amber, naming both paths.
+
+Still a warning and not a refusal: the parser can be wrong about the directory too, and a correct
+path overruled by a bad reading would be a build that cannot run at all. Leave the field empty and
+Laneyard writes the file where the build reads it.
+
 ## 0.8.0
 
 ### The file your build reads, in the clone for the length of a run
