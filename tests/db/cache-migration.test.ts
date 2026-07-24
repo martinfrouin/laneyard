@@ -39,3 +39,38 @@ describe("introspection cache migration", () => {
     expect((again.prepare("SELECT COUNT(*) AS n FROM introspection_cache").get() as { n: number }).n).toBe(1);
   });
 });
+
+describe("the environment-file column", () => {
+  it("adds it to a secret table written before it existed, keeping every row", async () => {
+    // The opposite of the cache above: dropping this table would delete the
+    // vault. The column is added, and the rows that predate it read as "not in
+    // the file" — which is what they were.
+    const path = join(await tmpDir("laneyard-mig-"), "laneyard.db");
+
+    const old = new Database(path);
+    old.exec(
+      `CREATE TABLE secret (
+         project_slug TEXT NOT NULL, key TEXT NOT NULL, value_enc TEXT NOT NULL,
+         masked INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL,
+         PRIMARY KEY (project_slug, key))`,
+    );
+    old.prepare("INSERT INTO secret VALUES (?, ?, ?, ?, ?)").run("app", "TOKEN", "cipher", 1, "now");
+    old.close();
+
+    const db = openDatabase(path);
+    const row = db.prepare("SELECT * FROM secret").get() as { value_enc: string; in_env_file: number };
+
+    expect(row.value_enc).toBe("cipher");
+    expect(row.in_env_file).toBe(0);
+  });
+
+  it("leaves an already-migrated database alone", async () => {
+    const path = join(await tmpDir("laneyard-mig-"), "laneyard.db");
+    openDatabase(path)
+      .prepare("INSERT INTO secret (project_slug, key, value_enc, masked, in_env_file, updated_at) VALUES (?,?,?,?,?,?)")
+      .run("app", "TOKEN", "cipher", 1, 1, "now");
+
+    const again = openDatabase(path);
+    expect((again.prepare("SELECT in_env_file AS f FROM secret").get() as { f: number }).f).toBe(1);
+  });
+});

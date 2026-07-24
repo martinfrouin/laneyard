@@ -10,7 +10,7 @@ describe("SecretStore", () => {
     s.set("app", "MATCH_PASSWORD", "cipher-blob", true);
 
     const listed = s.list("app");
-    expect(listed).toEqual([{ key: "MATCH_PASSWORD", masked: true }]);
+    expect(listed).toEqual([{ key: "MATCH_PASSWORD", masked: true, inEnvFile: false }]);
     // The listing type has no `value` at all — this is a compile-time guarantee
     // as much as a runtime one.
     expect(JSON.stringify(listed)).not.toContain("cipher-blob");
@@ -41,7 +41,7 @@ describe("SecretStore", () => {
     const s = store();
     s.set("app", "TOKEN", "cipher", false);
 
-    expect(s.find("app", "TOKEN")).toEqual({ key: "TOKEN", masked: false, valueEnc: "cipher" });
+    expect(s.find("app", "TOKEN")).toEqual({ key: "TOKEN", masked: false, inEnvFile: false, valueEnc: "cipher" });
     expect(s.find("other", "TOKEN")).toBeUndefined();
   });
 
@@ -67,7 +67,7 @@ describe("SecretStore", () => {
     s.set("app", "TOKEN", "cipher", true);
 
     expect(s.setMasked("app", "TOKEN", false)).toBe(true);
-    expect(s.list("app")).toEqual([{ key: "TOKEN", masked: false }]);
+    expect(s.list("app")).toEqual([{ key: "TOKEN", masked: false, inEnvFile: false }]);
     expect(s.encrypted("app")["TOKEN"]).toBe("cipher");
     expect(s.setMasked("app", "ABSENT", false)).toBe(false);
   });
@@ -79,6 +79,37 @@ describe("SecretStore", () => {
     s.set("other", "ELSEWHERE", "c3", true);
 
     expect([...s.maskedKeys("app")]).toEqual(["SECRET"]);
+  });
+
+  it("carries whether a secret belongs in the environment file", () => {
+    const s = store();
+    s.set("app", "API_URL", "cipher", false, true);
+    s.set("app", "MATCH_PASSWORD", "cipher", true);
+
+    expect(s.list("app")).toEqual([
+      { key: "API_URL", masked: false, inEnvFile: true },
+      { key: "MATCH_PASSWORD", masked: true, inEnvFile: false },
+    ]);
+  });
+
+  it("flips the environment-file flag without touching the value or the masking", () => {
+    const s = store();
+    s.set("app", "API_URL", "cipher", true);
+
+    expect(s.setInEnvFile("app", "API_URL", true)).toBe(true);
+    expect(s.list("app")).toEqual([{ key: "API_URL", masked: true, inEnvFile: true }]);
+    expect(s.encrypted("app")["API_URL"]).toBe("cipher");
+    expect(s.setInEnvFile("app", "ABSENT", true)).toBe(false);
+  });
+
+  it("names the keys that go in the file, sorted, and only this project's", () => {
+    const s = store();
+    s.set("app", "SENTRY_DSN", "c1", true, true);
+    s.set("app", "API_URL", "c2", false, true);
+    s.set("app", "MATCH_PASSWORD", "c3", true);
+    s.set("other", "ELSEWHERE", "c4", true, true);
+
+    expect(s.envFileKeys("app")).toEqual(["API_URL", "SENTRY_DSN"]);
   });
 
   it("removes everything a project holds, and returns how many", () => {

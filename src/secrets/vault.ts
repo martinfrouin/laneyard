@@ -30,8 +30,14 @@ export class Vault {
     return new Vault(await loadOrCreateKey(home), store, credentials);
   }
 
-  async set(projectSlug: string, key: string, value: string, masked: boolean): Promise<void> {
-    this.store.set(projectSlug, key, encrypt(value, this.key), masked);
+  async set(
+    projectSlug: string,
+    key: string,
+    value: string,
+    masked: boolean,
+    inEnvFile = false,
+  ): Promise<void> {
+    this.store.set(projectSlug, key, encrypt(value, this.key), masked, inEnvFile);
   }
 
   remove(projectSlug: string, key: string): boolean {
@@ -156,6 +162,25 @@ export class Vault {
   /** Flips whether a value is kept out of the logs, leaving the value alone. */
   setMasked(projectSlug: string, key: string, masked: boolean): boolean {
     return this.store.setMasked(projectSlug, key, masked);
+  }
+
+  /** Flips whether a value is written into the environment file. */
+  setInEnvFile(projectSlug: string, key: string, inEnvFile: boolean): boolean {
+    return this.store.setInEnvFile(projectSlug, key, inEnvFile);
+  }
+
+  /**
+   * The variables that go in the environment file, in the clear, ready to be
+   * rendered.
+   *
+   * Decrypted here rather than in the writer, so plaintext stays inside this one
+   * file — the property the whole module exists to make checkable by reading.
+   * A row that will not decrypt is skipped, the same leniency `resolve` takes:
+   * the build then fails on its own terms rather than on a rotated key.
+   */
+  envFileValues(projectSlug: string): Record<string, string> {
+    const wanted = new Set(this.store.envFileKeys(projectSlug));
+    return Object.fromEntries(Object.entries(this.resolve(projectSlug)).filter(([key]) => wanted.has(key)));
   }
 
   /**

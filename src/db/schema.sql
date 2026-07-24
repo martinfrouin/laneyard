@@ -53,11 +53,16 @@ CREATE TABLE IF NOT EXISTS introspection_cache (
 -- Every secret belongs to one project. There was a second scope once — the
 -- empty slug, read by every project — and `migrate-global-scope.ts` is what
 -- became of the rows written under it.
+-- `in_env_file` says this variable is also written into the file the build reads
+-- from disk — see `runner/env-file.ts`. It is membership, not a second value: a
+-- flagged secret still reaches the run as an environment variable like any
+-- other. `open.ts` adds the column to a database written before it existed.
 CREATE TABLE IF NOT EXISTS secret (
   project_slug TEXT    NOT NULL,
   key          TEXT    NOT NULL,
   value_enc    TEXT    NOT NULL,
   masked       INTEGER NOT NULL DEFAULT 1,
+  in_env_file  INTEGER NOT NULL DEFAULT 0,
   updated_at   TEXT    NOT NULL,
   PRIMARY KEY (project_slug, key)
 );
