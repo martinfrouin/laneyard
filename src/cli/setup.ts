@@ -312,12 +312,22 @@ export async function runSetupCommand(
     // files it writes explained far enough up the screen to have scrolled off.
     const writes =
       "\n" +
-      dim(`  ${configPath}\n`) +
-      dim(`    this machine's registry${adminName === null ? "" : ", and your account"}\n`) +
-      dim(`  ${relative(cwd, repoConfigPath) || LANEYARD_YML}\n`) +
-      dim(`    how it builds — ${repoConfigExists ? "already there, left as it is" : "commit it"}\n`);
+      dim("  Nothing has been written yet. Answering yes writes:\n") +
+      dim(`    ${configPath}\n`) +
+      dim(`      this machine's registry${adminName === null ? "" : ", and your account"}\n`) +
+      dim(`    ${relative(cwd, repoConfigPath) || LANEYARD_YML}\n`) +
+      dim(
+        `      how this project builds — ${
+          repoConfigExists ? "already there, kept as it is" : "commit it"
+        }\n`,
+      );
 
-    if (!(await asker.confirm(`${writes}\n${bold(`Set up "${slug}"`)}?`, true))) {
+    if (
+      !(await asker.confirm(
+        `${writes}\n  Register this project as ${bold(slug)} and write those?`,
+        true,
+      ))
+    ) {
       process.stdout.write(dim("Nothing written.") + "\n");
       return 0;
     }

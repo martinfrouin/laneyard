@@ -273,10 +273,12 @@ describe("runSetupCommand", () => {
       },
     });
 
-    const final = asked.find((q) => q.includes("Set up"));
-    expect(final).toBeDefined();
+    const final = asked.at(-1);
+    // What answering yes does, and to which files — `Set up "x"?` said neither.
+    expect(final).toContain("Nothing has been written yet");
     expect(final).toContain("config.yml");
     expect(final).toContain(LANEYARD_YML_NAME);
+    expect(final).toMatch(/Register this project as .*popotheque/);
   });
 
   it("offers the fastlane directory as you would write it from where you are", async () => {
