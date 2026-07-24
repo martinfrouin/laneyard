@@ -10,6 +10,15 @@ import type { Literal } from "../sidecar/scan.js";
  */
 export type Tier = "file" | "inline" | "secret";
 
+/** One argument a proposal rewrites, and the name it will come to read. */
+export interface Rewrite {
+  /** The keyword as it will read after the patch — `key_content` becomes `key_filepath`. */
+  arg: string;
+  /** What that argument says today. */
+  literal: Literal;
+  varName: string;
+}
+
 export interface Proposal {
   tier: Tier;
   /** The credential block this belongs in, absent for a plain vault entry. */
@@ -26,6 +35,14 @@ export interface Proposal {
    * inline carries one per identifier alongside the file rewrite.
    */
   edits: Edit[];
+  /**
+   * The same rewrites, named — one entry per argument that changes.
+   *
+   * `edits` are byte ranges, which say nothing on a screen. A proposal touching
+   * three arguments used to be announced by the one it was anchored on, so the
+   * prompt named `…KEY_FILEPATH` and silently rewrote the two identifiers too.
+   */
+  rewrites: Rewrite[];
   checked: boolean;
 }
 
@@ -92,6 +109,10 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
       const main = rewriteTo(literal, name);
       const identifiers = file.kind === "apple_asc" ? appleIdentifierRewrites(appleIdentifiers) : EMPTY;
       const edits = [...(main ? [main] : []), ...identifiers.edits];
+      const rewrites = [
+        ...(main ? [{ arg: literal.arg, literal, varName: name }] : []),
+        ...identifiers.rewrites,
+      ];
       // Every edit was a no-op — the value already reads its Laneyard name, and
       // so did each identifier. Nothing to propose.
       if (edits.length === 0) continue;
@@ -107,6 +128,7 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
         },
         literal,
         edits,
+        rewrites,
         checked: true,
       });
       continue;
@@ -136,6 +158,7 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
           },
           ...identifiers.edits,
         ],
+        rewrites: [{ arg: inline.becomes, literal, varName: name }, ...identifiers.rewrites],
         checked: true,
       });
       continue;
@@ -149,6 +172,7 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
         literal,
         suggestedFields: {},
         edits: [{ start: literal.valueStart, length: literal.valueLength, replacement: `ENV.fetch("${name}")` }],
+        rewrites: [{ arg: literal.arg, literal, varName: name }],
         // Unticked on purpose. This is the one tier where a false positive is
         // likely — a non-secret URL, a placeholder — and a patch applied by
         // default to a value that was not a secret is a silent regression in
@@ -162,7 +186,11 @@ export function proposalsFor(literals: Literal[]): Proposal[] {
 }
 
 /** Neither an edit nor a field: an `apple_asc` block that names no identifier. */
-const EMPTY: { edits: Edit[]; fields: Record<string, string> } = { edits: [], fields: {} };
+const EMPTY: { edits: Edit[]; fields: Record<string, string>; rewrites: Rewrite[] } = {
+  edits: [],
+  fields: {},
+  rewrites: [],
+};
 
 /**
  * The rewrites and pre-filled fields for the identifiers written beside an
@@ -176,18 +204,23 @@ const EMPTY: { edits: Edit[]; fields: Record<string, string> } = { edits: [], fi
  */
 function appleIdentifierRewrites(
   identifiers: Literal[],
-): { edits: Edit[]; fields: Record<string, string> } {
+): { edits: Edit[]; fields: Record<string, string>; rewrites: Rewrite[] } {
   const defaults = defaultVarNames("apple_asc");
   const edits: Edit[] = [];
+  const rewrites: Rewrite[] = [];
   const fields: Record<string, string> = {};
   for (const id of identifiers) {
-    const edit = rewriteTo(id, defaults[id.arg]!);
-    if (edit) edits.push(edit);
+    const name = defaults[id.arg]!;
+    const edit = rewriteTo(id, name);
+    if (edit) {
+      edits.push(edit);
+      rewrites.push({ arg: id.arg, literal: id, varName: name });
+    }
     // Only a literal is the identifier's value; an env name is the *variable* it
     // was read from, not the id itself, so it pre-fills nothing.
     if (id.kind === "literal") fields[id.arg] = id.value;
   }
-  return { edits, fields };
+  return { edits, fields, rewrites };
 }
 
 /**

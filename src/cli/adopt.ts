@@ -81,9 +81,16 @@ export async function runAdoption(options: AdoptionOptions): Promise<AdoptionRes
     // A rewrite-only proposal stores nothing — it renames a variable your lane
     // already reads — so the question is not "store it here".
     const rewriteOnly = proposal.tier === "file" && !found.has(proposal);
+    // Plural when more than one argument changes — the mapping is on screen
+    // above, so the question counts them rather than repeating three long names.
+    const all = proposal.rewrites.length;
     const question = rewriteOnly
-      ? `  Rewrite it to ${bold(proposal.varName)}?`
-      : `  Store it here and use ${bold(proposal.varName)}?`;
+      ? all > 1
+        ? `  Rewrite all ${all} to the names the block exports?`
+        : `  Rewrite it to ${bold(proposal.varName)}?`
+      : all > 1
+        ? `  Store it here and rewrite all ${all}?`
+        : `  Store it here and use ${bold(proposal.varName)}?`;
     if (!(await asker.confirm(question, proposal.checked))) {
       continue;
     }
@@ -162,27 +169,37 @@ function describe(fastlaneDir: string, proposal: Proposal): string {
   // or a password, and setup's output is pasted into bug reports and kept in CI
   // transcripts — printing it there would be this feature leaking the very
   // thing it exists to put away. The file and line above say where to look.
-  const shown =
-    literal.kind === "env"
-      ? `ENV["${literal.value}"]`
+  const shown = (r: (typeof proposal.rewrites)[number]): string =>
+    r.literal.kind === "env"
+      ? `ENV["${r.literal.value}"]`
       : proposal.tier === "file"
-        ? `"${literal.value}"`
+        ? `"${r.literal.value}"`
         : proposal.tier === "inline"
           ? dim("(a key, inline in the file)")
           : dim("(a literal value, masked)");
+
+  const many = proposal.rewrites.length > 1;
   const why =
     literal.kind === "env"
-      ? "Renamed to the variable Laneyard's signing block exports."
+      ? `Renamed to the variable${many ? "s" : ""} Laneyard's signing block exports.`
       : proposal.tier === "inline"
         ? "This key is in your repository in cleartext."
         : proposal.tier === "file"
           ? "That path does not survive the clone: Laneyard builds from your remote."
           : "A literal secret in a build file is a secret in your history.";
 
+  // Every argument that changes, not just the one the proposal is anchored on:
+  // an `apple_asc` block rewrites its key file *and* both identifiers, and
+  // naming one of the three made the other two look like they were not touched.
+  const width = Math.max(...proposal.rewrites.map((r) => r.arg.length));
+  const lines = proposal.rewrites
+    .map((r) => `    ${`${r.arg}:`.padEnd(width + 2)} ${shown(r)} → ${bold(r.varName)}\n`)
+    .join("");
+
   return (
     "\n" +
-    `  ${bold(`${fastlaneDir}/Fastfile:${literal.line}`)}   ${literal.action}(${literal.arg}:)\n` +
-    `                        → ${shown}\n` +
+    `  ${bold(`${fastlaneDir}/Fastfile:${literal.line}`)}   ${literal.action}\n` +
+    lines +
     dim(`  ${why}\n`)
   );
 }
@@ -207,6 +224,7 @@ async function named(asker: Asker, proposal: Proposal): Promise<Proposal> {
     ...proposal,
     varName,
     edits: [{ ...proposal.edits[0]!, replacement: `ENV.fetch("${varName}")` }],
+    rewrites: [{ ...proposal.rewrites[0]!, varName }],
   };
 }
 

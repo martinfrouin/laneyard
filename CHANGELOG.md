@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.3
+
+### Adoption names every argument it rewrites
+
+A proposal that renames an App Store Connect key file also renames the Key ID and
+the Issuer ID beside it — but the prompt was built from the one argument it was
+anchored on, so it said `APP_STORE_CONNECT_API_KEY_KEY_FILEPATH` and rewrote
+three things. It now lists each argument, what it says today and the name it will
+read, and asks about all of them.
+
 ## 0.6.2
 
 ### Setup asks for the fastlane folder as you write it from where you are

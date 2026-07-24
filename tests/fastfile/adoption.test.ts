@@ -138,6 +138,21 @@ describe("proposalsFor", () => {
     expect(p!.suggestedFields).toEqual({});
   });
 
+  it("names every argument it rewrites, not only the one it is anchored on", () => {
+    // The prompt is built from this: announcing the key file alone while three
+    // arguments changed made the other two look untouched.
+    const [p] = proposalsFor([
+      literal({ action: "app_store_connect_api_key", arg: "key_filepath", kind: "env", value: "ASC_KEY_FILEPATH", valueStart: 30, valueLength: 22 }),
+      literal({ action: "app_store_connect_api_key", arg: "key_id", kind: "env", value: "ASC_KEY_ID", valueStart: 60, valueLength: 17 }),
+      literal({ action: "app_store_connect_api_key", arg: "issuer_id", kind: "env", value: "ASC_ISSUER_ID", valueStart: 90, valueLength: 20 }),
+    ]);
+    expect(p!.rewrites.map((r) => [r.arg, r.varName])).toEqual([
+      ["key_filepath", "APP_STORE_CONNECT_API_KEY_KEY_FILEPATH"],
+      ["key_id", "APP_STORE_CONNECT_API_KEY_KEY_ID"],
+      ["issuer_id", "APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
+    ]);
+  });
+
   it("emits nothing when the value already reads the canonical name", () => {
     expect(
       proposalsFor([literal({ action: "supply", arg: "json_key", kind: "env", value: "SUPPLY_JSON_KEY" })]),
