@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { RunDetail } from "../api";
+import { ProjectTabs } from "../components/ProjectTabs";
 import { Terminal } from "../components/Terminal";
 import type { TerminalHandle } from "../components/Terminal";
 import { isActive, mark, statusLabel } from "../status";
@@ -21,13 +22,28 @@ const size = (bytes: number): string =>
 
 export function Run() {
   const id = Number(useParams().id);
+  const navigate = useNavigate();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [again, setAgain] = useState(false);
+  const [againError, setAgainError] = useState<string | null>(null);
   const [, tick] = useState(0);
   const terminal = useRef<TerminalHandle>(null);
   const { log, finished } = useRunStream(id);
+
+  // "run again" goes from one run to the next without leaving this screen, so
+  // for the first time the component survives a change of run. Everything below
+  // is about the run in the address bar; left standing it would be the previous
+  // one's head, and its failure, sitting under the new number until the first
+  // fetch lands. The output is already handled — `useRunStream` clears its own.
+  useEffect(() => {
+    setRun(null);
+    setError(null);
+    setCancelError(null);
+    setAgainError(null);
+  }, [id]);
 
   // The detail is reloaded as long as the run keeps moving: steps and
   // artifacts don't arrive over the stream, only the raw output does.
@@ -79,8 +95,34 @@ export function Run() {
   if (error) return <p className="status-failed">{error}</p>;
   if (!run) return <p className="dim">loading…</p>;
 
+  /**
+   * The same lane again, with the parameters this one carried.
+   *
+   * A retry is a new run and says so — it gets its own number and its own log,
+   * and this one keeps the output that explains why it failed. The branch is
+   * not carried over: it is resolved from the project at launch, the same as
+   * every other way of starting a lane, so retrying a run cannot quietly pin a
+   * build to a branch that has since moved on.
+   */
+  const runAgain = async (): Promise<void> => {
+    setAgain(true);
+    setAgainError(null);
+    try {
+      const { id: next } = await api.trigger(run.projectSlug, run.lane, run.platform, run.params);
+      navigate(`/r/${next}`);
+    } catch (e) {
+      setAgainError((e as Error).message);
+    } finally {
+      setAgain(false);
+    }
+  };
+
   return (
     <>
+      {/* The run belongs to a project, and this is what says so: every tab of it
+          is one click away, including the lanes you came from. */}
+      <ProjectTabs slug={run.projectSlug} />
+
       <div className="run-head panel">
         <span>
           <span className={`mark status-${run.status}`}>{mark(run.status)}</span>{" "}
@@ -108,9 +150,20 @@ export function Run() {
             cancel
           </button>
         )}
+        {/* And its opposite, once there is nothing left to stop. Beside the
+            failure it answers, rather than back on the lanes list: a build that
+            failed for a reason you have just fixed is the commonest thing to
+            want twice, and going and finding the lane again to say so is the
+            kind of small friction that makes a screen feel like a dead end. */}
+        {!isActive(run.status) && (
+          <button onClick={() => void runAgain()} disabled={again} title="start this lane again">
+            run again
+          </button>
+        )}
       </div>
 
       {cancelError && <p className="status-failed">cancel refused — {cancelError}</p>}
+      {againError && <p className="status-failed">launch refused — {againError}</p>}
       {run.errorSummary && <p className="status-failed">{run.errorSummary}</p>}
 
       <div className="run-body">

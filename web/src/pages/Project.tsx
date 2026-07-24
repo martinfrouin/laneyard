@@ -1,16 +1,12 @@
-import { useContext, useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useMatch, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, Outlet, useMatch, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { Lane, RunDetail } from "../api";
-import { Session } from "../App";
+import { ProjectTabs } from "../components/ProjectTabs";
 import { mark, statusLabel } from "../status";
 
 export function Project() {
   const { slug = "" } = useParams();
-  // A builder is shown the tabs a builder can use. The server refuses the other
-  // routes regardless — this is what keeps the strip from offering three tabs
-  // that would each answer 403.
-  const admin = useContext(Session)?.role === "admin";
   const navigate = useNavigate();
   const [lanes, setLanes] = useState<Lane[]>([]);
   const [runs, setRuns] = useState<RunDetail[]>([]);
@@ -54,46 +50,10 @@ export function Project() {
     }
   };
 
-  const tabs = (
-    <nav className="tabs">
-      <NavLink to={`/p/${slug}`} end className={({ isActive }) => (isActive ? "current" : "")}>
-        lanes
-      </NavLink>
-      {/* The Fastfile is readable by anyone with a session — a builder who can
-          start a lane benefits from seeing what it does — but this tab also
-          saves, commits and pushes it, and those are an admin's. */}
-      {admin && (
-        <NavLink to={`/p/${slug}/fastfile`} className={({ isActive }) => (isActive ? "current" : "")}>
-          fastfile
-        </NavLink>
-      )}
-      {admin && (
-        <NavLink to={`/p/${slug}/secrets`} className={({ isActive }) => (isActive ? "current" : "")}>
-          secrets
-        </NavLink>
-      )}
-      {/* Beside secrets, because the two are neighbours in the mind of whoever
-          is looking for one: values you type there, files you upload here. */}
-      {admin && (
-        <NavLink to={`/p/${slug}/signing`} className={({ isActive }) => (isActive ? "current" : "")}>
-          signing
-        </NavLink>
-      )}
-      <NavLink to={`/p/${slug}/readiness`} className={({ isActive }) => (isActive ? "current" : "")}>
-        readiness
-      </NavLink>
-      {admin && (
-        <NavLink to={`/p/${slug}/settings`} className={({ isActive }) => (isActive ? "current" : "")}>
-          settings
-        </NavLink>
-      )}
-    </nav>
-  );
-
   if (onSubTab) {
     return (
       <>
-        {tabs}
+        <ProjectTabs slug={slug} />
         <Outlet />
       </>
     );
@@ -101,7 +61,7 @@ export function Project() {
 
   return (
     <>
-      {tabs}
+      <ProjectTabs slug={slug} />
       <h2 className="section">lanes</h2>
       {/* A lane-reading error is stated, never hidden behind an empty list. */}
       {lanesError && <p className="status-failed">unreadable lanes — {lanesError}</p>}
