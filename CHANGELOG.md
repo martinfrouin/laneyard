@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.0
+
+### A secret belongs to one project
+
+The vault had two scopes. A secret or a signing block stored under no project applied to every one of
+them, and a project's own quietly won over it. It bought sharing — an App Store Connect key is one
+per developer account, not one per app — and it cost the answer to the question the screen exists to
+answer: *what does this project see?* That answer was a merge of two sets no screen ever showed
+whole, and a name stored twice resolved to the nearer one without saying so.
+
+Everything now belongs to exactly one project, signing blocks included. Five apps under one account
+hold five copies of the key, and rotating it means replacing five. That is the price, and it is
+paid for a rule with no exception to state.
+
+**Nothing that built yesterday stops building.** On first start, every row that was shared is
+**copied** into each project that read it, and the server prints what it did — one line per key, and
+the projects it went to. A project that had overridden a shared value keeps its own. Delete the
+copies you did not want; the report is there so you know they exist. A row no project ever read is
+removed, and said so rather than dropped in silence.
+
+The unscoped API routes are gone, the interface has no `global` badge left, and removing a project no
+longer reports what it was not allowed to take — there is nothing it is not allowed to take.
+
 ## 0.7.0
 
 ### fastlane starts from the app's directory, not the repository root
