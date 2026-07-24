@@ -28,8 +28,18 @@ configuration.
 place to enter a value. A variable both fastlane and the app need is stored once
 and ticked.
 
-**Each project carries one environment-file block**: on or off — off by default —
-and a path. A project that leaves it off sees no change anywhere.
+**The path is a setting, not a vault row.** Configuration lives in files here —
+that is what makes backing Laneyard up a matter of copying one — and where a
+build writes a file is build behaviour, the same kind of fact as
+`artifact_globs`. So it is `env_file` in `laneyard.yml`, with the server block in
+`config.yml` as the fallback for a repository you would rather not touch. Absent
+means off, which is the default, and a project that never sets it sees no change
+anywhere.
+
+```yaml
+# laneyard.yml
+env_file: .env
+```
 
 Two questions this settles by construction:
 
@@ -40,8 +50,7 @@ Two questions this settles by construction:
   values as `••••`. A missing line is visible; an unticked box is not.
 
 ```
-Environment file                 ☑ on
-Path   .env
+Environment file   .env                    from laneyard.yml
 
 Written at run time:
   API_URL=https://api.example.com
@@ -49,16 +58,22 @@ Written at run time:
   SENTRY_DSN=••••
 ```
 
+The panel is read-only about the path — it says where the file goes and which
+file said so, the way every other resolved setting is reported. What it is there
+for is the body underneath.
+
 Nothing is required. A project whose Fastfile forwards values with `ENV.fetch`
 leaves the block off and is served by the vault as it is today.
 
 ## The file
 
 **Path**, relative to the app root — the directory holding `laneyard.yml`, so a
-monorepo needs no extra notion. A path climbing out of that root is refused when
-it is typed, not when the run starts: the value comes from a form, and a run must
-never be able to drop a file anywhere on the server. Same rule as
-`properties_path` in `gradle-properties.ts`.
+monorepo needs no extra notion. `normaliseAppConfig` already collapses
+app-relative paths into repo-root-relative ones for `fastlane_dir` and
+`artifact_globs`; `env_file` joins them, and nothing downstream learns a new
+rule. A path climbing out of the workspace is refused at load, so an invalid
+value is reported the way every other bad setting is and the last good
+configuration stays live.
 
 **Content** is dotenv: `KEY=value`, one per line, sorted by name so a diff of two
 runs is readable. A value containing a space, a quote, a `#`, or a newline is
