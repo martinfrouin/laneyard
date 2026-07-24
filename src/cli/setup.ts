@@ -211,19 +211,6 @@ export async function runSetupCommand(
       );
     }
 
-    // The repository file lives in the app's own directory, so a monorepo of N
-    // apps carries N of them — one beside each app's fastlane folder. `appRoot`
-    // is the fastlane dir's parent; for a plain app whose fastlane sits at the
-    // root it is `.`, and the file lands at the repository root as it always did.
-    const appRoot = appRootOf(d.fastlaneDir);
-    const repoConfigPath = join(repoRoot(cwd, d.subPath), appRoot, LANEYARD_YML);
-    if (await fileExists(repoConfigPath)) {
-      process.stdout.write(
-        "\n" + warn(`${LANEYARD_YML} already exists in the repository.\n`) +
-          dim("  Its values win over anything written here; it will be left alone.\n"),
-      );
-    }
-
     // A machine with no account gets its first admin here. Asked rather than
     // assumed: the name is typed into a login form every day afterwards, and
     // `admin` is a poor thing to call a person once there are two of them.
@@ -262,11 +249,32 @@ export async function runSetupCommand(
       d.defaultBranch,
       dim("A run uses this branch unless you pick another one when you start it."),
     );
-    const fastlaneDir = await asker.ask(
-      "fastlane directory",
-      d.fastlaneDir,
-      dim("Relative to the repository root, because that is what Laneyard clones."),
+    // Asked as it is written from where the command ran: from `app/`, the folder
+    // is `fastlane`, not `app/fastlane`. The repository-root-relative form is
+    // what the clone has and what `config.yml` stores, but prefixing it is
+    // Laneyard's job — asking someone to type a path they are standing inside
+    // reads like a mistake, and is the one people correct wrongly.
+    const fastlaneDir = fromRepoRoot(
+      d.subPath,
+      await asker.ask(
+        "fastlane directory",
+        fromHere(d.subPath, d.fastlaneDir),
+        dim("Relative to this directory."),
+      ),
     );
+
+    // Computed from the answer, never from the detection: correcting the folder
+    // moves the app root with it, and with it where `laneyard.yml` is written and
+    // which prefix its paths drop. Read before the prompt, a correction was
+    // silently ignored and the file landed beside the wrong app.
+    const appRoot = appRootOf(fastlaneDir);
+    const repoConfigPath = join(repoRoot(cwd, d.subPath), appRoot, LANEYARD_YML);
+    if (await fileExists(repoConfigPath)) {
+      process.stdout.write(
+        "\n" + warn(`${LANEYARD_YML} already exists in the repository.\n`) +
+          dim("  Its values win over anything written here; it will be left alone.\n"),
+      );
+    }
 
     // A fastlane folder that is on disk but not in git will not survive the
     // clone Laneyard builds from — the case that started this: a stray
@@ -534,6 +542,30 @@ function appRelative(appRoot: string, p: string): string {
   if (appRoot === "" || appRoot === ".") return p;
   const prefix = `${appRoot}/`;
   return p.startsWith(prefix) ? p.slice(prefix.length) : p;
+}
+
+/**
+ * A repository-root-relative path as it is written from where setup ran.
+ *
+ * `app/fastlane` is `fastlane` when standing in `app/`. A path outside that
+ * directory has no shorter form and is shown as it is.
+ */
+function fromHere(subPath: string, repoRelative: string): string {
+  if (subPath === "") return repoRelative;
+  const prefix = `${subPath}/`;
+  return repoRelative.startsWith(prefix) ? repoRelative.slice(prefix.length) : repoRelative;
+}
+
+/**
+ * The inverse: back to repository-root-relative, which is the shape of the clone.
+ *
+ * Tolerant of an answer that already carries the prefix — someone who types
+ * `app/fastlane` from `app/` means the same folder, and double-prefixing it into
+ * `app/app/fastlane` would be a worse answer than the one they gave.
+ */
+function fromRepoRoot(subPath: string, here: string): string {
+  if (subPath === "" || here === "") return here;
+  return here === subPath || here.startsWith(`${subPath}/`) ? here : `${subPath}/${here}`;
 }
 
 /** `git@github.com:you/thing.git` reads better as `you/thing` in a sentence. */

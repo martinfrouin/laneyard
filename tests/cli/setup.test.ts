@@ -254,6 +254,34 @@ describe("runSetupCommand", () => {
     expect(written.projects[0]).not.toHaveProperty("runtime");
   });
 
+  it("offers the fastlane directory as you would write it from where you are", async () => {
+    // Run from `app/`, the folder is `fastlane` from here. Making someone type
+    // the repository-root-relative `app/fastlane` is asking them to do the
+    // prefixing Laneyard is about to do anyway — and it reads like a mistake.
+    const { app, configPath } = await monorepo();
+    const offered: Record<string, string> = {};
+
+    await runSetupCommand(app, configPath, {
+      asker: {
+        ask: async (label, proposed) => {
+          offered[label] = proposed;
+          return proposed;
+        },
+        confirm: async () => true,
+        close: () => {},
+      },
+    });
+
+    expect(offered["fastlane directory"]).toBe("fastlane");
+
+    // config.yml still carries the repository-root-relative path: that is the
+    // shape of the clone the server builds from.
+    const written = parse(await readFile(configPath, "utf8")) as {
+      projects: { fastlane_dir?: string }[];
+    };
+    expect(written.projects[0]!.fastlane_dir).toBe("app/fastlane");
+  });
+
   it("writes the project's slug into the file, so remove can read it back", async () => {
     // The slug is the file's identity: `remove`, run from the app's directory,
     // takes it from here rather than from an argument.

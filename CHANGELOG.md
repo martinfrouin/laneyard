@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.2
+
+### Setup asks for the fastlane folder as you write it from where you are
+
+Run from `app/`, setup proposed `app/fastlane` — the repository-root-relative
+form, which is what the clone has and what `config.yml` stores, but not what you
+would type standing inside `app/`. It asks for `fastlane` now and does the
+prefixing itself; from the repository root, where fastlane usually sits, nothing
+changes.
+
+Correcting that answer also works properly: the app root was read from the
+*detected* folder before the question was asked, so a correction left
+`laneyard.yml` beside the wrong app with the wrong prefix dropped from its paths.
+It is computed from the answer now.
+
 ## 0.6.1
 
 ### Setup normalises credential args that already read a variable
