@@ -68,6 +68,13 @@ export interface RunDetail {
   id: number;
   projectSlug: string;
   lane: string;
+  /**
+   * What it was started with, and what starting it again takes. The two used to
+   * be missing from this type though the server has always sent them, which is
+   * why the run screen could show you a failure and no way to try it once more.
+   */
+  platform: string | null;
+  params: Record<string, string>;
   status: string;
   /** 1 for the next to start, null when the run is not waiting. */
   queuePosition: number | null;
@@ -110,11 +117,20 @@ export interface ProjectRemoval {
   };
 }
 
-/** What a listing may expose. There is deliberately no value here. */
+/**
+ * What a listing may expose.
+ *
+ * `value` is present exactly when `masked` is false, and absent otherwise —
+ * a value kept out of the build logs is never sent back, whoever asks. There is
+ * no third state: a variable stored in the clear is printed verbatim in every
+ * log its lane produces, so there is nothing for this screen to protect by
+ * withholding it.
+ */
 export interface SecretSummary {
   key: string;
   masked: boolean;
   scope: "project" | "global";
+  value?: string;
 }
 
 /**
@@ -239,11 +255,11 @@ export const api = {
     ),
 
   /**
-   * One secret's value, and only one that was never declared secret.
+   * One secret's value, asked for by name.
    *
-   * A separate call rather than a field on the listing: a listing that carried
-   * values would put every one of them in the browser at once, for a page most
-   * people open to check a name. The server refuses a masked value whoever asks.
+   * A separate call rather than a field on the listing: a masked value is not in
+   * the listing at all, so a page holds one only because someone pressed `show`
+   * on that line.
    */
   revealSecret: (slug: string, key: string) =>
     fetch(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}/value`).then(
@@ -284,6 +300,20 @@ export const api = {
   projects: () => fetch("/api/projects").then(json<ProjectSummary[]>),
   lanes: (slug: string) => fetch(`/api/projects/${slug}/lanes`).then(json<Lane[]>),
   runsOf: (slug: string) => fetch(`/api/projects/${slug}/runs`).then(json<RunDetail[]>),
+
+  /**
+   * Brings the clone up to the remote, so what the screens read is what the next
+   * run would. Nothing else fetches: `ensureCloned` is a no-op once the clone
+   * exists, so without this the repository was frozen on the commit of the first
+   * run that got far enough to fetch one.
+   *
+   * Refused with a sentence — a run in flight, a commit never pushed, a remote
+   * that will not answer — and `json` carries it to the screen.
+   */
+  fetchWorkspace: (slug: string) =>
+    fetch(`/api/projects/${slug}/fetch`, { method: "POST" }).then(
+      json<{ branch: string; commitSha: string }>,
+    ),
   run: (id: number) => fetch(`/api/runs/${id}`).then(json<RunDetail>),
   log: (id: number, from = 0) => fetch(`/api/runs/${id}/log?from=${from}`).then((r) => r.text()),
 

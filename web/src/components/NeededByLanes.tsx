@@ -30,6 +30,9 @@ export function NeededByLanes({
   const [typed, setTyped] = useState<Record<string, string>>({});
   const [storing, setStoring] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(false);
+  /** Bumped by the button, so the list is read again after the clone moved. */
+  const [fetched, setFetched] = useState(0);
 
   useEffect(() => {
     // A project whose workspace was never cloned still has a secrets page, and
@@ -38,7 +41,32 @@ export function NeededByLanes({
       .requiredSecrets(slug)
       .then((r) => setMissing(r.missing))
       .catch(() => setMissing([]));
-  }, [slug, refresh]);
+  }, [slug, refresh, fetched]);
+
+  /**
+   * The clone, brought up to the remote, and then this list read again.
+   *
+   * These names are read out of the repository — what a lane fetches from the
+   * environment, what a committed `.env.example` declares — and the clone they
+   * are read from only ever moved at the start of a run. A Fastfile that stopped
+   * reading a variable went on being asked for it for as long as no run got far
+   * enough to fetch, with nothing on screen to suggest the answer was old. This
+   * is the way to make it current without launching a build.
+   */
+  const refetch = async () => {
+    setFetching(true);
+    setError(null);
+    try {
+      await api.fetchWorkspace(slug);
+      setFetched((n) => n + 1);
+    } catch (e) {
+      // A run in flight, a commit never pushed, a remote that will not answer:
+      // the server's sentence is the only thing that says which.
+      setError((e as Error).message);
+    } finally {
+      setFetching(false);
+    }
+  };
 
   const store = async (name: string) => {
     const value = (typed[name] ?? "").trim();
@@ -62,21 +90,28 @@ export function NeededByLanes({
 
   return (
     <>
-      <h2 className="section" style={{ marginTop: 20 }}>
-        needed by the lanes
-      </h2>
-      <p className="dim">
-        read by a lane, named in <code>.env.example</code>, or listed under{" "}
-        <code>required_secrets</code> — and not stored yet. type the value; the name is already the
-        one fastlane looks for.
+      {/* The button sits on the heading because it answers a question about the
+          whole list rather than any line of it: not "store this" but "is this
+          still true". */}
+      <p className="section head-with-action" style={{ marginTop: 20 }}>
+        <span>needed by the lanes</span>
+        <button onClick={() => void refetch()} disabled={fetching} title="fetch the repository">
+          {fetching ? "fetching…" : "refresh"}
+        </button>
       </p>
       <ul className="rows needed">
         {missing.map((name) => (
           <li key={name}>
             <span className="mark dim">○</span>
             <span className="needed-name bright">{name}</span>
+            {/* Plain text, like the form below this list. What you are doing is
+                checking a value into a build server on your own machine — the
+                moment it matters that you can see it is exactly this one, with
+                a token freshly pasted and a newline you would never notice
+                behind dots. Hiding starts once it is stored, and only for the
+                values ticked to stay out of the logs. */}
             <input
-              type="password"
+              type="text"
               className="grow"
               value={typed[name] ?? ""}
               onChange={(e) => setTyped((prev) => ({ ...prev, [name]: e.target.value }))}
@@ -84,7 +119,8 @@ export function NeededByLanes({
                 if (e.key === "Enter") void store(name);
               }}
               placeholder="value"
-              autoComplete="new-password"
+              spellCheck={false}
+              autoComplete="off"
               aria-label={name}
             />
             <button

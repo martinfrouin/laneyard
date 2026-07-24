@@ -291,6 +291,16 @@ code { color: var(--text-bright); }
 
 /* A name waiting for its value: the name holds a column of its own so the
    fields line up, and the field takes the rest of the row. */
+/* A section title with one control on it. The button keeps its own case — the
+   title is the only thing here wearing small capitals, and a control that
+   borrowed them would read as a second heading. */
+.head-with-action {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.head-with-action button { text-transform: none; letter-spacing: normal; font-size: 13px; }
+
 .needed .needed-name { flex: none; min-width: 26ch; }
 .needed input { min-width: 0; }
 
@@ -325,8 +335,20 @@ code { color: var(--text-bright); }
   white-space: normal;
 }
 
-/* A value on screen, once someone asked for it. Monospace like everything
-   else, and bright rather than coloured: it is text, not a status. */
+/* A stored name and what it holds: two columns, not one phrase.
+   `SENTRY_ORG popotes` separated by one space read as a single string, and the
+   only way to tell where the name stopped was to know the name already.
+   The column also lines every value on the screen up at the same place, which
+   is what makes the one that looks wrong stand out.
+
+   `min-width` in `ch` rather than a fixed width: the whole interface is
+   monospace, so the gutter is exactly as wide as the names it is sized for, and
+   a name longer than it pushes its own value along instead of being cut. */
+.pair { display: inline-flex; align-items: baseline; gap: 14px; min-width: 0; }
+.pair > .key { min-width: 24ch; }
+
+/* A value on screen. Monospace like everything else, and bright rather than
+   coloured: it is text, not a status. */
 .revealed { color: var(--text-bright); word-break: break-all; }
 
 .file-pick { cursor: pointer; }

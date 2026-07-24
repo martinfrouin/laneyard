@@ -8,8 +8,12 @@ import { requiredSecrets } from "../required-secrets.js";
 const VALID_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
+  // A project's listing carries the values that were never declared secret; the
+  // global one carries names only. Not a judgement about global secrets — it is
+  // that `/api/secrets` answers for no project in particular, and a value is
+  // only ever decrypted in the context of the project that reads it.
   const listRoute = (slug: string | null) =>
-    slug === null ? ctx.vault.listGlobal() : ctx.vault.list(slug);
+    slug === null ? ctx.vault.listGlobal() : ctx.vault.listWithValues(slug);
 
   app.get("/api/secrets", async () => listRoute(null));
 
@@ -54,26 +58,26 @@ export async function registerSecretRoutes(app: FastifyInstance, ctx: AppContext
   });
 
   /**
-   * One value, in the clear — and only one that was never declared secret.
+   * One value, in the clear — including a masked one, on request.
    *
-   * A separate route rather than a field on the listing, so that reading a value
-   * is always a deliberate request for one named key. A listing that carried
-   * values would put every one of them in a browser at once, for a page most
-   * people open to check a name.
+   * A separate route rather than a field on the listing, and that is the whole
+   * of what keeps a secret a secret here: reading one is a deliberate request
+   * for one named key, by an admin, one at a time. The listing carries the
+   * unmasked values and never a masked one, so opening the tab reveals nothing
+   * — pressing `show` on a line does.
+   *
+   * It used to refuse a masked value outright, and `vault.ts` says at length why
+   * that was worth less than it looked. The short version: `masked` is about
+   * what a run prints, and refusing to ever show it again meant a passphrase
+   * suspected of a typo could be replaced but never checked.
    */
   app.get("/api/projects/:slug/secrets/:key/value", async (req, reply) => {
     const { slug, key } = req.params as { slug: string; key: string };
     if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
 
-    try {
-      const value = ctx.vault.reveal(slug, key);
-      if (value === null) return reply.code(404).send({ error: "Unknown secret" });
-      return { key, value };
-    } catch (cause) {
-      // The vault refuses a masked value whoever asks. 409 rather than 403: the
-      // request is not forbidden to this account, it is refused for this secret.
-      return reply.code(409).send({ error: (cause as Error).message });
-    }
+    const value = ctx.vault.reveal(slug, key);
+    if (value === null) return reply.code(404).send({ error: "Unknown secret" });
+    return { key, value };
   });
 
   /**

@@ -42,6 +42,41 @@ export class Vault {
     return this.store.list(projectSlug);
   }
 
+  /**
+   * The same listing, with the value attached wherever there is nothing to hide.
+   *
+   * The rule is the user's own tick box and nothing else: `masked` means "keep
+   * this out of the build logs", and a value carrying it is never returned,
+   * whoever asks. A value without it is printed verbatim in every log the lane
+   * produces — hiding it on the one screen where you might want to check it
+   * protects nothing and costs the check.
+   *
+   * That is why this is not `list`. Everything else in the server asks a
+   * question about names — is this one stored, is that one missing — and it
+   * would be a poor trade to hand all of them plaintext for it. One method, one
+   * caller, and `list` stays the answer to "what is here".
+   *
+   * A masked value stays out even though `reveal` would now return it: a secret
+   * is readable on request, one key at a time, and that is not the same as
+   * putting every secret a project holds into a browser because someone opened
+   * a tab.
+   *
+   * A row that will not decrypt loses its value and keeps its name, the same
+   * leniency `resolve` takes: a rotated key should cost one line of one screen,
+   * not the screen.
+   */
+  listWithValues(projectSlug: string): (SecretSummary & { value?: string })[] {
+    return this.store.list(projectSlug).map((summary) => {
+      if (summary.masked) return summary;
+      try {
+        const value = this.reveal(projectSlug, summary.key);
+        return value === null ? summary : { ...summary, value };
+      } catch {
+        return summary;
+      }
+    });
+  }
+
   listGlobal(): SecretSummary[] {
     return this.store.listGlobal();
   }
@@ -110,28 +145,29 @@ export class Vault {
   }
 
   /**
-   * One value, in the clear — and only when it was never declared secret.
+   * One value, in the clear, whether or not it is masked.
    *
-   * The refusal is the point. This vault has been write-only since it was
-   * written: the server never sent a value back, so the interface had nothing to
-   * uncover and no browser ever held one. That is worth keeping for anything
-   * anyone called a secret.
+   * This used to refuse a masked value outright: the vault was write-only, no
+   * route ever sent one back, and the secrets screen offered nothing to press.
+   * The property was real and it was worth less than it looked. `masked` means
+   * "keep this out of the build logs" — it is about what a run prints, and it
+   * was doing double duty as "and nobody may ever look at it again", which
+   * nobody asked for. A passphrase stored six months ago and now suspected of a
+   * typo could only be replaced, never checked, and replacing a credential you
+   * cannot read is how the wrong one gets stored twice.
    *
-   * But not everything stored here is one. `APP_VERSION`, `SENTRY_ORG`, an
-   * issuer id — those are identifiers, and being unable to check what was stored
-   * makes an import something you have to take on faith. The line between the
-   * two already existed and is the user's own: `masked` is "keep this out of the
-   * logs". A value that carries it is never returned, whoever asks.
+   * What the refusal actually bought was narrow, because everything around it
+   * still holds: the screen is admin-only, one key is read per request, and a
+   * masked value is still absent from `listWithValues`, so opening the page puts
+   * none of them in a browser. What is gone is only the guarantee that a value
+   * never leaves the server — which was never what protected it. Redaction of
+   * the logs is untouched and is the property that matters.
    *
-   * Returns null for an unknown key, and throws for a masked one — a caller
-   * that forgot to check must fail loudly rather than leak.
+   * Returns null for an unknown key.
    */
   reveal(projectSlug: string, key: string): string | null {
     const row = this.store.find(projectSlug, key);
     if (!row) return null;
-    if (row.masked) {
-      throw new Error(`${key} is kept out of the logs, so its value is never sent back.`);
-    }
     return decrypt(row.valueEnc, this.key);
   }
 

@@ -256,6 +256,24 @@ describe("revealing a value", () => {
       payload: { value, masked },
     });
 
+  // The listing draws the same line the single-value route draws, so a screen
+  // never has to ask twice for something it is allowed to show once.
+  it("carries the values that were never declared secret, and only those", async () => {
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    await store(app, cookies, "APP_VERSION", "1.4.0", false);
+    await store(app, cookies, "MATCH_PASSWORD", "a long enough passphrase", true);
+
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/secrets", cookies });
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json() as { key: string; value?: string }[];
+    expect(body.find((s) => s.key === "APP_VERSION")?.value).toBe("1.4.0");
+    // Absent, not empty: a masked value is never sent back, whoever asks.
+    expect(body.find((s) => s.key === "MATCH_PASSWORD")).not.toHaveProperty("value");
+    expect(res.body).not.toContain("a long enough passphrase");
+  });
+
   it("hands back a value that was never declared secret", async () => {
     const { app } = await harness();
     const cookies = { laneyard_session: await login(app) };
@@ -270,8 +288,10 @@ describe("revealing a value", () => {
     expect(res.json().value).toBe("1.4.0");
   });
 
-  // The whole point. A masked value is never returned, whoever asks.
-  it("refuses a value that is kept out of the logs", async () => {
+  // Asked for by name, one at a time, and answered — including for a value kept
+  // out of the logs. What `masked` decides is what a run prints and what the
+  // listing carries, not whether its owner may ever look at it again.
+  it("hands back a value that is kept out of the logs, when asked for by name", async () => {
     const { app } = await harness();
     const cookies = { laneyard_session: await login(app) };
     await store(app, cookies, "MATCH_PASSWORD", "a long enough passphrase", true);
@@ -281,8 +301,12 @@ describe("revealing a value", () => {
       url: "/api/projects/sample/secrets/MATCH_PASSWORD/value",
       cookies,
     });
-    expect(res.statusCode).toBe(409);
-    expect(res.body).not.toContain("a long enough passphrase");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().value).toBe("a long enough passphrase");
+
+    // And still nowhere near the listing: opening the tab reveals nothing.
+    const list = await app.inject({ method: "GET", url: "/api/projects/sample/secrets", cookies });
+    expect(list.body).not.toContain("a long enough passphrase");
   });
 
   it("answers 404 for a secret that is not there", async () => {
@@ -337,7 +361,7 @@ describe("turning redaction on and off", () => {
     expect(res.json().value).toBe("acme-mobile");
   });
 
-  it("masks again, and the value stops coming back", async () => {
+  it("masks again, and the value leaves the listing", async () => {
     const { app } = await harness();
     const cookies = { laneyard_session: await login(app) };
     await app.inject({
@@ -354,12 +378,10 @@ describe("turning redaction on and off", () => {
       payload: { masked: true },
     });
 
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/projects/sample/secrets/SENTRY_ORG/value",
-      cookies,
-    });
-    expect(res.statusCode).toBe(409);
+    // Out of the logs, and out of the listing — which is what the tick box
+    // decides. Asked for by name it still answers: see the reveal tests above.
+    const list = await app.inject({ method: "GET", url: "/api/projects/sample/secrets", cookies });
+    expect(list.body).not.toContain("acme-mobile");
   });
 
   // The same refusal as on the way in: accepting it would leave someone

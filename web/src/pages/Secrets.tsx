@@ -8,11 +8,18 @@ import { NeededByLanes } from "../components/NeededByLanes";
  * The values one project stores, in two zones: variables and secrets.
  *
  * The line between them is not this screen's invention — it is the user's own
- * tick box. `masked` means "keep this out of the build log", and the vault
- * answers on that basis alone: a value carrying it is never sent back, whoever
- * asks, so those rows offer no `show` and never could. A value without it can be
- * read on request, one named key at a time, which is what makes an imported name
- * something you can check rather than take on faith.
+ * tick box. `masked` means "keep this out of the build log", and it decides how
+ * a value reaches this page rather than whether it may.
+ *
+ * A variable stored in the clear is printed verbatim in every log its lane
+ * produces, so it arrives with the listing and sits on screen: hiding it behind
+ * a click protected nothing and cost the one thing this page is for.
+ *
+ * A secret is never in the listing, and is fetched by name when `show` is
+ * pressed. That is the difference worth keeping — opening this tab reveals
+ * nothing, and every secret on screen was asked for one at a time — and it is
+ * not the same as never being able to look. A passphrase you cannot read is one
+ * you can only replace, which is how the wrong value gets stored twice.
  *
  * The `••••••` is the same marker the logs use — what you see beside a secret
  * here is exactly what a run's output would show.
@@ -83,11 +90,12 @@ export function Secrets() {
   };
 
   /**
-   * Values read one at a time, and forgotten as readily.
+   * Masked values on screen, one at a time and only once asked for.
    *
-   * Kept in a map rather than fetched into the row's own state so that showing
-   * one is a deliberate act with a visible opposite: `hide` drops it, and
-   * leaving the page drops all of them. Nothing here is ever fetched in bulk.
+   * Kept in a map rather than in the row's own state so that showing one is a
+   * deliberate act with a visible opposite: `hide` drops it, and leaving the
+   * page drops all of them. Nothing here is ever fetched in bulk — the listing
+   * carries no masked value, so every one on screen was pressed for.
    */
   const [shown, setShown] = useState<Record<string, string>>({});
 
@@ -120,8 +128,9 @@ export function Secrets() {
     setFormError(null);
     try {
       await api.setSecretMasked(slug, secret.key, !secret.masked);
-      // A value that has just become secret again must not stay on screen.
-      if (!secret.masked) hide(secret.key);
+      // A value that has just become secret must not stay on screen because it
+      // happened to be revealed a moment ago.
+      hide(secret.key);
       load();
     } catch (e) {
       setFormError((e as Error).message);
@@ -161,13 +170,13 @@ export function Secrets() {
    */
   const superseded = (s: SecretSummary): string | null => {
     if (s.key === "APP_STORE_CONNECT_API_KEY_P8") {
-      return "nothing reads this. no action in fastlane looks for that name — an earlier version of this interface asked for it, which was our mistake. the .p8 belongs on the signing tab, as an app store connect key block.";
+      return "nothing reads this name.";
     }
     if (
       s.key === "SUPPLY_JSON_KEY_DATA" &&
       credentials.some((c) => c.kind === "play_service_account")
     ) {
-      return "superseded by the play store service account block on the signing tab. this still works — but the same credential is now stored twice, and nothing says which one a build used.";
+      return "stored twice — nothing says which one a build used.";
     }
     return null;
   };
@@ -179,24 +188,27 @@ export function Secrets() {
    */
   const row = (s: SecretSummary) => {
     const note = superseded(s);
+    // Two ways a value gets on screen and one place they meet: unmasked, it
+    // came with the listing; masked, it came from pressing `show`. Below this
+    // line the row does not care which.
+    const value = s.masked ? shown[s.key] : s.value;
     return (
       <li key={s.key} className={note ? "superseded" : undefined}>
         {/* ✓ kept out of the logs, ○ stored as it is and printed as it is. */}
         <span className={`mark ${s.masked ? "accent" : "dim"}`}>{s.masked ? "✓" : "○"}</span>
         <span className="grow">
-          <span className="bright">{s.key}</span>{" "}
-          {s.masked ? (
-            <span className="dim">••••••</span>
-          ) : shown[s.key] !== undefined ? (
-            <span className="revealed">{shown[s.key]}</span>
-          ) : (
-            <span className="dim">stored as it is</span>
-          )}
-          {/* The one sentence that explains why a row has no `show`. The
-              redaction and the reading are the same decision seen from two
-              sides — Laneyard treats a secret as one end to end — and a
-              missing button with no reason reads as a missing feature. */}
-          {s.masked && <span className="dim"> — kept out of the logs, so never shown here either</span>}
+          {/* Name and value are two facts, not one phrase, and a single space
+              between them made `SENTRY_ORG popotes` read as one string. The
+              name gets a column of its own so every value on the screen starts
+              at the same place — which is what makes a wrong one stand out. */}
+          <span className="pair">
+            <span className="bright key">{s.key}</span>
+            {value === undefined ? (
+              <span className="dim">{s.masked ? "••••••" : "unreadable — store it again"}</span>
+            ) : (
+              <span className="revealed">{value}</span>
+            )}
+          </span>
           {/* On its own line, because it is a sentence about the row rather than
               another word about the value — and because nothing else on this
               screen wraps. Never a removal: it is the user's data, and a build
@@ -205,21 +217,21 @@ export function Secrets() {
           {note && <span className="superseded-note">{note}</span>}
         </span>
 
-        {/* A checkbox, not a verb. This is a property of the secret, and a
-            button beside `show` read as a second way of doing the same
-            thing. The wording is the form's own, word for word, so the
-            thing you tick when storing is the thing you see afterwards. */}
+        {/* A checkbox, not a verb: this is a property of the value, and it is
+            the only control on the row that changes what is on screen beside
+            it. One word, and the same word the form uses. */}
         {s.scope !== "global" && (
-          <label className="row-flag" title="a secret is removed from build logs, and never shown here">
+          <label className="row-flag" title="kept out of the build logs, and never shown here">
             <input type="checkbox" checked={s.masked} onChange={() => void toggleMasked(s)} />
-            keep out of the logs
+            secret
           </label>
         )}
 
-        {/* Offered only where it is allowed, which the line above explains. */}
-        {!s.masked &&
-          s.scope !== "global" &&
-          (shown[s.key] === undefined ? (
+        {/* Only on a masked row: an unmasked value is already there, and a
+            button that hid it again would be a control whose whole effect is to
+            show you less. */}
+        {s.masked &&
+          (value === undefined ? (
             <button onClick={() => void show(s)} title="show the value">
               show
             </button>
@@ -228,6 +240,7 @@ export function Secrets() {
               hide
             </button>
           ))}
+
         {s.scope === "global" ? (
           // A global secret belongs to every project. Editing it from inside
           // one would hide that, so from here it is only ever reported.
@@ -251,18 +264,12 @@ export function Secrets() {
 
   return (
     <>
-      {/* What this tab is, before the first heading names a half of it: someone
-          landing here cold reads one sentence about values, and the two
-          headings under it are the one distinction that matters. */}
-      <p className="dim">
-        the values this project's lanes read. typed here, encrypted at rest, and handed to every run
-        as environment variables.
-      </p>
-
-      <h2 className="section" style={{ marginTop: 16 }}>
-        variables
-      </h2>
-      <p className="dim">stored as they are — printed in the logs, and readable here on request.</p>
+      {/* No preamble. The two headings, the marks and the `secret` box carry the
+          whole distinction, and a paragraph restating them was read once by
+          nobody and skipped forever after. What is left on this screen is the
+          values themselves and the words that only appear when something is
+          wrong — a refusal, a row nothing reads. */}
+      <h2 className="section">variables</h2>
 
       {listError && <p className="status-failed">unreadable secrets — {listError}</p>}
       {loading && <p className="dim">reading vault…</p>}
@@ -274,22 +281,8 @@ export function Secrets() {
       <h2 className="section" style={{ marginTop: 20 }}>
         secrets
       </h2>
-      <p className="dim">
-        the same variables, kept out of the build logs — and never sent back, not even to this page.
-      </p>
       {!loading && !listError && kept.length === 0 && <p className="dim">no secrets yet.</p>}
       <ul className="rows">{kept.map(row)}</ul>
-
-      {/* One quiet line, where somebody looking for a keystore would look: this
-          page held those blocks until now, and a thing that moved must say where
-          it went rather than leave an absence to be read as a removal. */}
-      <p className="dim" style={{ marginTop: 10 }}>
-        a file rather than a value — an app store connect key, a keystore, a play store service
-        account — is stored on its own tab.{" "}
-        <Link to={`/p/${slug}/signing`} className="accent">
-          signing →
-        </Link>
-      </p>
 
       {/* Before the free-form form, because it is the reason most people open
           this page — and because a name that is already on screen is a name
@@ -309,23 +302,33 @@ export function Secrets() {
           autoComplete="off"
           aria-label="name"
         />
+        {/* Plain text, including for something about to be kept out of the
+            logs. Masking here protected nothing — the value is on this machine,
+            typed by the person who owns it — and cost the one moment when
+            seeing it matters: a pasted token with a newline in it, a password
+            typed on the wrong keyboard layout, stored and wrong until a build
+            fails days later. Hiding starts once the value is stored, and only
+            for the values that asked for it. */}
         <input
-          type="password"
+          type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="value"
-          autoComplete="new-password"
+          spellCheck={false}
+          autoComplete="off"
           aria-label="value"
         />
-        <label>
+        {/* The same word as the row's own box, and the title says the rest for
+            whoever wants it. It used to read "keep this out of the logs", which
+            is what the box does rather than what it means. */}
+        <label title="kept out of the build logs, and never shown here">
           <input type="checkbox" checked={masked} onChange={(e) => setMasked(e.target.checked)} />
-          keep this out of the logs
+          secret
         </label>
         <button type="submit" disabled={saving || key.trim() === "" || value === ""}>
           store
         </button>
       </form>
-      <p className="dim">an existing name is replaced.</p>
 
       {formError && <p className="status-failed">refused — {formError}</p>}
     </>

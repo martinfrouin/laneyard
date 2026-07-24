@@ -10,8 +10,10 @@ Read this before putting Laneyard on a network.
 - **Roles are enforced by the server, not the interface.** One table names the admin-only routes and
   one hook reads it. What a builder is not shown is also what a builder is refused.
 - **Secrets are encrypted at rest** with AES-256-GCM, under a key in `~/.laneyard/key` — outside the
-  database, mode `600`, and Laneyard refuses to start if anyone else can read it. No route ever sends
-  a value back, which is why the Secrets tab has no reveal button.
+  database, mode `600`, and Laneyard refuses to start if anyone else can read it.
+- **A masked value is never in a listing.** It is read one key at a time, by an admin, when `show` is
+  pressed on that line — so opening the Secrets tab reveals nothing. Unmasked variables come with the
+  listing: they are printed verbatim in every log their lane produces.
 - **A signing block is on disk only while a run needs it**, in `~/.laneyard/runs/<run id>/secrets/`
   (mode `600` in a `700` directory), removed when the run ends. Its secret fields are stripped from
   output like any masked secret.
