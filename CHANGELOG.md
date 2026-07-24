@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.4
+
+### Setup's last question says what it will write
+
+`Set up "popotheque"?` arrived at the end of a run of unrelated questions, with
+the two files it writes explained far enough up the screen to have scrolled off —
+so the one question that actually commits to something was the one with the least
+on screen. It now names both files right above itself, and says which one you
+commit and which one is already there and will be left alone.
+
 ## 0.6.3
 
 ### Adoption names every argument it rewrites

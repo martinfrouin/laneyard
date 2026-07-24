@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import { Document, parseDocument, YAMLSeq } from "yaml";
 import { VALID_NAME, ensureFirstAdmin, hasAccount } from "../config/accounts.js";
@@ -269,7 +269,8 @@ export async function runSetupCommand(
     // silently ignored and the file landed beside the wrong app.
     const appRoot = appRootOf(fastlaneDir);
     const repoConfigPath = join(repoRoot(cwd, d.subPath), appRoot, LANEYARD_YML);
-    if (await fileExists(repoConfigPath)) {
+    const repoConfigExists = await fileExists(repoConfigPath);
+    if (repoConfigExists) {
       process.stdout.write(
         "\n" + warn(`${LANEYARD_YML} already exists in the repository.\n`) +
           dim("  Its values win over anything written here; it will be left alone.\n"),
@@ -305,7 +306,17 @@ export async function runSetupCommand(
     // right, and the file is there to be edited when they are not.
     const globs = d.artifactGlobs;
 
-    if (!(await asker.confirm(`\n${bold(`Set up "${slug}"`)}?`, true))) {
+    // What pressing Return does, named right above the question. It used to be a
+    // bare `Set up "x"?` at the end of a run of unrelated questions, with the two
+    // files it writes explained far enough up the screen to have scrolled off.
+    const writes =
+      "\n" +
+      dim(`  ${configPath}\n`) +
+      dim(`    this machine's registry${adminName === null ? "" : ", and your account"}\n`) +
+      dim(`  ${relative(cwd, repoConfigPath) || LANEYARD_YML}\n`) +
+      dim(`    how it builds — ${repoConfigExists ? "already there, left as it is" : "commit it"}\n`);
+
+    if (!(await asker.confirm(`${writes}\n${bold(`Set up "${slug}"`)}?`, true))) {
       process.stdout.write(dim("Nothing written.") + "\n");
       return 0;
     }

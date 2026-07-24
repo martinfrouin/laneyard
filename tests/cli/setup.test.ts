@@ -8,6 +8,8 @@ import { acceptingAsker } from "../../src/cli/prompt.js";
 import { addProjectToConfig, fastlaneDirIsTracked, runSetupCommand } from "../../src/cli/setup.js";
 import { tmpDir } from "../fixtures/repos.js";
 
+const LANEYARD_YML_NAME = "laneyard.yml";
+
 /** Runs `fn`, returning everything it wrote to stdout as plain text. */
 async function captureStdout(fn: () => Promise<void>): Promise<string> {
   const original = process.stdout.write.bind(process.stdout);
@@ -252,6 +254,29 @@ describe("runSetupCommand", () => {
     };
     expect(written.projects[0]).not.toHaveProperty("fastlane_dir");
     expect(written.projects[0]).not.toHaveProperty("runtime");
+  });
+
+  it("says which files it will write before asking to confirm", async () => {
+    // The last question used to be a bare `Set up "x"?` after a run of unrelated
+    // ones — nothing on screen said what pressing Return would do.
+    const { app, configPath } = await monorepo();
+    const asked: string[] = [];
+
+    await runSetupCommand(app, configPath, {
+      asker: {
+        ask: async (_label, proposed) => proposed,
+        confirm: async (question) => {
+          asked.push(question);
+          return true;
+        },
+        close: () => {},
+      },
+    });
+
+    const final = asked.find((q) => q.includes("Set up"));
+    expect(final).toBeDefined();
+    expect(final).toContain("config.yml");
+    expect(final).toContain(LANEYARD_YML_NAME);
   });
 
   it("offers the fastlane directory as you would write it from where you are", async () => {
