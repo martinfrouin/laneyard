@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { FastifyInstance } from "fastify";
 import { glob } from "tinyglobby";
@@ -123,9 +123,13 @@ async function androidSigning(
   workspacePath: string,
   appRoot: string,
   unreachable: string | null,
-): Promise<{ androidSigning: Known<SigningFacts>; signingFilePresent: boolean }> {
+): Promise<{
+  androidSigning: Known<SigningFacts>;
+  signingFilePresent: boolean;
+  signingFileAt: string | null;
+}> {
   if (unreachable !== null) {
-    return { androidSigning: { ok: false, reason: unreachable }, signingFilePresent: false };
+    return { androidSigning: { ok: false, reason: unreachable }, signingFilePresent: false, signingFileAt: null };
   }
 
   const build = await findAndroidBuild(join(workspacePath, appRoot));
@@ -133,13 +137,38 @@ async function androidSigning(
     return {
       androidSigning: { ok: false, reason: "no android build.gradle found in the clone" },
       signingFilePresent: false,
+      signingFileAt: null,
     };
   }
 
   const present =
     build.facts.conditionalOn === null ? false : await isPresent(build, build.facts.conditionalOn);
 
-  return { androidSigning: { ok: true, value: build.facts }, signingFilePresent: present };
+  return {
+    androidSigning: { ok: true, value: build.facts },
+    signingFilePresent: present,
+    signingFileAt: propertiesFileAt(build, join(workspacePath, appRoot)),
+  };
+}
+
+/**
+ * Where the build reads the properties file, relative to the app.
+ *
+ * The scope resolved into a path someone can paste into the block's form, and
+ * the same resolution `runner/gradle-properties.ts` makes — `root` is the Gradle
+ * root, `module` the app module. `unknown` stays null: that is the case the
+ * configured path exists to settle, and inventing a likely answer for it would
+ * put a file in the wrong directory with nothing to say it was a guess.
+ */
+function propertiesFileAt(build: AndroidBuild, appRoot: string): string | null {
+  const on = build.facts.conditionalOn;
+  if (on === null) return null;
+  const dir = on.scope === "root" ? build.gradleRoot : on.scope === "module" ? build.moduleDir : null;
+  if (dir === null) return null;
+  const inside = relative(appRoot, join(dir, on.name));
+  // A build outside the app root is a shape nothing here can name relative to
+  // it, and a `../` in this field would be refused by the runner anyway.
+  return inside.startsWith("..") || isAbsolute(inside) ? null : inside;
 }
 
 /**
@@ -165,6 +194,34 @@ function keystoreSetting(vault: Vault, slug: string): KeystoreSetting | null {
 }
 
 export async function registerReadinessRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
+  /**
+   * Where this project's build reads its signing properties file.
+   *
+   * One fact, read from the clone, and the whole of what the keystore block's
+   * form cannot ask for itself: the field is a path relative to the app, and
+   * nobody types one of those correctly from a build script they are not looking
+   * at. Pre-filled with this, a wrong value is visible as a value that differs.
+   *
+   * Cheap enough to answer on opening a screen — two files parsed, no git, no
+   * bundler — which is why it is not part of the readiness answer even though
+   * that computes it too. Null for a project with no android build, or one whose
+   * script names the file in a way the parser cannot resolve to a directory.
+   */
+  app.get("/api/projects/:slug/signing-hints", async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    const entry = ctx.config.project(slug);
+    if (!entry) return reply.code(404).send({ error: "Unknown project" });
+
+    const workspacePath = ctx.workspacePath(slug);
+    const resolved = await ctx.config.resolve(slug, workspacePath).catch(() => null);
+    const appRoot = appRootOf(resolved?.settings.fastlane_dir ?? "fastlane");
+
+    // The clone as it stands, never fetched for this: a screen opening must not
+    // pull a repository, and a project never cloned simply has no hint to give.
+    const build = await findAndroidBuild(searchDir(workspacePath, appRoot)).catch(() => null);
+    return { propertiesPath: build === null ? null : propertiesFileAt(build, searchDir(workspacePath, appRoot)) };
+  });
+
   /**
    * Computed only when asked for.
    *

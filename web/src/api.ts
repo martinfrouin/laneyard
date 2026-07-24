@@ -151,6 +151,8 @@ export interface CredentialSummary {
   fileName: string;
   varNames: Record<string, string>;
   updatedAt: string;
+  /** What was typed, secret fields excepted. An unanswered one is absent. */
+  fields: Record<string, string>;
 }
 
 /** A block as it goes up: taken whole or refused whole, the file included. */
@@ -371,6 +373,14 @@ export const api = {
     fetch(`/api/projects/${slug}/credentials`).then(json<CredentialSummary[]>),
 
   /**
+   * Where the build reads its signing properties file, relative to the app —
+   * the one thing the keystore block's form cannot ask for itself. Null when
+   * there is no android build, or no clone to read one from.
+   */
+  signingHints: (slug: string) =>
+    fetch(`/api/projects/${slug}/signing-hints`).then(json<{ propertiesPath: string | null }>),
+
+  /**
    * Stores one block. The file rides along base64 in the JSON body rather than
    * as a multipart upload: a `.p8` is two kilobytes, and the browser encodes it
    * in one call, so carrying it that way costs a dependency on both sides for
@@ -386,6 +396,37 @@ export const api = {
 
   deleteCredential: (slug: string, kind: CredentialKind) =>
     fetch(`/api/projects/${slug}/credentials/${kind}`, { method: "DELETE" }).then(empty),
+
+  /**
+   * Corrects fields of a stored block without giving the file again. `PUT` is
+   * for a block arriving; this is for one already in place, where re-uploading
+   * a `.jks` to fix a mistyped password is another chance to mistype it.
+   */
+  patchCredential: (
+    slug: string,
+    kind: CredentialKind,
+    changes: {
+      fileName?: string;
+      fileBase64?: string;
+      fields?: Record<string, string>;
+      varNames?: Record<string, string>;
+    },
+  ) =>
+    fetch(`/api/projects/${slug}/credentials/${kind}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(changes),
+    }).then(empty),
+
+  /**
+   * One secret field of one block, asked for by name — the same deliberate act
+   * as revealing a secret. The listing carries the fields that are not secret,
+   * so a password is on screen only because somebody pressed `show`.
+   */
+  revealCredentialField: (slug: string, kind: CredentialKind, field: string) =>
+    fetch(`/api/projects/${slug}/credentials/${kind}/fields/${encodeURIComponent(field)}/value`).then(
+      json<{ field: string; value: string }>,
+    ),
 
   fastfile: (slug: string) => fetch(`/api/projects/${slug}/fastfile`).then(json<FastfileContent>),
 

@@ -45,9 +45,9 @@ The variables your lanes read go into an encrypted vault, from a project's Secre
 there belongs to that project alone — nothing is shared with another, and nothing reaches a run that
 project did not store.
 
-A secret is write-only: the server never sends a masked value back, so no browser holds one. What you
-did not mark secret — `APP_VERSION`, an issuer id — is shown on request, one key at a time. Masking
-and unmasking switch which it is without retyping the value.
+A masked value is never in a listing: it is read one key at a time, when `show` is pressed on that
+line, so opening the tab reveals nothing. What you did not mark secret — `APP_VERSION`, an issuer id
+— comes with the listing. Masking and unmasking switch which it is without retyping the value.
 
 Each becomes an environment variable for every run of its project, kept out of the logs. A masked
 value must be at least four characters (see [Security](security.md)).
@@ -87,9 +87,10 @@ that make it usable, taken whole or refused.
 | android upload keystore | `.jks` or `.keystore` | key alias, store password, key password |
 | play store service account | JSON | — |
 
-They live in the **signing** part of the Secrets tab, encrypted at rest, and never come back out to a
-browser: a stored block shows its file name and nothing more, so replacing one means giving it again
-in full. A block belongs to one project, and is admin-only. Five apps under one developer account
+They live in the **signing** part of the Secrets tab, encrypted at rest. A stored block shows what you
+typed — an alias, a key id — and a password on `show`, one at a time, the same way a secret is read.
+A block arriving is taken whole or refused; once stored, each part changes on its own: `edit` a field
+or an exported name, `replace` the file without retyping the fields beside it. A block belongs to one project, and is admin-only. Five apps under one developer account
 each hold their own copy of the key: rotating it means replacing five.
 
 **A block becomes real files for the length of a run**, written to
@@ -105,6 +106,9 @@ The name you store is the only one exported.
 **The keystore block can also supply `key.properties`.** Flutter's build script signs with the debug
 config when that gitignored file is absent — which, on a build server, it always is. Laneyard writes
 it from the block for the length of the run rather than asking you to change your build script. Where
-it goes and what its keys are called are asked on the block.
+it goes and what its keys are called are asked on the block — the path arrives pre-filled with where
+your build reads it, and a stored one that disagrees is flagged there and on the checklist. Left
+empty, Laneyard finds the place itself; filled in with somewhere your build does not read, the file
+lands where nothing looks and the build signs with the debug key without failing.
 
 Only projects that sign need any of this: the three blocks are an offer, not a gate.

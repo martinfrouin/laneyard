@@ -52,6 +52,43 @@ describe("Vault credential blocks", () => {
     expect(JSON.stringify(summary)).not.toContain(KEYSTORE_FIELDS.store_password);
   });
 
+  it("attaches the fields that are not secret, and only those", async () => {
+    const { vault: v } = await vault();
+    await v.setCredential("app", "android_keystore", {
+      fileName: "upload.jks",
+      fileBytes: Buffer.from("keystore"),
+      fields: KEYSTORE_FIELDS,
+      varNames: defaultVarNames("android_keystore"),
+    });
+
+    const listed = v.listCredentialsWithFields("app");
+    // The alias is readable, which is the point: `stored` said the same word
+    // about a right one and one missing a character.
+    expect(listed[0]!.fields).toEqual({ key_alias: "upload" });
+    expect(JSON.stringify(listed)).not.toContain(KEYSTORE_FIELDS.store_password);
+    expect(JSON.stringify(listed)).not.toContain(KEYSTORE_FIELDS.key_password);
+
+    expect(v.revealCredentialField("app", "android_keystore", "store_password")).toBe(
+      KEYSTORE_FIELDS.store_password,
+    );
+    expect(v.revealCredentialField("app", "apple_asc", "key_id")).toBeNull();
+  });
+
+  it("keeps its summary when a block will not decrypt", async () => {
+    const { vault: v, db } = await vault();
+    await v.setCredential("app", "android_keystore", {
+      fileName: "upload.jks",
+      fileBytes: Buffer.from("keystore"),
+      fields: KEYSTORE_FIELDS,
+      varNames: defaultVarNames("android_keystore"),
+    });
+    db.prepare("UPDATE credential SET fields_enc = ? WHERE kind = ?").run("v1.aaaa.bbbb.cccc", "android_keystore");
+
+    const listed = v.listCredentialsWithFields("app");
+    expect(listed[0]!.fileName).toBe("upload.jks");
+    expect(listed[0]!.fields).toEqual({});
+  });
+
   it("refuses to hand back a block it cannot decrypt", async () => {
     const { vault: v, db } = await vault();
     await v.setCredential("app", "android_keystore", {

@@ -45,6 +45,21 @@ export function Signing() {
   useEffect(load, [slug]);
 
   /**
+   * Where this project's build reads its signing properties file, read from the
+   * clone. It pre-fills the keystore's path field and flags a stored one that
+   * disagrees — the field whose wrong value produces an artifact signed with the
+   * debug key and no error anywhere. Its failure is silent on purpose: a project
+   * with no android build, or one never cloned, simply has no hint to offer.
+   */
+  const [propertiesPath, setPropertiesPath] = useState<string | null>(null);
+  useEffect(() => {
+    api
+      .signingHints(slug)
+      .then((h) => setPropertiesPath(h.propertiesPath))
+      .catch(() => setPropertiesPath(null));
+  }, [slug]);
+
+  /**
    * Which blocks are open, which is a fact about this screen and about nothing
    * else. Not stored, not sent anywhere, and gone when the page is: what
    * someone opened to read is not a setting of their project.
@@ -77,6 +92,7 @@ export function Signing() {
                 slug={slug}
                 spec={spec}
                 stored={credentials.find((c) => c.kind === spec.kind)}
+                propertiesPath={propertiesPath}
                 open={opened.includes(spec.kind)}
                 onToggle={() => toggleBlock(spec.kind)}
                 onChanged={load}

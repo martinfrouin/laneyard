@@ -843,6 +843,25 @@ export interface ReleaseSigningInput {
   conditionalFilePresent: boolean;
   /** The keystore block that would supply that file, or null when there is none. */
   keystore?: KeystoreSetting | null;
+  /**
+   * Where the build reads that file, relative to the app — resolved against the
+   * clone, so `android/key.properties` rather than a scope. Null when the parser
+   * could not resolve the directory, which is the case the configured path
+   * exists for.
+   */
+  conditionalFileAt?: string | null;
+}
+
+/**
+ * Do the configured path and the one the build reads point at the same file?
+ *
+ * Compared as text after normalising, which is all that can be done here: the
+ * clone is not this function's to stat, and `./android/key.properties` and
+ * `android/key.properties` are the same answer typed twice.
+ */
+function samePath(configured: string, readAt: string): boolean {
+  const clean = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+/g, "/").replace(/\/$/, "");
+  return clean(configured) === clean(readAt);
 }
 
 /**
@@ -912,6 +931,36 @@ export function checkReleaseSigning(input: ReleaseSigningInput): Check {
   if (conditionalOn) {
     const { name } = conditionalOn;
     const writes = writesAt(keystore, conditionalOn);
+
+    /**
+     * The configured path, pointing somewhere the build does not read.
+     *
+     * The one way this check can be wrong while every part of it is right: the
+     * setting wins outright in `runner/gradle-properties.ts` — it exists
+     * precisely because detection cannot always tell — so a path off by a
+     * directory is written, found by nobody, and the release build falls back
+     * to the debug config. That is this check's own failure mode, arrived at
+     * through the field meant to prevent it.
+     *
+     * Said rather than refused. The parser can be wrong about the directory too,
+     * and a correct path overruled by a bad reading would be a build that cannot
+     * run at all — worse than one that says what it is about to do.
+     */
+    const configured = keystore?.propertiesPath ?? null;
+    const readAt = input.conditionalFileAt ?? null;
+    if (configured !== null && readAt !== null && !samePath(configured, readAt)) {
+      return {
+        ...META.releaseSigning,
+        ...warn(
+          `the keystore block names ${configured}, and the build reads ${name}${where(conditionalOn)} — ` +
+            `at ${readAt}. Laneyard writes the file where the block says, so the build finds none and ` +
+            "signs with the debug key: it does not fail, and the store rejects the artifact.",
+          `Set the properties file path to ${readAt}, or clear it and Laneyard writes it where the ` +
+            "build reads it.",
+          "signing",
+        ),
+      };
+    }
 
     // What Laneyard will do, in the words of the file the build already asks
     // for. The keys are named rather than assumed silently: they are a
@@ -1123,6 +1172,8 @@ export interface ReadinessInput {
   androidSigning: Known<SigningFacts>;
   /** Whether the properties file signing is conditional on is in the clone. */
   signingFilePresent: boolean;
+  /** Where the build reads that file, relative to the app, when it can be told. */
+  signingFileAt?: string | null;
   /**
    * The signing blocks this project holds, by kind. Names of kinds, and nothing
    * else: no file, no field, no variable name.
@@ -1213,6 +1264,7 @@ export const SECTIONS: { platform: SectionPlatform; checks: CheckRow[] }[] = [
           checkReleaseSigning({
             gradle: i.androidSigning,
             conditionalFilePresent: i.signingFilePresent,
+            conditionalFileAt: i.signingFileAt ?? null,
             keystore: i.keystore ?? null,
           }),
       },

@@ -1101,6 +1101,62 @@ describe("checkReleaseSigning", () => {
     expect(check.detail).toMatch(/android\/key\.properties/);
   });
 
+  // The way this check can be wrong while every part of it is right: the
+  // configured path wins at run time, so one off by a directory is written,
+  // found by nobody, and the release build signs with the debug key.
+  it("warns when the configured path is not where the build reads", () => {
+    const check = checkReleaseSigning({
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "root" },
+      }),
+      conditionalFilePresent: false,
+      conditionalFileAt: "android/key.properties",
+      keystore: {
+        propertyNames: ["storeFile", "storePassword", "keyPassword", "keyAlias"],
+        propertiesPath: "key.properties",
+      },
+    });
+    expect(check.state).toBe("warn");
+    expect(check.detail).toMatch(/android\/key\.properties/);
+    expect(check.detail).toMatch(/debug key/);
+    expect(check.fix).toMatch(/android\/key\.properties/);
+  });
+
+  it("says nothing when the two paths are the same file typed twice", () => {
+    const check = checkReleaseSigning({
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "root" },
+      }),
+      conditionalFilePresent: false,
+      conditionalFileAt: "android/key.properties",
+      keystore: {
+        propertyNames: ["storeFile", "storePassword", "keyPassword", "keyAlias"],
+        propertiesPath: "./android/key.properties",
+      },
+    });
+    expect(check.state).toBe("ok");
+  });
+
+  // The parser can be wrong about the directory too, and a correct path
+  // overruled by a bad reading would be a build that cannot run at all.
+  it("does not second-guess the configured path when nothing resolved a directory", () => {
+    const check = checkReleaseSigning({
+      gradle: facts({
+        releaseCanUseDebugKey: true,
+        conditionalOn: { name: "key.properties", scope: "unknown" },
+      }),
+      conditionalFilePresent: false,
+      conditionalFileAt: null,
+      keystore: {
+        propertyNames: ["storeFile", "storePassword", "keyPassword", "keyAlias"],
+        propertiesPath: "config/key.properties",
+      },
+    });
+    expect(check.state).toBe("ok");
+  });
+
   it("promises nothing when nobody can say which directory the file goes in", () => {
     // The runner declines to write in that case — writing into the likelier of
     // two directories would leave the build signing with the debug key beside a

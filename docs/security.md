@@ -16,7 +16,7 @@ Read this before putting Laneyard on a network.
   listing: they are printed verbatim in every log their lane produces.
 - **A signing block is on disk only while a run needs it**, in `~/.laneyard/runs/<run id>/secrets/`
   (mode `600` in a `700` directory), removed when the run ends. Its secret fields are stripped from
-  output like any masked secret.
+  output like any masked secret, and read back the same way: one field, on `show`, by an admin.
 - **Masked values are removed from output as it is written**, not when displayed — so the log file,
   the live stream and the stored error summary all hold `••••••`, even across two chunks of output.
 - **Do not put secrets in `config.yml`.** It is a plain file with ordinary permissions.

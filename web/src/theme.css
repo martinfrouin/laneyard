@@ -283,6 +283,13 @@ code { color: var(--text-bright); }
 
 .block-body[hidden] { display: none; }
 
+/* What was typed, one field to a line. `.pair` gives the labels a column of
+   their own, the same arrangement the secrets screen uses and for the same
+   reason: every value starting at the same place is what makes a wrong one
+   stand out. */
+.field-list > li { display: flex; align-items: baseline; gap: 10px; }
+.field-list input[type="text"] { width: 32ch; }
+
 /* The group's name, above its blocks. Dim and lowercase like every other
    sentence on this screen: it labels, it does not announce. */
 .credentials-group .platform { margin: 10px 0 0; }

@@ -236,6 +236,105 @@ export class Vault {
     return this.credentials.list(projectSlug);
   }
 
+  /**
+   * The same listing, with the fields that are not secret attached.
+   *
+   * The exact trade `listWithValues` makes for secrets, made again here and for
+   * a reason this project learned the hard way: a block whose every field reads
+   * `stored` cannot be checked. An alias with a character missing, a key id off
+   * by a digit, and the screen says the same word it says when they are right —
+   * so the mistake is found by a build that fails an hour later, if it fails at
+   * all rather than shipping a debug-signed artifact.
+   *
+   * A field marked `secret` is never here. Those come one at a time through
+   * `revealCredentialField`, so opening the screen puts no password in a
+   * browser.
+   *
+   * An unanswered optional field is absent rather than empty: the block never
+   * held it, and `""` would read as an answer somebody gave. A block that will
+   * not decrypt keeps its summary and loses its fields — the same leniency the
+   * rest of this file takes, and the screen still says what file is in place.
+   */
+  listCredentialsWithFields(projectSlug: string): (CredentialSummary & { fields: Record<string, string> })[] {
+    return this.credentials.list(projectSlug).map((summary) => {
+      try {
+        const block = this.resolveCredential(projectSlug, summary.kind);
+        const fields: Record<string, string> = {};
+        for (const field of fieldsOf(summary.kind)) {
+          const value = block?.fields[field.name];
+          if (!field.secret && value) fields[field.name] = value;
+        }
+        return { ...summary, fields };
+      } catch {
+        return { ...summary, fields: {} };
+      }
+    });
+  }
+
+  /**
+   * One field of one block, in the clear — a password included, on request.
+   *
+   * Deliberately as narrow as `reveal`: one named field of one named block, by
+   * an admin, one request at a time. That is what keeps a keystore password a
+   * secret while still letting somebody check the one they suspect of a typo,
+   * which is the whole reason this exists — a password can only be replaced by
+   * uploading the whole block again, and replacing a value you cannot read is
+   * how the wrong one gets stored twice.
+   *
+   * Null for a block that is not stored or a field it does not hold.
+   */
+  revealCredentialField(projectSlug: string, kind: CredentialKind, field: string): string | null {
+    const block = this.resolveCredential(projectSlug, kind);
+    return block?.fields[field] ?? null;
+  }
+
+  /**
+   * Corrects fields of a stored block, leaving its file alone.
+   *
+   * A block is still taken whole on the way in: `setCredential` is what "taken
+   * whole or refused" means, and it is right for a block arriving for the first
+   * time — a keystore with no alias is not a partial success. It was wrong for a
+   * block already in place. A password typed with one character missing could
+   * only be fixed by uploading the `.jks` again, which is asking someone to
+   * re-supply the one part that was never in doubt, and every re-supply is
+   * another chance to get the part that was in doubt wrong a second time.
+   *
+   * So: the fields given are the fields changed, and nothing else moves. An
+   * empty value removes an optional field, which is how an answer is taken back
+   * — the reader then falls back to what it would have used anyway. The caller
+   * decides what may be emptied; this stores what it is told.
+   *
+   * Returns false when there is no such block. Throws, through
+   * `resolveCredential`, on a block that will not decrypt: rewriting one of its
+   * fields would mean re-encrypting a file read as garbage.
+   */
+  async updateCredential(
+    projectSlug: string,
+    kind: CredentialKind,
+    changes: {
+      file?: { fileName: string; fileBytes: Buffer };
+      fields?: Record<string, string>;
+      varNames?: Record<string, string>;
+    },
+  ): Promise<boolean> {
+    const block = this.resolveCredential(projectSlug, kind);
+    if (!block) return false;
+
+    const fields = { ...block.fields };
+    for (const [name, value] of Object.entries(changes.fields ?? {})) {
+      if (value === "") delete fields[name];
+      else fields[name] = value;
+    }
+
+    await this.setCredential(projectSlug, kind, {
+      fileName: changes.file?.fileName ?? block.fileName,
+      fileBytes: changes.file?.fileBytes ?? block.fileBytes,
+      fields,
+      varNames: { ...block.varNames, ...(changes.varNames ?? {}) },
+    });
+    return true;
+  }
+
   removeCredential(projectSlug: string, kind: CredentialKind): boolean {
     return this.credentials.remove(projectSlug, kind);
   }

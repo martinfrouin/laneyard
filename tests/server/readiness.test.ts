@@ -288,6 +288,57 @@ describe("readiness API", () => {
     expect(signing.detail).toMatch(/is not in the clone/);
   }, SLOW);
 
+  // The field nobody fills in correctly from memory, answered from the clone so
+  // the form can arrive pre-filled rather than blank.
+  it("says where the build reads its properties file", async () => {
+    const { app } = await harness({
+      files: { "app/build.gradle.kts": FLUTTER_KTS },
+      uses: async () => GRADLE_USES,
+    });
+    const cookies = { laneyard_session: await login(app) };
+
+    // The clone has to exist first: this route never fetches one.
+    await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
+
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/signing-hints", cookies });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ propertiesPath: "key.properties" });
+  }, SLOW);
+
+  // What happened in the field: a path a directory off, a file written where
+  // nothing reads it, and an `.aab` signed with the debug key that the store
+  // refused. The run still goes — the parser can be wrong too — but nobody has
+  // to find out from Google.
+  it("warns when the keystore block names a path the build does not read", async () => {
+    const { app } = await harness({
+      files: { "app/build.gradle.kts": FLUTTER_KTS },
+      uses: async () => GRADLE_USES,
+    });
+    const cookies = { laneyard_session: await login(app) };
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/projects/sample/credentials/android_keystore",
+      cookies,
+      payload: {
+        fileName: "upload.jks",
+        fileBase64: Buffer.from("not really a keystore").toString("base64"),
+        fields: {
+          key_alias: "upload",
+          store_password: "a-store-password",
+          key_password: "a-key-password",
+          properties_path: "android/key.properties",
+        },
+      },
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/readiness", cookies });
+    const signing = byId(allChecks(res.json() as Report), "release-signing");
+    expect(signing.state).toBe("warn");
+    expect(signing.detail).toMatch(/debug key/);
+    expect(signing.detail).toMatch(/android\/key\.properties/);
+  }, SLOW);
+
   it("still counts an unmarked properties file as present", async () => {
     // The complement matters as much as the case above: a fix that made every
     // file invisible would pass that test while destroying this check for
