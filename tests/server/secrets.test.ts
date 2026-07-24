@@ -576,3 +576,111 @@ describe("GET /api/projects/:slug/required-secrets", () => {
     expect(environment.detail).not.toMatch(/SUPPLY_JSON_KEY/);
   }, 60_000);
 });
+
+describe("the environment file", () => {
+  it("stores the flag on the way in, and reports it in the listing", async () => {
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/projects/sample/secrets/API_URL",
+      cookies,
+      payload: { value: "https://api.example.com", masked: false, inEnvFile: true },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/api/projects/sample/secrets/MATCH_PASSWORD",
+      cookies,
+      payload: { value: "correct-horse-battery" },
+    });
+
+    const listed = (await app.inject({ method: "GET", url: "/api/projects/sample/secrets", cookies })).json();
+    expect(listed).toEqual([
+      { key: "API_URL", masked: false, inEnvFile: true, value: "https://api.example.com" },
+      { key: "MATCH_PASSWORD", masked: true, inEnvFile: false },
+    ]);
+  });
+
+  it("flips one flag without disturbing the other", async () => {
+    // They answer different questions about the same row — what a run prints,
+    // and what a build reads from disk. A request about one must not decide the
+    // other by omission.
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    const url = "/api/projects/sample/secrets/API_URL";
+    await app.inject({ method: "PUT", url, cookies, payload: { value: "https://api.example.com" } });
+
+    const flag = async (
+      payload: { masked?: boolean; inEnvFile?: boolean },
+    ): Promise<{ masked: boolean; inEnvFile: boolean }> => {
+      await app.inject({ method: "PATCH", url, cookies, payload });
+      const listed = (await app.inject({
+        method: "GET",
+        url: "/api/projects/sample/secrets",
+        cookies,
+      })).json() as { masked: boolean; inEnvFile: boolean }[];
+      return listed[0]!;
+    };
+
+    expect(await flag({ inEnvFile: true })).toMatchObject({ masked: true, inEnvFile: true });
+    expect(await flag({ masked: false })).toMatchObject({ masked: false, inEnvFile: true });
+    expect(await flag({ inEnvFile: false })).toMatchObject({ masked: false, inEnvFile: false });
+  });
+
+  it("refuses a request that flips nothing", async () => {
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+    await app.inject({
+      method: "PUT",
+      url: "/api/projects/sample/secrets/API_URL",
+      cookies,
+      payload: { value: "https://api.example.com" },
+    });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/projects/sample/secrets/API_URL",
+      cookies,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("shows the file that will be written, and never a masked value in it", async () => {
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+
+    for (const [key, value, masked] of [
+      ["API_URL", "https://api.example.com", false],
+      ["SENTRY_DSN", "https://abc@sentry.example/42", true],
+      ["MATCH_PASSWORD", "correct-horse-battery", true],
+    ] as const) {
+      await app.inject({
+        method: "PUT",
+        url: `/api/projects/sample/secrets/${key}`,
+        cookies,
+        payload: { value, masked, inEnvFile: key !== "MATCH_PASSWORD" },
+      });
+    }
+
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/env-file", cookies });
+    expect(res.statusCode).toBe(200);
+
+    const body = (res.json() as { body: string }).body;
+    expect(body).toBe("API_URL=https://api.example.com\nSENTRY_DSN=••••\n");
+    // The variable that was not ticked is absent, and no masked value left the
+    // server — the property the whole vault rests on.
+    expect(res.body).not.toContain("MATCH_PASSWORD");
+    expect(res.body).not.toContain("sentry.example");
+    expect(res.body).not.toContain("correct-horse-battery");
+  });
+
+  it("says the project names no file when it does not", async () => {
+    const { app } = await harness();
+    const cookies = { laneyard_session: await login(app) };
+
+    const res = await app.inject({ method: "GET", url: "/api/projects/sample/env-file", cookies });
+    expect(res.json()).toMatchObject({ path: null, provenance: null });
+  });
+});

@@ -59,11 +59,22 @@ function escape(value: string): string {
 export function renderDotenv(values: Record<string, string>): string {
   return Object.keys(values)
     .sort()
-    .map((key) => {
-      const value = values[key]!;
-      return `${key}=${BARE.test(value) ? value : `"${escape(value)}"`}\n`;
-    })
+    .map((key) => dotenvLine(key, values[key]!))
     .join("");
+}
+
+/**
+ * One `KEY=value` line, quoted if the value needs it.
+ *
+ * Exported for the preview the secrets screen shows, which renders a stand-in
+ * for every masked value rather than the value. It has to compose its own lines
+ * — a row of dots is not ASCII, so it would come back quoted, and the quotes
+ * would be a claim about the real value that nobody can check. It still goes
+ * through this function for everything it does show, so the preview and the
+ * file cannot drift apart in how they write a line.
+ */
+export function dotenvLine(key: string, value: string): string {
+  return `${key}=${BARE.test(value) ? value : `"${escape(value)}"`}\n`;
 }
 
 /** The first line of a file, or null when there is no file to read. */
