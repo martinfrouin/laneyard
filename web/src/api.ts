@@ -80,6 +80,11 @@ export interface RunDetail {
   queuePosition: number | null;
   branch: string | null;
   commitSha: string | null;
+  /**
+   * What this run was handed as `LANEYARD_BUILD_NUMBER`. Null until it starts,
+   * and for every run that finished before the counter existed.
+   */
+  buildNumber: number | null;
   startedAt: string | null;
   finishedAt: string | null;
   errorSummary: string | null;
@@ -341,6 +346,21 @@ export const api = {
     fetch(`/api/projects/${slug}/fetch`, { method: "POST" }).then(
       json<{ branch: string; commitSha: string }>,
     ),
+  /**
+   * The number the next run will be handed as `LANEYARD_BUILD_NUMBER`, and the
+   * way to move it. Setting is admin-only on the server; the screen offers the
+   * field to an admin and shows the number to everyone.
+   */
+  buildNumber: (slug: string) =>
+    fetch(`/api/projects/${slug}/build-number`).then(json<{ next: number }>),
+
+  setBuildNumber: (slug: string, next: number) =>
+    fetch(`/api/projects/${slug}/build-number`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ next }),
+    }).then(json<{ next: number }>),
+
   run: (id: number) => fetch(`/api/runs/${id}`).then(json<RunDetail>),
   log: (id: number, from = 0) => fetch(`/api/runs/${id}/log?from=${from}`).then((r) => r.text()),
 

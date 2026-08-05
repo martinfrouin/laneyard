@@ -27,6 +27,11 @@ export interface Run {
   finishedAt: string | null;
   exitCode: number | null;
   errorSummary: string | null;
+  /**
+   * The number this run was handed as `LANEYARD_BUILD_NUMBER`, null until it
+   * starts — and for every run that finished before the counter existed.
+   */
+  buildNumber: number | null;
 }
 
 export interface Step {
@@ -61,6 +66,7 @@ interface RunRow {
   finished_at: string | null;
   exit_code: number | null;
   error_summary: string | null;
+  build_number: number | null;
 }
 
 const toRun = (r: RunRow): Run => ({
@@ -78,6 +84,7 @@ const toRun = (r: RunRow): Run => ({
   finishedAt: r.finished_at,
   exitCode: r.exit_code,
   errorSummary: r.error_summary,
+  buildNumber: r.build_number,
 });
 
 const now = () => new Date().toISOString();
@@ -134,6 +141,16 @@ export class RunStore {
 
   setStatus(id: number, status: RunStatus): void {
     this.db.prepare("UPDATE run SET status = ? WHERE id = ?").run(status, id);
+  }
+
+  /**
+   * Records the number this run was handed, once it is taken.
+   *
+   * On the run rather than only in the log: the log is a wall of text, and the
+   * number is what says which build an artifact downloaded weeks later contains.
+   */
+  setBuildNumber(id: number, buildNumber: number): void {
+    this.db.prepare("UPDATE run SET build_number = ? WHERE id = ?").run(buildNumber, id);
   }
 
   markRunning(id: number, git: { branch: string; commitSha: string }): void {

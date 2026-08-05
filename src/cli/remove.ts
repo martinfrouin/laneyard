@@ -4,6 +4,7 @@ import { rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { loadRepoConfig } from "../config/load.js";
 import { ConfigStore } from "../config/store.js";
+import { BuildNumberStore } from "../db/build-numbers.js";
 import { CredentialStore } from "../db/credentials.js";
 import { openDatabase } from "../db/open.js";
 import { RunStore } from "../db/runs.js";
@@ -242,6 +243,7 @@ export async function runRemoveCommand(
         configPath,
         reloadConfig: () => config.load(),
         runs: new RunStore(db),
+        buildNumbers: new BuildNumberStore(db),
         logs: new LogStore(join(home, "logs")),
         vault: await Vault.open(home, new SecretStore(db), new CredentialStore(db)),
         workspacePath: (s) => join(home, "workspaces", s),

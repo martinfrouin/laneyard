@@ -13,9 +13,29 @@ CREATE TABLE IF NOT EXISTS run (
   started_at    TEXT,
   finished_at   TEXT,
   exit_code     INTEGER,
-  error_summary TEXT
+  error_summary TEXT,
+  -- The number this run was handed as LANEYARD_BUILD_NUMBER, null for a run
+  -- that never started — and for every run that predates the counter, which is
+  -- what `open.ts` fills the column with when it adds it.
+  build_number  INTEGER
 );
 CREATE INDEX IF NOT EXISTS run_by_project ON run (project_slug, id DESC);
+
+-- One counter per project, holding the number the *next* run will be handed.
+--
+-- Keyed by slug rather than derived from the run table: run ids are global, so
+-- a run of another project between two of yours would leave a hole, and the
+-- number belongs to the app rather than to the server that built it. A project
+-- with no row here has never run — `next` reads as 1 without one being written.
+--
+-- Editable, which is why it is a stored number and not a count of anything: a
+-- project migrating from a counter its repository already kept starts where
+-- that one stopped, and nothing else could express that.
+CREATE TABLE IF NOT EXISTS build_number (
+  project_slug TEXT    PRIMARY KEY,
+  next         INTEGER NOT NULL,
+  updated_at   TEXT    NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS run_step (
   run_id      INTEGER NOT NULL REFERENCES run (id) ON DELETE CASCADE,

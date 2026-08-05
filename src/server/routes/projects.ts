@@ -86,6 +86,7 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
         // truthful.
         reloadConfig: () => ctx.config.load(),
         runs: ctx.runs,
+        buildNumbers: ctx.buildNumbers,
         logs: ctx.logs,
         vault: ctx.vault,
         workspacePath: ctx.workspacePath,
@@ -193,6 +194,50 @@ export async function registerProjectRoutes(app: FastifyInstance, ctx: AppContex
       // git's own sentence is the only thing that explains any of them.
       return reply.code(409).send({ error: (cause as Error).message });
     }
+  });
+
+  /**
+   * The number the next run of this project will be handed.
+   *
+   * Readable by anyone who may reach the project: it is what the next build
+   * will carry, and a builder starting that build benefits from seeing it.
+   */
+  app.get("/api/projects/:slug/build-number", async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
+    return { next: ctx.buildNumbers.next(slug) };
+  });
+
+  /**
+   * Sets where the counter carries on from. Admin only — see `permissions.ts`.
+   *
+   * The one part of the build number that has to be reachable: a project
+   * arriving with a counter its repository already kept starts where that one
+   * stopped, and an upload made by hand outside Laneyard is corrected here
+   * rather than by editing a database.
+   *
+   * Refused while a run of this project is in flight. That run has already been
+   * handed its number, so a write now would not reach it — it would silently
+   * change what the *next* one gets, from a screen showing a build in progress.
+   * The same reason the Fastfile write and the fetch are refused there.
+   */
+  app.put("/api/projects/:slug/build-number", async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    if (!ctx.config.project(slug)) return reply.code(404).send({ error: "Unknown project" });
+
+    const { next } = (req.body ?? {}) as { next?: unknown };
+    if (typeof next !== "number" || !Number.isInteger(next) || next < 1) {
+      return reply.code(400).send({ error: "A whole number, 1 or more." });
+    }
+
+    if (ctx.runs.hasActiveRun(slug)) {
+      return reply.code(409).send({
+        error: "A run of this project is in flight; it already holds its number. Wait for it to finish.",
+      });
+    }
+
+    ctx.buildNumbers.set(slug, next);
+    return { next };
   });
 
   app.get("/api/projects/:slug/runs", async (req, reply) => {

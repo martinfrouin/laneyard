@@ -96,7 +96,7 @@ See [Credentials](docs/credentials.md).
 - **[Accounts](docs/accounts.md)** — the two roles, and which projects a builder reaches.
 - **[Credentials](docs/credentials.md)** — hardcoded credentials at setup, secrets, the environment file, signing blocks.
 - **[Readiness](docs/readiness.md)** — the per-project checklist, and what a tick means.
-- **[Managing a project](docs/managing.md)** — the Fastfile editor, removing, resetting, uninstalling.
+- **[Managing a project](docs/managing.md)** — the build number, the Fastfile editor, removing, resetting, uninstalling.
 - **[Security](docs/security.md)** — what is encrypted, what is not, and what this does not cover.
 
 ## Status
@@ -108,6 +108,7 @@ See [Credentials](docs/credentials.md).
 - `✓` adopt an existing fastlane project with one command
 - `✓` encrypted secret vault and log redaction
 - `✓` build queue, cancellation, timeouts surfaced in the UI
+- `✓` a build number per project, handed to every run as `LANEYARD_BUILD_NUMBER` and settable by hand
 - `✓` a checklist that gets a project running unattended
 - `✓` edit the Fastfile in the browser, verified on every save
 - `✓` signing credentials stored whole — the file and the fields beside it — written to disk for

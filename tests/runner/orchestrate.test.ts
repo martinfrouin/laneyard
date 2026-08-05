@@ -257,6 +257,65 @@ describe("executeRun", () => {
     expect(log).toContain("••••••");
   }, 60_000);
 
+  it("hands the build number to the lane, out of reach of the secrets", async () => {
+    const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n", ".gitignore": "build/\n" });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: join(root, "workspaces", "p"),
+      artifactsDir: join(root, "artifacts", String(runId)),
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => SETTINGS,
+      env: {
+        PATH: `${FAKE_DIR}:${process.env["PATH"]}`,
+        FAKE_FASTLANE_SCENARIO: "success",
+        FAKE_FASTLANE_ECHO: "LANEYARD_BUILD_NUMBER",
+      },
+      buildNumber: 57,
+      // A stored variable of the same name must not win: a build that could
+      // rewrite the counter it was handed would not be a counter.
+      secrets: { LANEYARD_BUILD_NUMBER: "1" },
+      onChunk: () => {},
+    });
+
+    expect(await logs.read(runId)).toContain("LANEYARD_BUILD_NUMBER=57");
+  }, 60_000);
+
+  it("leaves the variable unset when no number was reserved", async () => {
+    const origin = await makeOriginRepo({ "fastlane/Fastfile": "lane :beta do\nend\n", ".gitignore": "build/\n" });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    await executeRun({
+      runId,
+      runs,
+      logs,
+      workspacePath: join(root, "workspaces", "p"),
+      artifactsDir: join(root, "artifacts", String(runId)),
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => SETTINGS,
+      env: {
+        PATH: `${FAKE_DIR}:${process.env["PATH"]}`,
+        FAKE_FASTLANE_SCENARIO: "success",
+        FAKE_FASTLANE_ECHO: "LANEYARD_BUILD_NUMBER",
+      },
+      onChunk: () => {},
+    });
+
+    // Unset, not the string "undefined": the fixture echoes an empty value.
+    expect(await logs.read(runId)).toMatch(/LANEYARD_BUILD_NUMBER=\s/);
+  }, 60_000);
+
   it("keeps the secret out of what the browser receives too", async () => {
     // Redaction happens before the fan-out, so the file and the socket cannot
     // disagree — a fix applied to only one of them would be worse than none.

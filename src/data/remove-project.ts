@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { removeProjectFromAccounts } from "../config/accounts.js";
 import { removeProjectFromConfig } from "../cli/setup.js";
+import type { BuildNumberStore } from "../db/build-numbers.js";
 import type { RunStore } from "../db/runs.js";
 import type { LogStore } from "../logs/store.js";
 import type { Vault } from "../secrets/vault.js";
@@ -24,6 +25,7 @@ export interface RemoveProjectDeps {
    */
   reloadConfig: () => Promise<unknown>;
   runs: RunStore;
+  buildNumbers: BuildNumberStore;
   logs: LogStore;
   vault: Vault;
   workspacePath: (slug: string) => string;
@@ -99,6 +101,10 @@ export async function removeProjectData(deps: RemoveProjectDeps, slug: string): 
 
   // The run history: the rows, and their steps and artifact records by cascade.
   deps.runs.removeByProject(slug);
+
+  // The build counter. A slug re-used later must start again rather than
+  // silently inherit a number from an app that no longer exists here.
+  deps.buildNumbers.forget(slug);
 
   // The project's own secrets and signing blocks. Slug-scoped only: a global
   // secret three other projects read is not this one's to take.

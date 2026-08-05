@@ -18,6 +18,7 @@ export function openDatabase(path: string): Db {
   // for the column check to mean anything, and there `CREATE TABLE` has already
   // put the column in.
   migrateEnvFileColumn(db);
+  migrateBuildNumberColumn(db);
   return db;
 }
 
@@ -51,5 +52,19 @@ function migrateEnvFileColumn(db: Db): void {
   const columns = db.prepare("PRAGMA table_info(secret)").all() as { name: string }[];
   if (!columns.some((c) => c.name === "in_env_file")) {
     db.exec("ALTER TABLE secret ADD COLUMN in_env_file INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
+/**
+ * Adds `run.build_number` to a database written before the counter existed.
+ *
+ * Same reason as the column above, and the same one-line answer. No default:
+ * the column means "the number this run was handed", and a run that finished
+ * before Laneyard handed out any was handed none — which is what null says.
+ */
+function migrateBuildNumberColumn(db: Db): void {
+  const columns = db.prepare("PRAGMA table_info(run)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "build_number")) {
+    db.exec("ALTER TABLE run ADD COLUMN build_number INTEGER");
   }
 }

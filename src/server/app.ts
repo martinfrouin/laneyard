@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ConfigStore } from "../config/store.js";
+import { BuildNumberStore } from "../db/build-numbers.js";
 import type { Db } from "../db/open.js";
 import { RunStore } from "../db/runs.js";
 import { SessionRecords } from "../db/sessions.js";
@@ -47,6 +48,7 @@ export interface AppDeps {
 
 export interface AppContext extends AppDeps {
   runs: RunStore;
+  buildNumbers: BuildNumberStore;
   logs: LogStore;
   sessions: SessionStore;
   sockets?: RunSockets;
@@ -106,6 +108,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const ctx: AppContext = {
     ...deps,
     runs: new RunStore(deps.db),
+    buildNumbers: new BuildNumberStore(deps.db),
     logs: new LogStore(join(deps.root, "logs")),
     sessions: new SessionStore(new SessionRecords(deps.db)),
     workspacePath,
@@ -156,10 +159,20 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return;
     }
 
+    // The build number, taken here: the queue has picked this run, so it is
+    // starting, and every way out from now on is a run that started. A run
+    // still waiting takes none — cancelling a queue must not burn numbers —
+    // and a run that fails keeps the one it took. Skipping a number costs
+    // nothing; reusing one after a run that failed between two store uploads
+    // is a release the store refuses.
+    const buildNumber = ctx.buildNumbers.reserve(slug);
+    ctx.runs.setBuildNumber(runId, buildNumber);
+
     await executeRun({
       runId,
       runs: ctx.runs,
       logs: ctx.logs,
+      buildNumber,
       workspacePath: ctx.workspacePath(slug),
       artifactsDir: ctx.artifactsDir(runId),
       gitUrl: entry.git_url,

@@ -134,6 +134,14 @@ export function Run() {
         <span className="dim">
           run <span className="bright">#{run.id}</span>
         </span>
+        {/* The number this run was handed. Absent on a run that never started,
+            and on every run that finished before the counter existed — where
+            saying "build —" would claim something that was never true. */}
+        {run.buildNumber !== null && (
+          <span className="dim">
+            build <span className="bright">{run.buildNumber}</span>
+          </span>
+        )}
         <span className="dim">
           branch <span className="bright">{run.branch ?? "—"}</span>
         </span>

@@ -40,6 +40,15 @@ export interface ExecuteRunOptions {
   /** Resolved secrets, added to the run's environment. */
   secrets?: Record<string, string>;
   /**
+   * The number this run was handed, exported as `LANEYARD_BUILD_NUMBER`.
+   *
+   * Reserved by the caller, before the run — the counter belongs to the server,
+   * and this function is handed values rather than stores, as it is with the
+   * secrets. Absent leaves the variable unset, which is what every test that
+   * does not care about it gets.
+   */
+  buildNumber?: number;
+  /**
    * Variables pointing at the signing blocks already written to disk for this
    * run — see `materialise.ts`. Passed in rather than derived here for the same
    * reason `secrets` is: this function is handed plaintext, never the vault.
@@ -310,6 +319,15 @@ async function execute(opts: ExecuteRunOptions, wrote: Written): Promise<Execute
       CI: "true",
       FASTLANE_SKIP_UPDATE_CHECK: "1",
       FORCE_COLOR: "1",
+      // The build number, in every run and under one fixed name, so a Fastfile
+      // reads it without the project declaring anything. Here rather than with
+      // the secrets, and for the same reason `CI` is: a stored variable of this
+      // name would let a build rewrite the counter it was handed, which is the
+      // one thing a counter must not allow. Absent when none was reserved, so
+      // `ENV.fetch` fails loudly rather than building number 0.
+      ...(opts.buildNumber === undefined
+        ? {}
+        : { LANEYARD_BUILD_NUMBER: String(opts.buildNumber) }),
       // A lane may run git itself — bumping and pushing a build number is a
       // reasonable thing for a Fastfile to do — and until now that `sh("git
       // push")` inherited none of the care Laneyard takes with its own git

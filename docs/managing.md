@@ -1,5 +1,33 @@
 # Managing a project
 
+## The build number
+
+Every run is handed `LANEYARD_BUILD_NUMBER`, a whole number that counts up per project. Nothing to
+configure — read it where your lane needs one:
+
+```ruby
+build = ENV.fetch("LANEYARD_BUILD_NUMBER")
+sh "flutter build ipa --release --build-number=#{build}"
+```
+
+It is set by the server, so a lane run by hand outside Laneyard does not have it. Decide what that
+means for your project — a default, or a refusal:
+
+```ruby
+build = ENV.fetch("LANEYARD_BUILD_NUMBER") { UI.user_error!("run it from Laneyard, or pass build_number:") }
+```
+
+The number is taken when a run starts and kept whatever happens to it: a failed build consumes one.
+Skipping a number costs nothing, whereas reusing one after a run that failed between two store
+uploads is a release the store refuses. A run cancelled while still queued takes none.
+
+The lanes tab shows what the next run will get, and an admin can set it — starting where a counter
+your repository already kept stopped, or correcting after an upload made by hand. It is refused
+while a run is in flight, since that run already holds its number.
+
+Nothing is written back to your repository: no commit, no tag, no counter file. A lane that wants a
+tag still makes it, with the number it was handed.
+
 ## The Fastfile
 
 Every project has a Fastfile tab: a text editor with Ruby syntax highlighting, and nothing between

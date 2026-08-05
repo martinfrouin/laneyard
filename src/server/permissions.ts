@@ -32,6 +32,10 @@ export const REQUIRES_ADMIN: RoutePattern[] = [
   { method: "*", path: "/api/credentials" },
   { method: "*", path: "/api/projects/:slug/credentials" },
   { method: "PUT", path: "/api/projects/:slug/fastfile" },
+  // Reading it is not restricted: it is what the next build will carry, and a
+  // builder starting that build benefits from seeing it. Setting it changes
+  // what a build produces, which is the line a builder does not cross.
+  { method: "PUT", path: "/api/projects/:slug/build-number" },
   { method: "POST", path: "/api/projects/:slug/commit" },
   { method: "POST", path: "/api/projects/:slug/push" },
   { method: "DELETE", path: "/api/projects/:slug" },
