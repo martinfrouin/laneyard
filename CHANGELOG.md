@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.10.0
+
+### A build number, without a counter in your repository
+
+Every store wants a number that only goes up, and until now nothing handed one to a lane. So each
+project invented the same counter: a file in the repository, read, incremented, written back,
+committed and pushed by the lane itself — a build writing to its own git remote to remember how many
+times it had run.
+
+Every run now carries `LANEYARD_BUILD_NUMBER`, counting up per project. There is nothing to turn on
+and nothing to add to `laneyard.yml`:
+
+```ruby
+build = ENV.fetch("LANEYARD_BUILD_NUMBER")
+sh "flutter build ipa --release --build-number=#{build}"
+```
+
+The name is fixed and a stored secret cannot shadow it — a build that could rewrite the counter it
+was handed would not be a counter. The number is taken when a run starts and kept whatever happens
+to it: skipping one costs nothing, while reusing one after a run that failed between two store
+uploads is a release the store refuses. A run cancelled while still queued takes none.
+
+The lanes tab shows what the next run will get, and an admin can set it: a project arriving with a
+counter its repository already kept starts where that one stopped. The run screen shows the number
+each run was handed, so an artifact downloaded weeks later says which build it is.
+
+Nothing is written back to your repository — no commit, no tag, no counter file. A lane that wants a
+tag still makes it, with the number it was given.
+
 ## 0.9.0
 
 ### A signing block you can read, and correct a piece at a time

@@ -1,6 +1,6 @@
 {
   "name": "laneyard",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "type": "module",
   "bin": {
     "laneyard": "dist/src/main.js"
