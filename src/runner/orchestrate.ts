@@ -5,6 +5,7 @@ import type { RunStore, Step } from "../db/runs.js";
 import { gitEnvFor, Workspace } from "../git/workspace.js";
 import type { GitAuth } from "../git/workspace.js";
 import type { LogStore } from "../logs/store.js";
+import { readAppVersion } from "../heuristics/app-version.js";
 import { summarizeFailure } from "../heuristics/error-summary.js";
 import { appRootOf, searchDir } from "../heuristics/platforms.js";
 import { Redactor, scrub } from "../logs/redact.js";
@@ -18,6 +19,7 @@ import {
 import type { KeystoreBlock } from "./gradle-properties.js";
 import { removeEnvFile, sweepEnvFile, writeEnvFile } from "./env-file.js";
 import { LiveStepTracker } from "./live-steps.js";
+import { BUILD_NUMBER_VAR } from "./provided-env.js";
 import { startPty } from "./pty.js";
 import { readReport } from "./report.js";
 
@@ -325,9 +327,13 @@ async function execute(opts: ExecuteRunOptions, wrote: Written): Promise<Execute
       // name would let a build rewrite the counter it was handed, which is the
       // one thing a counter must not allow. Absent when none was reserved, so
       // `ENV.fetch` fails loudly rather than building number 0.
+      //
+      // The name comes from `provided-env.ts` rather than being spelt here: the
+      // checklist and the secrets screen read that list to know what nobody
+      // needs to supply, and a name written twice is a name that drifts once.
       ...(opts.buildNumber === undefined
         ? {}
-        : { LANEYARD_BUILD_NUMBER: String(opts.buildNumber) }),
+        : { [BUILD_NUMBER_VAR]: String(opts.buildNumber) }),
       // A lane may run git itself — bumping and pushing a build number is a
       // reasonable thing for a Fastfile to do — and until now that `sh("git
       // push")` inherited none of the care Laneyard takes with its own git
@@ -395,6 +401,12 @@ async function execute(opts: ExecuteRunOptions, wrote: Written): Promise<Execute
   return { status: "failed" };
 
   async function recordOutcome(): Promise<void> {
+    // Before the timeline, and whatever the verdict was: the version of a run
+    // that failed is the one somebody comes back for. Read now rather than at
+    // the start, so a lane that bumps it reports what it shipped.
+    const version = await readAppVersion(appRoot).catch(() => null);
+    if (version !== null) runs.setVersion(runId, version);
+
     const report = await readReport(reportPath);
     const live = tracker.steps();
 

@@ -19,6 +19,7 @@ export function openDatabase(path: string): Db {
   // put the column in.
   migrateEnvFileColumn(db);
   migrateBuildNumberColumn(db);
+  migrateVersionColumn(db);
   return db;
 }
 
@@ -66,5 +67,19 @@ function migrateBuildNumberColumn(db: Db): void {
   const columns = db.prepare("PRAGMA table_info(run)").all() as { name: string }[];
   if (!columns.some((c) => c.name === "build_number")) {
     db.exec("ALTER TABLE run ADD COLUMN build_number INTEGER");
+  }
+}
+
+/**
+ * Adds `run.version` to a database written before the version was recorded.
+ *
+ * Null for every row that predates it, and honestly so: the version those runs
+ * built is not knowable now, and back-filling it from today's working tree would
+ * label a run from March with the version of the commit currently checked out.
+ */
+function migrateVersionColumn(db: Db): void {
+  const columns = db.prepare("PRAGMA table_info(run)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "version")) {
+    db.exec("ALTER TABLE run ADD COLUMN version TEXT");
   }
 }

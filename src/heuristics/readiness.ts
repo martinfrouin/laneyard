@@ -1,4 +1,5 @@
 import type { CredentialKind } from "../credentials/kinds.js";
+import { isProvidedByLaneyard } from "../runner/provided-env.js";
 import type { PropertiesFile, SigningFacts } from "./android-signing.js";
 import type { AppfileFacts } from "./appfile.js";
 import { argsGiven, findBlockingActions } from "./blocking-actions.js";
@@ -1094,17 +1095,27 @@ export function checkEnvironment(input: EnvironmentInput): Check {
   }
 
   const read = uses.value.flatMap((lane) => lane.env ?? []);
-  const required = [...new Set([...read, ...declared])].sort();
+  // What Laneyard sets on every run is not a variable anybody has to supply, so
+  // it is dropped before the counting rather than ticked off after it. See
+  // `runner/provided-env.ts`: a Fastfile written the way the documentation says
+  // to write it reads `LANEYARD_BUILD_NUMBER`, and this check used to answer
+  // that by asking for it in the vault — which refuses it, on purpose.
+  const required = [...new Set([...read, ...declared])]
+    .filter((name) => !isProvidedByLaneyard(name))
+    .sort();
 
   if (required.length === 0) {
     const blind = unreadReason(unread);
     if (blind) {
       return {
         ...META.environment,
-        ...undetermined(`no lane seen reading an environment variable — but ${blind}.`, DECLARE_SECRETS),
+        ...undetermined(
+          `no lane seen reading a variable you have to supply — but ${blind}.`,
+          DECLARE_SECRETS,
+        ),
       };
     }
-    return { ...META.environment, ...ok("no lane reads an environment variable.") };
+    return { ...META.environment, ...ok("no lane reads a variable you have to supply.") };
   }
 
   // A block's exported names sit with the vault keys rather than beside them: a

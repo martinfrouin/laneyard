@@ -32,6 +32,12 @@ export interface Run {
    * starts — and for every run that finished before the counter existed.
    */
   buildNumber: number | null;
+  /**
+   * The app's own version, as the working tree held it when the lane finished.
+   * Null when the project keeps it where `heuristics/app-version.ts` cannot read
+   * it, and for every run that finished before this was recorded.
+   */
+  version: string | null;
 }
 
 export interface Step {
@@ -67,6 +73,7 @@ interface RunRow {
   exit_code: number | null;
   error_summary: string | null;
   build_number: number | null;
+  version: string | null;
 }
 
 const toRun = (r: RunRow): Run => ({
@@ -85,6 +92,7 @@ const toRun = (r: RunRow): Run => ({
   exitCode: r.exit_code,
   errorSummary: r.error_summary,
   buildNumber: r.build_number,
+  version: r.version,
 });
 
 const now = () => new Date().toISOString();
@@ -151,6 +159,18 @@ export class RunStore {
    */
   setBuildNumber(id: number, buildNumber: number): void {
     this.db.prepare("UPDATE run SET build_number = ? WHERE id = ?").run(buildNumber, id);
+  }
+
+  /**
+   * Records the app's own version, once the lane has stopped changing it.
+   *
+   * Written after the run rather than reserved before it, unlike the number
+   * above: this one is not handed out, it is observed, and a lane that bumps the
+   * version is common enough that observing it too early would record the value
+   * that was replaced.
+   */
+  setVersion(id: number, version: string): void {
+    this.db.prepare("UPDATE run SET version = ? WHERE id = ?").run(version, id);
   }
 
   markRunning(id: number, git: { branch: string; commitSha: string }): void {

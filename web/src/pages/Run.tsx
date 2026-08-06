@@ -136,10 +136,20 @@ export function Run() {
         </span>
         {/* The number this run was handed. Absent on a run that never started,
             and on every run that finished before the counter existed — where
-            saying "build —" would claim something that was never true. */}
+            saying "build —" would claim something that was never true. Spelt
+            `#87` like the runs list, and kept beside the word `build` because
+            this screen also shows the run's own number. */}
         {run.buildNumber !== null && (
           <span className="dim">
-            build <span className="bright">{run.buildNumber}</span>
+            build <span className="bright">#{run.buildNumber}</span>
+          </span>
+        )}
+        {/* The app's own version, read off the working tree once the lane had
+            finished — so a lane that bumps it shows what it shipped. Absent
+            when the project keeps it somewhere the server cannot read. */}
+        {run.version !== null && (
+          <span className="dim">
+            version <span className="bright">{run.version}</span>
           </span>
         )}
         <span className="dim">

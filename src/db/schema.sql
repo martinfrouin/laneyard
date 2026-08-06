@@ -17,7 +17,11 @@ CREATE TABLE IF NOT EXISTS run (
   -- The number this run was handed as LANEYARD_BUILD_NUMBER, null for a run
   -- that never started — and for every run that predates the counter, which is
   -- what `open.ts` fills the column with when it adds it.
-  build_number  INTEGER
+  build_number  INTEGER,
+  -- The app's own version, read off the working tree once the lane has finished
+  -- — see `heuristics/app-version.ts`. Null when the project keeps it somewhere
+  -- this cannot read, and for every run that predates the column.
+  version       TEXT
 );
 CREATE INDEX IF NOT EXISTS run_by_project ON run (project_slug, id DESC);
 

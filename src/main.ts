@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,6 +12,7 @@ import { runRemoveCommand } from "./cli/remove.js";
 import { runResetCommand } from "./cli/reset.js";
 import { runUninstallCommand } from "./cli/uninstall.js";
 import { runUserCommand } from "./cli/user.js";
+import { loadRepoConfig } from "./config/load.js";
 import { ConfigStore } from "./config/store.js";
 import { CacheStore } from "./db/cache.js";
 import { openDatabase } from "./db/open.js";
@@ -132,6 +133,36 @@ function migrationNotice(migration: GlobalScopeMigration): string {
   );
 }
 
+/**
+ * The project the directory the server was started from belongs to, if any.
+ *
+ * `laneyard.yml` records the slug, and it sits wherever the app does — the
+ * repository root for most projects, `app/` for one in a monorepo. Walked up
+ * from `cwd` so starting the server from a subdirectory of the app still finds
+ * it; the first file wins, which is the innermost app in nested repositories.
+ *
+ * Never throws, and answers null rather than a guess: this only decides which
+ * address is printed, and printing the plain one is the right fallback.
+ */
+export async function projectHere(cwd: string, known: string[]): Promise<string | null> {
+  let dir = cwd;
+  for (let up = 0; up < 8; up += 1) {
+    const path = join(dir, "laneyard.yml");
+    const slug = existsSync(path)
+      ? await loadRepoConfig(path).then(
+          (r) => (r.ok ? r.config.slug : undefined),
+          () => undefined,
+        )
+      : undefined;
+    if (slug !== undefined && known.includes(slug)) return slug;
+
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 /** Real startup, outside tests. */
 async function main(): Promise<void> {
   const root = process.env["LANEYARD_HOME"] ?? join(homedir(), ".laneyard");
@@ -145,9 +176,17 @@ async function main(): Promise<void> {
   await app.listen({ port: server.port, host: server.bind });
 
   const projects = config.projects();
+
+  // Started from a project's own folder, the address printed opens that project
+  // rather than the list. It is the one thing the terminal knows and the browser
+  // cannot: someone running `laneyard` from `popotheque/app` is not asking to be
+  // shown a menu of everything they have ever built.
+  const here = await projectHere(process.cwd(), projects.map((p) => p.slug));
+  const url = `http://localhost:${server.port}${here === null ? "" : `/p/${here}`}`;
+
   process.stdout.write(
     heading(`laneyard ${version}`) +
-      field("listening", `http://localhost:${server.port}`) +
+      field("listening", url) +
       "\n" +
       field("config", join(root, "config.yml")) +
       "\n" +

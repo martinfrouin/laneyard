@@ -28,6 +28,16 @@ while a run is in flight, since that run already holds its number.
 Nothing is written back to your repository: no commit, no tag, no counter file. A lane that wants a
 tag still makes it, with the number it was handed.
 
+Laneyard sets the variable itself, so it is never listed as a secret to store — not on the secrets
+tab, not in the checklist.
+
+## The version
+
+Beside each run, the app's own version: `#87 1.4.2`. It is read off the working tree once the lane
+has finished — `pubspec.yaml`, `versionName`, `MARKETING_VERSION` — so a lane that bumps the version
+reports what it shipped. A project that keeps its version somewhere else shows the build number
+alone; nothing is guessed.
+
 ## The Fastfile
 
 Every project has a Fastfile tab: a text editor with Ruby syntax highlighting, and nothing between

@@ -160,7 +160,15 @@ export function Project() {
         {runs.map((r) => (
           <li key={r.id}>
             <Link to={`/r/${r.id}`} className="grow">
-              <span className={`mark status-${r.status}`}>{mark(r.status)}</span> <span className="dim">#{r.id}</span>{" "}
+              <span className={`mark status-${r.status}`}>{mark(r.status)}</span>{" "}
+              {/* The build, and the version it belongs to — what an artifact
+                  downloaded weeks later is identified by. Not the run's own id:
+                  that is a row number in this server's database, and nobody
+                  looking for a build has one to compare it against. Absent on a
+                  run that never started, and on every run older than the
+                  counter, where a number would be an invention. */}
+              {r.buildNumber !== null && <span className="dim">#{r.buildNumber}</span>}
+              {r.version !== null && <span className="dim"> {r.version}</span>}{" "}
               {r.lane}
             </Link>
             {/* A queue of three is visible from here, without opening anything. */}

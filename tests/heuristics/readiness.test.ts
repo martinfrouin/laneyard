@@ -925,6 +925,25 @@ describe("checkEnvironment", () => {
     expect(check.detail).not.toMatch(/SUPPLY_JSON_KEY/);
   });
 
+  /**
+   * The runner sets `LANEYARD_BUILD_NUMBER` on every run, and the documentation
+   * tells you to read it. This check used to answer a Fastfile that did exactly
+   * that with a warning asking for it in the vault — which refuses it, so the
+   * warning had no way to go green.
+   */
+  it("never asks for a name Laneyard sets itself", () => {
+    const check = env({ uses: reading("LANEYARD_BUILD_NUMBER") });
+    expect(check.state).toBe("ok");
+    expect(check.detail).not.toMatch(/LANEYARD_BUILD_NUMBER/);
+  });
+
+  it("still warns about the names beside it", () => {
+    const check = env({ uses: reading("LANEYARD_BUILD_NUMBER", "SENTRY_AUTH_TOKEN") });
+    expect(check.state).toBe("warn");
+    expect(check.detail).toMatch(/SENTRY_AUTH_TOKEN/);
+    expect(check.detail).not.toMatch(/LANEYARD_BUILD_NUMBER/);
+  });
+
   it("only warns about the ones actually missing", () => {
     const check = env({
       uses: reading("A", "B", "C"),

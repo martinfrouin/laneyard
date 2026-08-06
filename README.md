@@ -109,6 +109,7 @@ See [Credentials](docs/credentials.md).
 - `✓` encrypted secret vault and log redaction
 - `✓` build queue, cancellation, timeouts surfaced in the UI
 - `✓` a build number per project, handed to every run as `LANEYARD_BUILD_NUMBER` and settable by hand
+- `✓` every run listed by the build and version it produced, not by a row number
 - `✓` a checklist that gets a project running unattended
 - `✓` edit the Fastfile in the browser, verified on every save
 - `✓` signing credentials stored whole — the file and the fields beside it — written to disk for

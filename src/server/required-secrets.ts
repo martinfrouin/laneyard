@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseEnvExample } from "../heuristics/env-example.js";
 import type { LaneUses } from "../heuristics/readiness.js";
+import { isProvidedByLaneyard } from "../runner/provided-env.js";
 
 /**
  * What a project needs from its environment, and what it is still missing.
@@ -24,6 +25,12 @@ import type { LaneUses } from "../heuristics/readiness.js";
  * A value is never read from any of them. `.env.example` holds placeholders by
  * definition, and the file that holds real values is the one that never reaches
  * a clone — which is the whole problem, not a source.
+ *
+ * What Laneyard sets itself is dropped outright, not counted as supplied.
+ * `LANEYARD_BUILD_NUMBER` is the case: `docs/managing.md` tells you to write
+ * `ENV.fetch("LANEYARD_BUILD_NUMBER")`, so every Fastfile that followed the
+ * documentation was reported as needing a variable the vault refuses to hold —
+ * a row asking to be filled in, with nothing that could go in it.
  */
 export interface RequiredSecrets {
   /** Everything the lanes need, sorted. */
@@ -50,7 +57,9 @@ export async function requiredSecrets(input: {
   const fromExample = await envExampleNames(input.workspacePath, input.fastlaneDir);
   const required = [
     ...new Set([...input.lanes.flatMap((l) => l.env ?? []), ...input.declared, ...fromExample]),
-  ].sort();
+  ]
+    .filter((name) => !isProvidedByLaneyard(name))
+    .sort();
 
   const supplied = new Set([...input.vaultKeys, ...input.blockNames, ...input.serverEnv]);
 

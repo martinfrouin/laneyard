@@ -85,6 +85,12 @@ export interface RunDetail {
    * and for every run that finished before the counter existed.
    */
   buildNumber: number | null;
+  /**
+   * The app's own version when the lane finished — `1.4.2`, not a counter.
+   * Null when the project keeps it somewhere the server cannot read, and for
+   * every run that finished before it was recorded.
+   */
+  version: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   errorSummary: string | null;

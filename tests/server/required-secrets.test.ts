@@ -123,4 +123,31 @@ describe("requiredSecrets", () => {
     });
     expect(answer.missing).toEqual(["NOWHERE"]);
   });
+
+  /**
+   * `docs/managing.md` tells you to write `ENV.fetch("LANEYARD_BUILD_NUMBER")`,
+   * and the runner sets it on every run. Asking for it was asking for something
+   * the vault refuses to hold: a row on the secrets screen with a field nobody
+   * could fill, sitting under a heading that says the lanes need it.
+   */
+  it("never asks for a name Laneyard sets itself", async () => {
+    const answer = await ask(["LANEYARD_BUILD_NUMBER", "CI", "SENTRY_AUTH_TOKEN"], []);
+    expect(answer.required).toEqual(["SENTRY_AUTH_TOKEN"]);
+    expect(answer.missing).toEqual(["SENTRY_AUTH_TOKEN"]);
+  });
+
+  it("drops it even when laneyard.yml declares it", async () => {
+    // `required_secrets` is the escape hatch for what no parse can find, not a
+    // way to put back a variable the runner supplies.
+    const answer = await requiredSecrets({
+      lanes: [{ lane: "beta", actions: [], env: [] }],
+      declared: ["LANEYARD_BUILD_NUMBER"],
+      workspacePath: "/nonexistent",
+      fastlaneDir: "fastlane",
+      vaultKeys: [],
+      blockNames: [],
+      serverEnv: [],
+    });
+    expect(answer.required).toEqual([]);
+  });
 });
