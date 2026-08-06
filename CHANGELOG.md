@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.11.0
+
+### Runs identified by what they built
+
+A run used to be listed by its own id — a row number in the server's database, which nobody looking
+for a build has anything to compare against. Each run now shows the build number it was handed and
+the app's version: `#87 1.4.2`.
+
+The version is read off the working tree once the lane has finished — `pubspec.yaml`, `versionName`,
+`MARKETING_VERSION` — so a lane that bumps it reports what shipped. A project that keeps its version
+somewhere else shows the build number alone; nothing is guessed, and runs from before this release
+show none.
+
+### `LANEYARD_BUILD_NUMBER` is no longer asked for as a secret
+
+The documentation tells you to write `ENV.fetch("LANEYARD_BUILD_NUMBER")`, and every Fastfile that
+did was then reported as needing a variable the vault refuses to hold — a row on the secrets tab
+with a field nobody could fill, and a checklist warning with no way to go green. Laneyard sets it,
+so nothing asks you for it.
+
+### The address that opens your project
+
+Started from a project's folder, `laneyard` now prints the address of that project rather than of
+the list. Running it from `popotheque/app` and clicking the link lands where you meant.
+
 ## 0.10.0
 
 ### A build number, without a counter in your repository
