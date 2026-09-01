@@ -69,6 +69,9 @@ laneyard         # start the server
 `~/.laneyard/config.yml`. On a machine with no account yet, it also creates the first admin: it asks
 the name and prints a generated password once. Write it down — it is not shown again.
 
+Lost that password? It is stored hashed, so it is replaced rather than read back — see
+[Accounts](docs/accounts.md).
+
 <details>
 <summary>Running from source instead</summary>
 

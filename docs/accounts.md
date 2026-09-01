@@ -47,3 +47,16 @@ been left open — and doing it ends every other session that account has.
 
 Removing an account ends its sessions immediately, and so does editing `config.yml` by hand: every
 request looks the account up again, so a change takes effect at once.
+
+## A forgotten password
+
+Passwords are stored hashed, so there is nothing to read back — you set a new one. The command that
+adds an account does it: on a name that already exists it replaces the password and the role, and
+leaves the rest of the account alone.
+
+```bash
+echo "$PASSWORD" | laneyard user add lea --role builder
+```
+
+Run it on the machine the server runs on; it picks the change up without a restart. If the name is
+what you forgot, the accounts are in `~/.laneyard/config.yml`.
