@@ -138,6 +138,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: `npm test` runs the w
 seconds against a fake fastlane, so you can work on any machine, with no Xcode, no signing
 certificates and no network.
 
+## Support
+
+If Laneyard saves you a CI bill, [buy me a coffee ☕](https://github.com/sponsors/martinfrouin).
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
