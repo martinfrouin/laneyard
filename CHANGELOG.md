@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.0
+
+### A password typed, not piped
+
+`laneyard user add` refused a terminal and suggested `echo "$PASSWORD" |` — which sets nothing
+unless that variable already exists, and which, typed with the password written out, leaves it in
+the shell's history. In a terminal it now asks for the password twice, without showing it. A script
+still pipes it in, exactly as before.
+
+### `laneyard user list`
+
+The accounts by name, role and the projects they reach. A forgotten password is reset by running
+`laneyard user add` on a name that exists; this is where that name is found, rather than in
+`config.yml`.
+
 ## 0.11.0
 
 ### Runs identified by what they built
