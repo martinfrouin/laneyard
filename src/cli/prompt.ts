@@ -70,6 +70,51 @@ export function terminalAsker(): Asker {
   };
 }
 
+/**
+ * Reads one line from the terminal without echoing it: a password.
+ *
+ * Nothing typed reaches the screen or the shell's history, which is what makes
+ * a prompt safer than the `echo "…" |` it replaces. The label goes to stderr so
+ * that stdout stays clean for whoever reads it.
+ */
+export function askHidden(label: string): Promise<string> {
+  const stdin = process.stdin;
+  process.stderr.write(label);
+  return new Promise((resolve, reject) => {
+    let value = "";
+    const finish = () => {
+      stdin.off("data", onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+      process.stderr.write("\n");
+    };
+    const onData = (chunk: string) => {
+      for (const char of chunk) {
+        if (char === "\r" || char === "\n") {
+          finish();
+          resolve(value);
+          return;
+        }
+        // Raw mode turns Ctrl-C and Ctrl-D into plain characters.
+        if (char === "\u0003" || char === "\u0004") {
+          finish();
+          reject(new PromptAborted());
+          return;
+        }
+        if (char === "\u007f" || char === "\b") {
+          value = value.slice(0, -1);
+          continue;
+        }
+        value += char;
+      }
+    };
+    stdin.setRawMode(true);
+    stdin.setEncoding("utf8");
+    stdin.resume();
+    stdin.on("data", onData);
+  });
+}
+
 /** Accepts every proposal without asking. Used by `--yes` and by the tests. */
 export const acceptingAsker: Asker = {
   async ask(_label, proposed) {

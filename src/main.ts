@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { bold, dim, field, heading } from "./cli/style.js";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
-import { PromptAborted } from "./cli/prompt.js";
+import { PromptAborted, askHidden } from "./cli/prompt.js";
 import { runSetupCommand } from "./cli/setup.js";
 import { runRemoveCommand } from "./cli/remove.js";
 import { runResetCommand } from "./cli/reset.js";
@@ -231,8 +231,10 @@ const USAGE = `laneyard — a self-hosted web UI for fastlane
 
   laneyard setup      set up the project in the current directory
                       --yes accepts every detected value without asking
+  laneyard user list  show the accounts, by name and role
   laneyard user add NAME [--role admin|builder]
-                      create an account, its password read from standard input
+                      create an account, or reset its password; asked for in
+                      a terminal, read from standard input in a script
   laneyard remove     remove the project of the current directory, and its
                       laneyard.yml — run from where that file lives
                       --dry-run shows what would go and stops
@@ -309,6 +311,7 @@ if (invokedDirectly()) {
       await runUserCommand(home, rest, {
         stdin: process.stdin,
         interactive: process.stdin.isTTY === true,
+        askHidden,
         out: (text) => process.stdout.write(text),
         err: (text) => process.stderr.write(text),
       }),

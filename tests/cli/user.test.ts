@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { PromptAborted } from "../../src/cli/prompt.js";
 import { runUserCommand } from "../../src/cli/user.js";
 import { authenticate, hashPassword } from "../../src/server/auth.js";
 import { loadServerConfig } from "../../src/config/load.js";
@@ -29,6 +30,9 @@ async function run(dir: string, args: string[], stdin = "a long enough password"
   const code = await runUserCommand(dir, args, {
     stdin: Readable.from([stdin]),
     interactive: false,
+    askHidden: async () => {
+      throw new Error("a piped run never prompts");
+    },
     out: (t) => out.push(t),
     err: (t) => err.push(t),
   });
@@ -46,6 +50,33 @@ const accountsIn = async (dir: string) =>
   (parse(await readFile(join(dir, "config.yml"), "utf8")) as {
     server: { users: { name: string; role: string; password_hash: string; projects?: string[] }[] };
   }).server.users;
+
+describe("laneyard user list", () => {
+  it("shows each account's name, role and reach, never its hash", async () => {
+    const dir = await home(`server:
+  users:
+    - { name: martin, role: admin, password_hash: "${hashPassword("admin pass")}" }
+    - { name: ci, role: builder, password_hash: "${hashPassword("builder pass")}", projects: [popotheque] }
+    - { name: lea, role: builder, password_hash: "${hashPassword("lea pass")}", projects: [] }
+`);
+    const { code, out } = await run(dir, ["list"]);
+
+    expect(code).toBe(0);
+    expect(out.split("\n").filter(Boolean)).toEqual([
+      "martin  admin    every project",
+      "ci      builder  popotheque",
+      "lea     builder  no project",
+    ]);
+    expect(out).not.toMatch(/\$|hash/);
+  });
+
+  it("sends a machine with no account to `laneyard setup`", async () => {
+    const dir = await tmpDir("laneyard-cli-user-");
+    const { code, err } = await run(dir, ["list"]);
+    expect(code).toBe(1);
+    expect(err).toMatch(/laneyard setup/);
+  });
+});
 
 describe("laneyard user add", () => {
   it("adds a builder whose password came from standard input", async () => {
@@ -90,17 +121,56 @@ describe("laneyard user add", () => {
     expect(err).toMatch(/standard input/);
   });
 
-  it("refuses when standard input is a terminal, and says how to pipe", async () => {
-    const dir = await home();
+  /** Runs the command as typed at a terminal, answering each hidden prompt in turn. */
+  async function runTyped(dir: string, args: string[], answers: (string | Error)[]) {
     const err: string[] = [];
-    const code = await runUserCommand(dir, ["add", "renaud"], {
+    const asked: string[] = [];
+    const code = await runUserCommand(dir, args, {
       stdin: Readable.from([]),
       interactive: true,
+      askHidden: async (label) => {
+        asked.push(label);
+        const next = answers.shift();
+        if (next instanceof Error) throw next;
+        return next ?? "";
+      },
       out: () => {},
       err: (t) => err.push(t),
     });
+    return { code, err: err.join(""), asked };
+  }
+
+  it("asks a terminal for the password twice, without echoing it", async () => {
+    const dir = await home();
+    const { code, asked } = await runTyped(dir, ["add", "renaud"], [
+      "a long enough password",
+      "a long enough password",
+    ]);
+
+    expect(code).toBe(0);
+    expect(asked).toHaveLength(2);
+    const identity = await authenticate(await loadedUsers(dir), "renaud", "a long enough password");
+    expect(identity).toEqual({ name: "renaud", role: "builder" });
+  });
+
+  it("changes nothing when the two typed passwords differ", async () => {
+    const dir = await home();
+    const { code, err } = await runTyped(dir, ["add", "martin", "--role", "admin"], [
+      "a long enough password",
+      "a long enough passwrod",
+    ]);
+
     expect(code).toBe(1);
-    expect(err.join("")).toMatch(/laneyard user add/);
+    expect(err).toMatch(/differ/);
+    expect(await authenticate(await loadedUsers(dir), "martin", "admin pass")).not.toBeNull();
+  });
+
+  it("changes nothing when the prompt is interrupted", async () => {
+    const dir = await home();
+    const { code } = await runTyped(dir, ["add", "renaud"], [new PromptAborted()]);
+
+    expect(code).toBe(130);
+    expect((await accountsIn(dir)).map((u) => u.name)).not.toContain("renaud");
   });
 
   it("refuses an empty password, and a short one", async () => {

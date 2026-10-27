@@ -34,11 +34,12 @@ Removing a project strips its slug from every account, so a re-created slug inhe
 ## Adding and removing
 
 ```bash
-echo "$PASSWORD" | laneyard user add lea --role builder
+laneyard user add lea --role builder
 ```
 
-The password is read from standard input, never an argument — an argument lands in your shell
-history. Without `--role`, the account is a builder. Removing or demoting the last admin is refused:
+The password is never an argument — an argument lands in your shell history. In a terminal it is
+asked for twice, without being shown; a script pipes it in instead:
+`printf '%s' "$PASSWORD" | laneyard user add lea --role builder`. Without `--role`, the account is a builder. Removing or demoting the last admin is refused:
 a server nobody can administer cannot be repaired from the interface.
 
 Anyone changes their own password and name from **your account**, builders included. Both ask for the
@@ -55,7 +56,7 @@ adds an account does it: on a name that already exists it replaces the password 
 leaves the rest of the account alone.
 
 ```bash
-echo "$PASSWORD" | laneyard user add lea --role builder
+laneyard user add lea --role builder
 ```
 
 Run it on the machine the server runs on; it picks the change up without a restart. If the name is

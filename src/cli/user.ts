@@ -8,13 +8,20 @@ import {
   upsertUserInConfig,
 } from "../config/accounts.js";
 import { loadServerConfig } from "../config/load.js";
-import type { UserRole } from "../config/schema.js";
+import type { UserEntry, UserRole } from "../config/schema.js";
+import { PromptAborted } from "./prompt.js";
 
-export const USER_USAGE = `laneyard user add <name> [--role admin|builder]
+export const USER_USAGE = `laneyard user list
+laneyard user add <name> [--role admin|builder]
 
-The password is read from standard input, never from an argument:
+The password is never an argument. In a terminal it is asked for, twice, without
+being shown; a script pipes it in instead:
 
-  echo "$PASSWORD" | laneyard user add renaud --role builder
+  laneyard user add renaud --role builder
+  printf '%s' "$PASSWORD" | laneyard user add renaud --role builder
+
+On a name that already exists, the password and the role are replaced: that is
+how a forgotten password is reset.
 
 Without --role, the account is a builder: it can start a build, watch it, cancel
 it and download what it produced. An admin can do everything besides.
@@ -25,6 +32,8 @@ export interface UserCommandIo {
   stdin: Readable;
   /** True when stdin is a terminal, meaning nothing is being piped in. */
   interactive: boolean;
+  /** Asks for a secret without echoing it; used when [interactive]. */
+  askHidden: (label: string) => Promise<string>;
   out: (text: string) => void;
   err: (text: string) => void;
 }
@@ -93,6 +102,14 @@ export async function runUserCommand(
 ): Promise<number> {
   const [subcommand, ...rest] = args;
 
+  if (subcommand === "list") {
+    if (rest.length > 0) {
+      io.err(`laneyard user list takes no argument.\n\n${USER_USAGE}`);
+      return 1;
+    }
+    return listUsers(join(home, "config.yml"), io);
+  }
+
   if (subcommand !== "add") {
     io.err(
       subcommand === undefined ? USER_USAGE : `Unknown subcommand: ${subcommand}\n\n${USER_USAGE}`,
@@ -142,18 +159,31 @@ export async function runUserCommand(
     return 1;
   }
 
+  let password: string;
   if (io.interactive) {
-    io.err(
-      "The password is read from standard input, and standard input is a terminal.\n" +
-        "Pipe it in instead, so it stays out of your shell history:\n\n" +
-        `  echo "$PASSWORD" | laneyard user add ${parsed.name} --role ${parsed.role}\n`,
-    );
-    return 1;
+    try {
+      password = await io.askHidden(`Password for ${parsed.name}: `);
+      // Typed blind, so typed twice: a typo here locks the account out.
+      if (password !== "" && (await io.askHidden("Again: ")) !== password) {
+        io.err("The two passwords differ. Nothing was changed.\n");
+        return 1;
+      }
+    } catch (cause) {
+      if (cause instanceof PromptAborted) {
+        io.err("Interrupted. Nothing was changed.\n");
+        return 130;
+      }
+      throw cause;
+    }
+  } else {
+    password = await readPassword(io.stdin);
   }
-
-  const password = await readPassword(io.stdin);
   if (password === "") {
-    io.err("Nothing came in on standard input, so there is no password to set.\n");
+    io.err(
+      io.interactive
+        ? "No password typed, so there is no password to set.\n"
+        : "Nothing came in on standard input, so there is no password to set.\n",
+    );
     return 1;
   }
   if (password.length < MIN_PASSWORD_LENGTH) {
@@ -169,5 +199,39 @@ export async function runUserCommand(
       // Saying so is what stops someone from restarting a build server for it.
       "  the running server picks this up on its own.\n",
   );
+  return 0;
+}
+
+/** What an account can reach, in words: the three cases of `projects`. */
+function reach(user: UserEntry): string {
+  if (user.role === "admin" || user.projects === undefined) return "every project";
+  if (user.projects.length === 0) return "no project";
+  return user.projects.join(", ");
+}
+
+/**
+ * Prints the accounts — the names a forgotten password is reset by. Never the
+ * hashes: they are not secret enough to print, and of no use on a screen.
+ */
+async function listUsers(configPath: string, io: UserCommandIo): Promise<number> {
+  if (!(await hasAccount(configPath))) {
+    io.err(
+      `No account yet in ${configPath}.\n` +
+        "Run `laneyard setup` from a project that uses fastlane: it creates the first admin.\n",
+    );
+    return 1;
+  }
+  const loaded = await loadServerConfig(configPath);
+  if (!loaded.ok) {
+    io.err(`Unreadable configuration in ${configPath}: ${loaded.error}\n`);
+    return 1;
+  }
+
+  const users = loaded.config.server.users;
+  const nameWidth = Math.max(...users.map((u) => u.name.length));
+  const roleWidth = Math.max(...users.map((u) => u.role.length));
+  for (const user of users) {
+    io.out(`${user.name.padEnd(nameWidth)}  ${user.role.padEnd(roleWidth)}  ${reach(user)}\n`);
+  }
   return 0;
 }

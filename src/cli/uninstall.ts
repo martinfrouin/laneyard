@@ -22,9 +22,9 @@ and a lifecycle script cannot ask.
 
 /**
  * Same shape as `laneyard secret set` and `laneyard user add`, minus their
- * `interactive` flag: those two refuse a terminal because a secret typed at a
- * prompt lands in the shell's history. Here the answer is a folder path that is
- * printed on the line above, so a terminal is exactly where it belongs.
+ * `interactive` flag: those two treat a terminal differently because what they
+ * read is a secret. Here the answer is a folder path that is printed on the
+ * line above, so a terminal is exactly where it belongs.
  */
 export interface UninstallIo {
   stdin: Readable;
