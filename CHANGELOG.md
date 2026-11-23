@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.0
+
+### A value changed where it is
+
+Each row of the Secrets tab has an `edit`: the value becomes a field on the line, and saving keeps
+the row's `secret` and `in file` ticks as they were. Changing a value used to mean retyping its name
+in the form below, which stored it unmasked unless the box was ticked again, and dropped it from the
+environment file.
+
+### A clone that stays buildable
+
+A build rewrites tracked files it does not commit — Flutter's `pub get` rewrites `pubspec.lock`
+whenever the machine's SDK differs from the one that produced it — and the next run then refused to
+start on a dirty tree, for good. Tracked changes are now put back to `HEAD` when a run ends. Commits a
+lane made and untracked output stay; a hand edit that stops a run from preparing is still refused,
+never wiped.
+
 ## 0.12.0
 
 ### A password typed, not piped

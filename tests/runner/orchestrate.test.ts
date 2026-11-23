@@ -1,9 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../../src/db/open.js";
 import { RunStore } from "../../src/db/runs.js";
 import { LogStore } from "../../src/logs/store.js";
+import { Workspace } from "../../src/git/workspace.js";
 import { executeRun } from "../../src/runner/orchestrate.js";
 import { makeOriginRepo, tmpDir } from "../fixtures/repos.js";
 
@@ -78,6 +79,101 @@ describe("executeRun", () => {
     expect(arts).toHaveLength(1);
     expect(arts[0]!.filename).toBe("Sample.ipa");
     expect(arts[0]!.kind).toBe("ipa");
+  }, 60_000);
+
+  it("discards a tracked file the build rewrote, so the next run can start", async () => {
+    // Flutter's `pub get` rewrites pubspec.lock. That file is tracked, so
+    // leaving the rewrite in the clone makes `prepare` refuse every run after
+    // the one that produced it.
+    const origin = await makeOriginRepo({
+      "fastlane/Fastfile": "lane :beta do\nend\n",
+      "pubspec.lock": "locked\n",
+      ".gitignore": "build/\n",
+    });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const workspacePath = join(root, "workspaces", "p");
+    const runId = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    const shared = {
+      runs,
+      logs,
+      workspacePath,
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => SETTINGS,
+      onChunk: () => {},
+    };
+
+    await executeRun({
+      ...shared,
+      runId,
+      artifactsDir: join(root, "artifacts", String(runId)),
+      env: {
+        PATH: `${FAKE_DIR}:${process.env["PATH"]}`,
+        FAKE_FASTLANE_SCENARIO: "success",
+        FAKE_FASTLANE_TOUCH: "pubspec.lock",
+      },
+    });
+
+    expect(runs.get(runId)!.status).toBe("success");
+    const workspace = new Workspace(workspacePath, origin);
+    expect(await workspace.isDirty()).toBe(false);
+    expect(await readFile(join(workspacePath, "pubspec.lock"), "utf8")).toBe("locked\n");
+
+    const again = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+    await executeRun({
+      ...shared,
+      runId: again,
+      artifactsDir: join(root, "artifacts", String(again)),
+      env: { PATH: `${FAKE_DIR}:${process.env["PATH"]}`, FAKE_FASTLANE_SCENARIO: "success" },
+    });
+    expect(runs.get(again)!.status).toBe("success");
+    expect(runs.get(again)!.errorSummary).toBeNull();
+  }, 60_000);
+
+  it("leaves a hand edit in place when preparation refuses to start", async () => {
+    const origin = await makeOriginRepo({
+      "fastlane/Fastfile": "lane :beta do\nend\n",
+      ".gitignore": "build/\n",
+    });
+    const root = await tmpDir("laneyard-root-");
+    const runs = new RunStore(openDatabase(":memory:"));
+    const logs = new LogStore(join(root, "logs"));
+    const workspacePath = join(root, "workspaces", "p");
+    const first = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+
+    const shared = {
+      runs,
+      logs,
+      workspacePath,
+      gitUrl: origin,
+      branch: "main",
+      resolveSettings: async () => SETTINGS,
+      env: { PATH: `${FAKE_DIR}:${process.env["PATH"]}`, FAKE_FASTLANE_SCENARIO: "success" },
+      onChunk: () => {},
+    };
+
+    await executeRun({
+      ...shared,
+      runId: first,
+      artifactsDir: join(root, "artifacts", String(first)),
+    });
+
+    const fastfile = join(workspacePath, "fastlane", "Fastfile");
+    await writeFile(fastfile, "edited by hand\n", "utf8");
+
+    const second = runs.create({ projectSlug: "p", lane: "beta", platform: null, params: {} });
+    await executeRun({
+      ...shared,
+      runId: second,
+      artifactsDir: join(root, "artifacts", String(second)),
+    });
+
+    expect(runs.get(second)!.status).toBe("failed");
+    expect(runs.get(second)!.errorSummary).toMatch(/uncommitted/i);
+    expect(await readFile(fastfile, "utf8")).toBe("edited by hand\n");
   }, 60_000);
 
   it("marks the failure and keeps an error summary", async () => {

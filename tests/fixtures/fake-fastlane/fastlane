@@ -37,6 +37,13 @@ if [ -n "${FAKE_FASTLANE_CAT:-}" ]; then
   cat "$FAKE_FASTLANE_CAT" 2>/dev/null || echo "[09:41:07]: absent"
 fi
 
+# Stands in for a build rewriting a tracked file. Flutter's `pub get` rewrites
+# pubspec.lock on a machine whose SDK is not the one that produced the lock,
+# and that rewrite is what used to make the next run refuse to start.
+if [ -n "${FAKE_FASTLANE_TOUCH:-}" ]; then
+  echo "rewritten" > "$FAKE_FASTLANE_TOUCH"
+fi
+
 if [ "$scenario" = "slow" ]; then
   sleep 30
 fi

@@ -116,12 +116,26 @@ export interface ExecuteRunResult {
  */
 export async function executeRun(opts: ExecuteRunOptions): Promise<ExecuteRunResult> {
   const wrote: Written = { properties: null, envFile: null };
+  // Set only once `prepare` has returned. The discard below must not run when
+  // preparation refused a dirty tree: that dirt is a hand edit, and wiping it
+  // is the thing `prepare` exists to avoid.
+  const started: { workspace: Workspace | null } = { workspace: null };
   try {
-    return await execute(opts, wrote);
+    return await execute(opts, wrote, started);
   } finally {
     // Guarded by the marker, so a file the user replaced mid-run survives.
     await removeGradleProperties(wrote.properties).catch(() => {});
     await removeEnvFile(wrote.envFile).catch(() => {});
+    // After the files this run wrote are gone. A build also rewrites tracked
+    // files it does not own — `pubspec.lock` is the usual one — and the clone
+    // is kept. Left in place, that rewrite is uncommitted, and the next run
+    // refuses to prepare. A lane that means to keep a change commits it before
+    // it exits; what remains is residue.
+    //
+    // Swallowed for the same reason as `cleanup` below: the verdict is already
+    // decided, and a reset that fails must not turn a finished build into a
+    // failure it did not have.
+    if (started.workspace) await started.workspace.discardTrackedChanges().catch(() => {});
     // Deliberately swallowed: by now the log writer is closed and the run's
     // verdict is recorded, so there is nowhere left to report this without
     // rewriting a finished run's outcome as a failure it did not have. A
@@ -142,7 +156,11 @@ interface Written {
   envFile: string | null;
 }
 
-async function execute(opts: ExecuteRunOptions, wrote: Written): Promise<ExecuteRunResult> {
+async function execute(
+  opts: ExecuteRunOptions,
+  wrote: Written,
+  started: { workspace: Workspace | null },
+): Promise<ExecuteRunResult> {
   const { runId, runs, logs } = opts;
   const writer = await logs.open(runId);
   const tracker = new LiveStepTracker();
@@ -204,6 +222,7 @@ async function execute(opts: ExecuteRunOptions, wrote: Written): Promise<Execute
   } catch (cause) {
     return fail(`Could not prepare the workspace: ${(cause as Error).message}`);
   }
+  started.workspace = workspace;
 
   runs.markRunning(runId, { branch: opts.branch, commitSha });
 

@@ -385,11 +385,11 @@ export const api = {
   // bundler. The tab calls it when it opens and when the user presses refresh.
   readiness: (slug: string) => fetch(`/api/projects/${slug}/readiness`).then(json<Readiness>),
 
-  setSecret: (slug: string, key: string, value: string, masked: boolean) =>
+  setSecret: (slug: string, key: string, value: string, masked: boolean, inEnvFile?: boolean) =>
     fetch(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ value, masked }),
+      body: JSON.stringify({ value, masked, inEnvFile }),
     }).then(empty),
 
   deleteSecret: (slug: string, key: string) =>

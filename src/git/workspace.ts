@@ -244,6 +244,32 @@ export class Workspace {
   }
 
   /**
+   * Puts every tracked file back to `HEAD`.
+   *
+   * A build rewrites tracked files and does not always commit them. Flutter's
+   * `pub get` rewrites `pubspec.lock` whenever the machine's SDK is not the one
+   * that produced the committed lock, and the next `prepare` then refuses to
+   * start — permanently, because nothing else ever cleans that clone.
+   * Untracked output is already ignored by `isDirty`: checkout leaves it
+   * alone. A tracked rewrite is not.
+   *
+   * `reset --hard` rather than restoring the worktree only. A lane can stage
+   * and then fail before committing; a staged path is still dirty, and the
+   * next run would refuse all the same. Commits are left where they are: a
+   * lane that means to keep a change commits it during the run, and this must
+   * not throw that commit away. Untracked files stay too — deleting build
+   * output is not what this is for.
+   *
+   * Called only after a run has prepared the workspace. A hand edit that
+   * blocked `prepare` has to survive, which is the whole reason `prepare`
+   * refuses a dirty tree instead of resetting it.
+   */
+  async discardTrackedChanges(): Promise<void> {
+    if (!(await this.exists())) return;
+    await this.git(["reset", "--hard", "HEAD"]);
+  }
+
+  /**
    * Brings the workspace to the requested branch, up to date.
    * Clones on the first call, just fetches afterwards.
    */

@@ -41,6 +41,26 @@ describe("Workspace", () => {
     await expect(ws.prepare("main")).rejects.toThrow(/uncommitted/i);
   }, 30_000);
 
+  it("puts a tracked rewrite back, and leaves untracked files and commits", async () => {
+    const origin = await makeOriginRepo({ "pubspec.lock": "locked\n", "a.txt": "v1\n" });
+    const ws = new Workspace(join(await tmpDir(), "p"), origin);
+    await ws.prepare("main");
+
+    await writeFile(join(ws.path, "pubspec.lock"), "rewritten\n", "utf8");
+    await writeFile(join(ws.path, "a.txt"), "staged\n", "utf8");
+    await exec("git", ["add", "--", "a.txt"], { cwd: ws.path });
+    await writeFile(join(ws.path, "build-output.txt"), "artifact\n", "utf8");
+    const sha = await ws.headSha();
+
+    await ws.discardTrackedChanges();
+
+    expect(await readFile(join(ws.path, "pubspec.lock"), "utf8")).toBe("locked\n");
+    expect(await readFile(join(ws.path, "a.txt"), "utf8")).toBe("v1\n");
+    expect(await readFile(join(ws.path, "build-output.txt"), "utf8")).toBe("artifact\n");
+    expect(await ws.isDirty()).toBe(false);
+    expect(await ws.headSha()).toBe(sha);
+  }, 30_000);
+
   it("doesn't declare itself dirty for untracked files left by a build", async () => {
     const origin = await makeOriginRepo({ "a.txt": "v1" });
     const ws = new Workspace(join(await tmpDir(), "p"), origin);

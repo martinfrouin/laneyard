@@ -192,6 +192,28 @@ export function Secrets() {
     }
   };
 
+  const [editing, setEditing] = useState<{ key: string; draft: string } | null>(null);
+
+  const startEdit = (secret: SecretSummary) => {
+    setFormError(null);
+    const current = secret.masked ? shown[secret.key] : secret.value;
+    setEditing({ key: secret.key, draft: current ?? "" });
+  };
+
+  const saveEdit = async (event: React.FormEvent, secret: SecretSummary) => {
+    event.preventDefault();
+    if (!editing || editing.draft === "") return;
+    setFormError(null);
+    try {
+      await api.setSecret(slug, secret.key, editing.draft, secret.masked, secret.inEnvFile);
+      setEditing(null);
+      hide(secret.key);
+      load();
+    } catch (e) {
+      setFormError((e as Error).message);
+    }
+  };
+
   const remove = async (secret: SecretSummary) => {
     setFormError(null);
     try {
@@ -247,6 +269,33 @@ export function Secrets() {
     // came with the listing; masked, it came from pressing `show`. Below this
     // line the row does not care which.
     const value = s.masked ? shown[s.key] : s.value;
+    if (editing?.key === s.key) {
+      return (
+        <li key={s.key}>
+          <span className={`mark ${s.masked ? "accent" : "dim"}`}>{s.masked ? "✓" : "○"}</span>
+          <form className="grow pair" onSubmit={(e) => void saveEdit(e, s)}>
+            <span className="bright key">{s.key}</span>
+            <input
+              type="text"
+              value={editing.draft}
+              onChange={(e) => setEditing({ key: s.key, draft: e.target.value })}
+              onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
+              placeholder="new value"
+              spellCheck={false}
+              autoComplete="off"
+              autoFocus
+              aria-label="value"
+            />
+            <button type="submit" disabled={editing.draft === ""}>
+              save
+            </button>
+            <button type="button" onClick={() => setEditing(null)}>
+              cancel
+            </button>
+          </form>
+        </li>
+      );
+    }
     return (
       <li key={s.key} className={note ? "superseded" : undefined}>
         {/* ✓ kept out of the logs, ○ stored as it is and printed as it is. */}
@@ -306,6 +355,10 @@ export function Secrets() {
         {/* The word rather than the mark on a superseded row: ✗ is the same
             three pixels everywhere on this page, and the one row worth removing
             should not need the same look as the rows worth keeping. */}
+        <button onClick={() => startEdit(s)} title="change the value">
+          edit
+        </button>
+
         <button onClick={() => void remove(s)} title={note ? "remove this row" : "remove"}>
           {note ? "remove" : "✗"}
         </button>
