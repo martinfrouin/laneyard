@@ -12,6 +12,7 @@ import { runRemoveCommand } from "./cli/remove.js";
 import { runResetCommand } from "./cli/reset.js";
 import { runUninstallCommand } from "./cli/uninstall.js";
 import { runUserCommand } from "./cli/user.js";
+import { latestVersion, updateNotice } from "./cli/update.js";
 import { loadRepoConfig } from "./config/load.js";
 import { ConfigStore } from "./config/store.js";
 import { CacheStore } from "./db/cache.js";
@@ -166,6 +167,7 @@ export async function projectHere(cwd: string, known: string[]): Promise<string 
 /** Real startup, outside tests. */
 async function main(): Promise<void> {
   const root = process.env["LANEYARD_HOME"] ?? join(homedir(), ".laneyard");
+  const latest = latestVersion();
   const { app, config, migration } = await createServerFromConfig(root);
 
   config.watch((ok) => {
@@ -205,6 +207,7 @@ async function main(): Promise<void> {
           `  ${bold("laneyard setup")}\n`
         : "") +
       migrationNotice(migration) +
+      updateNotice(version, await latest) +
       "\n",
   );
 }
