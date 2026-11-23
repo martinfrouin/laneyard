@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.1
+
+### A newer version announced at start
+
+Starting the server asks npm for the latest release and, when it is newer than the one running,
+says so under the banner with the command that installs it. Offline, or with no answer within two
+seconds, nothing is printed and the start is not held up.
+
 ## 0.13.0
 
 ### A value changed where it is
